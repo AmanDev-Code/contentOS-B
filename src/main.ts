@@ -35,7 +35,7 @@ async function bootstrap() {
   );
 
   const config = new DocumentBuilder()
-    .setTitle('ContentOS AI API')
+    .setTitle('Postra AI API')
     .setDescription('AI-powered content intelligence and automation platform')
     .setVersion('1.0')
     .addBearerAuth()
@@ -47,7 +47,7 @@ async function bootstrap() {
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
   
-  console.log(`🚀 ContentOS AI Backend running on: http://localhost:${port}`);
+  console.log(`🚀 Postra AI Backend running on: http://localhost:${port}`);
   console.log(`📚 API Documentation: http://localhost:${port}/api`);
 }
 
