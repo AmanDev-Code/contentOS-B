@@ -1,0 +1,62 @@
+# Environment files - DO NOT COMMIT
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+
+# Markdown files - DO NOT COMMIT
+*.md
+**/*.md
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Testing
+coverage
+
+# Production
+build
+dist
+dist-ssr
+*.local
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.swp
+*.swo
+*~
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# n8n-as-code AI helpers
+n8nac-skills
+n8nac-skills.cmd
+
+# Docker
+docker-compose.override.yml
