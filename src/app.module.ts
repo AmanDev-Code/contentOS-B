@@ -13,6 +13,10 @@ import { CacheController } from './controllers/cache.controller';
 import { QuotaController } from './controllers/quota.controller';
 import { SubscriptionController } from './controllers/subscription.controller';
 import { PublicController } from './controllers/public.controller';
+import { MediaController } from './controllers/media.controller';
+import { PostsController } from './controllers/posts.controller';
+import { ContentController } from './controllers/content.controller';
+import { MinioProxyController } from './controllers/minio-proxy.controller';
 
 import { SupabaseService } from './services/supabase.service';
 import { GenerationService } from './services/generation.service';
@@ -21,6 +25,9 @@ import { N8nService } from './services/n8n.service';
 import { CacheService } from './services/cache.service';
 import { QuotaService } from './services/quota.service';
 import { SubscriptionService } from './services/subscription.service';
+import { MediaGenerationService } from './services/media-generation.service';
+import { MinioService } from './services/minio.service';
+import { PostSchedulingService } from './services/post-scheduling.service';
 
 import { ProfileRepository } from './repositories/profile.repository';
 import { GenerationJobRepository } from './repositories/generation-job.repository';
@@ -29,6 +36,8 @@ import { SubscriptionRepository } from './repositories/subscription.repository';
 
 import { GenerationWorker } from './workers/generation.worker';
 import { GenerationWorkerManager } from './workers/generation-worker-manager';
+import { PostPublishingProcessor } from './processors/post-publishing.processor';
+import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
 
 import { QUEUE_NAMES } from './common/constants';
 
@@ -53,6 +62,9 @@ import { QUEUE_NAMES } from './common/constants';
     BullModule.registerQueue({
       name: QUEUE_NAMES.LINKEDIN_PUBLISH,
     }),
+    BullModule.registerQueue({
+      name: 'post-publishing',
+    }),
   ],
   controllers: [
     AppController,
@@ -64,6 +76,10 @@ import { QUEUE_NAMES } from './common/constants';
     QuotaController,
     SubscriptionController,
     PublicController,
+    MediaController,
+    PostsController,
+    ContentController,
+    MinioProxyController,
   ],
   providers: [
     AppService,
@@ -74,12 +90,17 @@ import { QUEUE_NAMES } from './common/constants';
     CacheService,
     QuotaService,
     SubscriptionService,
+    MediaGenerationService,
+    MinioService,
+    PostSchedulingService,
     ProfileRepository,
     GenerationJobRepository,
     GeneratedContentRepository,
     SubscriptionRepository,
     GenerationWorker,
     GenerationWorkerManager,
+    PostPublishingProcessor,
+    RateLimitMiddleware,
   ],
 })
 export class AppModule {}

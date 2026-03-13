@@ -103,13 +103,73 @@ export class QuotaService {
     return quota.remainingCredits >= creditsNeeded;
   }
 
-  async consumeCredits(userId: string, creditsUsed: number = 1.5): Promise<UserQuota> {
+  async consumeCredits(
+    userId: string, 
+    creditsUsed: number = 1.5, 
+    description: string = 'Credit consumption',
+    operationType: string = 'generation',
+    contentType?: string,
+    contentId?: string
+  ): Promise<UserQuota> {
+    try {
+      // Log the credit transaction
+      const { error } = await this.supabaseService.getServiceClient()
+        .rpc('log_credit_transaction', {
+          p_user_id: userId,
+          p_content_id: contentId || null,
+          p_transaction_type: 'debit',
+          p_amount: creditsUsed,
+          p_description: description,
+          p_operation_type: operationType,
+          p_content_type: contentType || null,
+          p_metadata: {}
+        });
+
+      if (error) {
+        console.error('Failed to log credit transaction:', error);
+        // Continue anyway - don't fail the operation
+      }
+    } catch (error) {
+      console.error('Error logging credit transaction:', error);
+      // Continue anyway - don't fail the operation
+    }
+
     // Invalidate cache to force refresh
     const cacheKey = `quota:${userId}`;
     await this.cacheService.delete(cacheKey);
     
     // Return updated quota
     return this.getUserQuota(userId);
+  }
+
+  async logTransaction(
+    userId: string,
+    contentId: string | null,
+    transactionType: 'debit' | 'credit' | 'refund',
+    amount: number,
+    description: string,
+    operationType: string,
+    contentType: string
+  ): Promise<void> {
+    try {
+      const { error } = await this.supabaseService.getServiceClient()
+        .rpc('log_credit_transaction', {
+          p_user_id: userId,
+          p_content_id: contentId,
+          p_transaction_type: transactionType,
+          p_amount: Math.abs(amount),
+          p_description: description,
+          p_operation_type: operationType,
+          p_content_type: contentType,
+          p_metadata: {}
+        });
+
+      if (error) {
+        console.error('Failed to log transaction:', error);
+      }
+    } catch (error) {
+      console.error('Error logging transaction:', error);
+    }
   }
 
   async incrementUsage(userId: string): Promise<void> {

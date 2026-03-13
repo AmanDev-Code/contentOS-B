@@ -5,6 +5,7 @@ import { Job } from 'bullmq';
 import { N8nService } from '../services/n8n.service';
 import { GenerationJobRepository } from '../repositories/generation-job.repository';
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
+import { QuotaService } from '../services/quota.service';
 import { QUEUE_NAMES, JOB_STAGES } from '../common/constants';
 import { JobStatus } from '../common/types';
 
@@ -17,6 +18,7 @@ export class GenerationWorker extends WorkerHost {
     private n8nService: N8nService,
     private generationJobRepository: GenerationJobRepository,
     private generatedContentRepository: GeneratedContentRepository,
+    private quotaService: QuotaService,
   ) {
     super();
   }
@@ -77,6 +79,23 @@ export class GenerationWorker extends WorkerHost {
         // Check if n8n completed (webhook was called)
         if (currentJob.status === JobStatus.READY) {
           this.logger.log(`✅ Job ${jobId} completed successfully by n8n`);
+          
+          // LOG SUCCESSFUL CREDIT TRANSACTION
+          try {
+            await this.quotaService.logTransaction(
+              userId,
+              currentJob.contentId || null,
+              'debit',
+              0, // No additional charge, already deducted
+              'Content generated successfully (1.5 credits total)',
+              'generation',
+              'text'
+            );
+            this.logger.log(`Logged successful generation transaction for user ${userId}`);
+          } catch (logError) {
+            this.logger.error(`Failed to log transaction for user ${userId}: ${logError.message}`);
+          }
+          
           await job.updateProgress(100);
           return {
             success: true,
@@ -112,6 +131,20 @@ export class GenerationWorker extends WorkerHost {
       this.logger.error(
         `Failed to process generation job ${jobId}: ${error.message}`,
       );
+
+      // REFUND CREDITS for failed generation
+      try {
+        await this.quotaService.consumeCredits(
+          userId,
+          -1.5, // Refund 1.5 credits
+          'Refund for failed content generation (1.5 credits)',
+          'refund',
+          'text'
+        );
+        this.logger.log(`Refunded 1.5 credits to user ${userId} for failed job ${jobId}`);
+      } catch (refundError) {
+        this.logger.error(`Failed to refund credits for user ${userId}: ${refundError.message}`);
+      }
 
       // Mark job as failed in database
       await this.generationJobRepository.updateError(

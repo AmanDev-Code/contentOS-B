@@ -46,10 +46,20 @@ export class GenerationService {
     userId: string,
     preferences?: Record<string, any>,
   ): Promise<{ jobId: string; message: string }> {
-    // Skip quota check for test user
-    if (userId !== 'c9327732-05cd-41dc-9d4f-e0c17b7fbea3') {
-      await this.checkQuotaAndSubscription(userId);
+    // Check quota and consume credits immediately (no more test user exception)
+    const hasQuota = await this.quotaService.checkQuotaAvailable(userId, 1.5);
+    if (!hasQuota) {
+      throw new BadRequestException('Insufficient credits. Content generation requires 1.5 credits. Please upgrade your plan.');
     }
+
+    // IMMEDIATE CREDIT DEDUCTION for content generation
+    await this.quotaService.consumeCredits(
+      userId,
+      1.5,
+      'Content generation initiated (1.5 credits)',
+      'generation',
+      'text' // Default to text, will be updated based on actual content type
+    );
 
     const job = await this.generationJobRepository.create(userId);
 

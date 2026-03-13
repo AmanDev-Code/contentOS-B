@@ -429,11 +429,13 @@ export class LinkedinService {
     }
   }
 
-  async publishPost(
-    userId: string,
-    contentId: string,
-  ): Promise<{ postUrl: string }> {
-    const profile = await this.profileRepository.findById(userId);
+  async publishPost(request: {
+    userId: string;
+    text: string;
+    mediaType: 'text' | 'image' | 'document';
+    mediaUrl?: string;
+  }): Promise<{ postId: string }> {
+    const profile = await this.profileRepository.findById(request.userId);
     if (!profile) {
       throw new BadRequestException('User profile not found');
     }
@@ -449,42 +451,40 @@ export class LinkedinService {
       throw new BadRequestException(ERROR_MESSAGES.LINKEDIN_TOKEN_EXPIRED);
     }
 
-    const content =
-      await this.generatedContentRepository.findById(contentId);
-    if (!content) {
-      throw new BadRequestException('Content not found');
+    const linkedinUserId = await this.getLinkedinUserId(profile.linkedin_access_token);
+
+    let postData: any;
+
+    switch (request.mediaType) {
+      case 'text':
+        postData = await this.createTextPost(linkedinUserId, request.text);
+        break;
+      case 'image':
+        if (!request.mediaUrl) {
+          throw new BadRequestException('Media URL required for image post');
+        }
+        postData = await this.createImagePost(linkedinUserId, request.text, request.mediaUrl, profile.linkedin_access_token);
+        break;
+      case 'document':
+        if (!request.mediaUrl) {
+          throw new BadRequestException('Media URL required for document post');
+        }
+        postData = await this.createDocumentPost(linkedinUserId, request.text, request.mediaUrl, profile.linkedin_access_token);
+        break;
+      default:
+        throw new BadRequestException(`Unsupported media type: ${request.mediaType}`);
     }
 
-    if (content.userId !== userId) {
-      throw new BadRequestException('Unauthorized access to content');
-    }
-
-    const linkedinUserId = await this.getLinkedinUserId(
-      profile.linkedin_access_token,
-    );
-
-    const postData = {
-      author: `urn:li:person:${linkedinUserId}`,
-      lifecycleState: 'PUBLISHED',
-      specificContent: {
-        'com.linkedin.ugc.ShareContent': {
-          shareCommentary: {
-            text: `${content.content}\n\n${content.hashtags?.join(' ') || ''}`,
-          },
-          shareMediaCategory: 'NONE',
-        },
-      },
-      visibility: {
-        'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC',
-      },
-    };
-
-    const response = await fetch('https://api.linkedin.com/v2/ugcPosts', {
+    // Log the post data for debugging
+    this.logger.log(`Publishing to LinkedIn: ${JSON.stringify(postData, null, 2)}`);
+    
+    const response = await fetch('https://api.linkedin.com/rest/posts', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${profile.linkedin_access_token}`,
+        'Authorization': `Bearer ${profile.linkedin_access_token}`,
         'X-Restli-Protocol-Version': '2.0.0',
+        'LinkedIn-Version': '202504',
       },
       body: JSON.stringify(postData),
     });
@@ -492,15 +492,214 @@ export class LinkedinService {
     if (!response.ok) {
       const error = await response.text();
       this.logger.error(`LinkedIn post failed: ${error}`);
+      
+      // Handle duplicate post error specifically
+      if (error.includes('DUPLICATE_POST') || error.includes('Duplicate post is detected')) {
+        this.logger.warn('Post rejected as duplicate by LinkedIn');
+        throw new BadRequestException('This content has already been posted to LinkedIn. Please modify the content before posting again.');
+      }
+      
+      this.logger.error(`Post data that failed: ${JSON.stringify(postData, null, 2)}`);
       throw new BadRequestException('Failed to publish to LinkedIn');
     }
 
-    const result = await response.json();
-    const postUrl = `https://www.linkedin.com/feed/update/${result.id}`;
+    const postId = response.headers.get('x-restli-id');
+    if (!postId) {
+      throw new BadRequestException('Failed to get post ID from LinkedIn');
+    }
 
-    await this.generatedContentRepository.markAsPublished(contentId, postUrl);
+    return { postId };
+  }
 
-    return { postUrl };
+  private async createTextPost(linkedinUserId: string, text: string): Promise<any> {
+    return {
+      author: `urn:li:person:${linkedinUserId}`,
+      commentary: text,
+      visibility: 'PUBLIC',
+      distribution: {
+        feedDistribution: 'MAIN_FEED',
+        targetEntities: [],
+        thirdPartyDistributionChannels: [],
+      },
+      lifecycleState: 'PUBLISHED',
+      isReshareDisabledByAuthor: false,
+    };
+  }
+
+  private async createImagePost(
+    linkedinUserId: string,
+    text: string,
+    imageUrl: string,
+    accessToken: string,
+  ): Promise<any> {
+    // First, upload the image to LinkedIn
+    const uploadedImageUrn = await this.uploadImageToLinkedIn(imageUrl, accessToken);
+
+    return {
+      author: `urn:li:person:${linkedinUserId}`,
+      commentary: text,
+      visibility: 'PUBLIC',
+      distribution: {
+        feedDistribution: 'MAIN_FEED',
+        targetEntities: [],
+        thirdPartyDistributionChannels: [],
+      },
+      content: {
+        media: {
+          title: 'Generated Image',
+          id: uploadedImageUrn,
+        },
+      },
+      lifecycleState: 'PUBLISHED',
+      isReshareDisabledByAuthor: false,
+    };
+  }
+
+  private async createDocumentPost(
+    linkedinUserId: string,
+    text: string,
+    documentUrl: string,
+    accessToken: string,
+  ): Promise<any> {
+    // Upload the document (PDF) to LinkedIn
+    const uploadedDocumentUrn = await this.uploadDocumentToLinkedIn(documentUrl, accessToken);
+
+    return {
+      author: `urn:li:person:${linkedinUserId}`,
+      commentary: text,
+      visibility: 'PUBLIC',
+      distribution: {
+        feedDistribution: 'MAIN_FEED',
+        targetEntities: [],
+        thirdPartyDistributionChannels: [],
+      },
+      content: {
+        media: {
+          title: 'Carousel PDF',
+          id: uploadedDocumentUrn,
+        },
+      },
+      lifecycleState: 'PUBLISHED',
+      isReshareDisabledByAuthor: false,
+    };
+  }
+
+  private async uploadImageToLinkedIn(imageUrl: string, accessToken: string): Promise<string> {
+    try {
+      // Initialize upload
+      const initResponse = await fetch('https://api.linkedin.com/rest/images?action=initializeUpload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+          'LinkedIn-Version': '202504',
+        },
+        body: JSON.stringify({
+          initializeUploadRequest: {
+            owner: await this.getLinkedinPersonUrn(accessToken),
+          },
+        }),
+      });
+
+      if (!initResponse.ok) {
+        throw new Error('Failed to initialize image upload');
+      }
+
+      const initData = await initResponse.json();
+      const uploadUrl = initData.value.uploadUrl;
+      const imageUrn = initData.value.image;
+
+      // Validate image URL
+      if (!imageUrl || imageUrl === 'generated-image' || !imageUrl.startsWith('http')) {
+        throw new Error(`Invalid image URL: ${imageUrl}. Please ensure the image is properly uploaded to MinIO.`);
+      }
+
+      // Download image from MinIO
+      const imageResponse = await fetch(imageUrl);
+      if (!imageResponse.ok) {
+        throw new Error('Failed to download image from MinIO');
+      }
+
+      const imageBuffer = await imageResponse.arrayBuffer();
+
+      // Upload to LinkedIn
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'image/jpeg',
+        },
+        body: imageBuffer,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload image to LinkedIn');
+      }
+
+      return imageUrn;
+    } catch (error) {
+      this.logger.error('Failed to upload image to LinkedIn:', error);
+      throw new BadRequestException('Failed to upload image to LinkedIn');
+    }
+  }
+
+  private async uploadDocumentToLinkedIn(documentUrl: string, accessToken: string): Promise<string> {
+    try {
+      // Initialize document upload
+      const initResponse = await fetch('https://api.linkedin.com/rest/documents?action=initializeUpload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+          'LinkedIn-Version': '202504',
+        },
+        body: JSON.stringify({
+          initializeUploadRequest: {
+            owner: await this.getLinkedinPersonUrn(accessToken),
+          },
+        }),
+      });
+
+      if (!initResponse.ok) {
+        throw new Error('Failed to initialize document upload');
+      }
+
+      const initData = await initResponse.json();
+      const uploadUrl = initData.value.uploadUrl;
+      const documentUrn = initData.value.document;
+
+      // Download document from MinIO
+      const documentResponse = await fetch(documentUrl);
+      if (!documentResponse.ok) {
+        throw new Error('Failed to download document from MinIO');
+      }
+
+      const documentBuffer = await documentResponse.arrayBuffer();
+
+      // Upload to LinkedIn
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/pdf',
+        },
+        body: documentBuffer,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload document to LinkedIn');
+      }
+
+      return documentUrn;
+    } catch (error) {
+      this.logger.error('Failed to upload document to LinkedIn:', error);
+      throw new BadRequestException('Failed to upload document to LinkedIn');
+    }
+  }
+
+  private async getLinkedinPersonUrn(accessToken: string): Promise<string> {
+    const userId = await this.getLinkedinUserId(accessToken);
+    return `urn:li:person:${userId}`;
   }
 
   private async getLinkedinUserId(accessToken: string): Promise<string> {
