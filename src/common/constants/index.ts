@@ -54,7 +54,8 @@ export const RATE_LIMITS = {
 };
 
 export const ERROR_MESSAGES = {
-  QUOTA_EXCEEDED: 'Monthly generation quota exceeded. Please upgrade your plan.',
+  QUOTA_EXCEEDED:
+    'Monthly generation quota exceeded. Please upgrade your plan.',
   INVALID_SUBSCRIPTION: 'Invalid or expired subscription.',
   LINKEDIN_NOT_CONNECTED: 'LinkedIn account not connected.',
   LINKEDIN_TOKEN_EXPIRED: 'LinkedIn token expired. Please reconnect.',

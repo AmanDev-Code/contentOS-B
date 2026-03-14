@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Delete, Param, Body, HttpCode, HttpStatus, Logger } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Param,
+  Body,
+  HttpCode,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiBody } from '@nestjs/swagger';
 import { CacheService } from '../services/cache.service';
 
@@ -14,7 +24,7 @@ export class CacheController {
   @ApiParam({ name: 'key', description: 'Cache key' })
   getCachedData(@Param('key') key: string) {
     const data = this.cacheService.get(key);
-    
+
     if (data === null) {
       return { success: false, message: 'Cache miss' };
     }
@@ -30,17 +40,17 @@ export class CacheController {
       properties: {
         key: { type: 'string' },
         data: { type: 'object' },
-        ttl: { type: 'number', default: 3600 }
+        ttl: { type: 'number', default: 3600 },
       },
-      required: ['key', 'data']
-    }
+      required: ['key', 'data'],
+    },
   })
   @HttpCode(HttpStatus.OK)
   setCachedData(@Body() body: { key: string; data: any; ttl?: number }) {
     const { key, data, ttl = 3600 } = body;
-    
+
     this.cacheService.set(key, data, ttl);
-    
+
     return { success: true, message: 'Data cached successfully' };
   }
 
@@ -50,10 +60,10 @@ export class CacheController {
   @HttpCode(HttpStatus.OK)
   deleteCachedData(@Param('key') key: string) {
     const deleted = this.cacheService.delete(key);
-    
-    return { 
-      success: deleted, 
-      message: deleted ? 'Cache entry deleted' : 'Cache entry not found' 
+
+    return {
+      success: deleted,
+      message: deleted ? 'Cache entry deleted' : 'Cache entry not found',
     };
   }
 
@@ -63,11 +73,11 @@ export class CacheController {
   @HttpCode(HttpStatus.OK)
   invalidateUserCache(@Param('userId') userId: string) {
     const deletedCount = this.cacheService.invalidateUser(userId);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       message: `Invalidated ${deletedCount} cache entries for user`,
-      deletedCount 
+      deletedCount,
     };
   }
 

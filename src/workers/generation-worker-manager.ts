@@ -24,7 +24,10 @@ export class GenerationWorkerManager implements OnModuleInit {
     // Create Redis client for job completion signaling
     this.redis = new Redis({
       host: this.configService.get<string>('redis.host') || 'localhost',
-      port: parseInt(this.configService.get<string>('redis.port') || '6380', 10),
+      port: parseInt(
+        this.configService.get<string>('redis.port') || '6380',
+        10,
+      ),
       password: this.configService.get<string>('redis.password') || undefined,
     });
   }
@@ -40,15 +43,19 @@ export class GenerationWorkerManager implements OnModuleInit {
   getWorkerForUser(userId: string): Worker {
     if (!this.workers.has(userId)) {
       const queueName = `${QUEUE_NAMES.CONTENT_GENERATION}-${userId}`;
-      
+
       const worker = new Worker(
         queueName,
         async (job: Job) => this.processJob(job),
         {
           connection: {
             host: this.configService.get<string>('redis.host') || 'localhost',
-            port: parseInt(this.configService.get<string>('redis.port') || '6380', 10),
-            password: this.configService.get<string>('redis.password') || undefined,
+            port: parseInt(
+              this.configService.get<string>('redis.port') || '6380',
+              10,
+            ),
+            password:
+              this.configService.get<string>('redis.password') || undefined,
           },
           concurrency: 1, // One job at a time per user
         },
@@ -59,7 +66,9 @@ export class GenerationWorkerManager implements OnModuleInit {
       });
 
       worker.on('failed', (job, err) => {
-        this.logger.error(`Job ${job?.id} failed for user ${userId}: ${err.message}`);
+        this.logger.error(
+          `Job ${job?.id} failed for user ${userId}: ${err.message}`,
+        );
       });
 
       this.workers.set(userId, worker);
@@ -87,7 +96,9 @@ export class GenerationWorkerManager implements OnModuleInit {
       );
 
       // Build callback URL for n8n to call when job completes
-      const baseUrl = this.configService.get<string>('app.baseUrl') || 'http://localhost:3000';
+      const baseUrl =
+        this.configService.get<string>('app.baseUrl') ||
+        'http://localhost:3000';
       const callbackUrl = `${baseUrl}/webhook/n8n-callback`;
 
       await this.n8nService.triggerContentGeneration({
@@ -104,7 +115,9 @@ export class GenerationWorkerManager implements OnModuleInit {
         JOB_STAGES.CONTENT_GENERATION,
       );
 
-      this.logger.log(`🚀 n8n webhook triggered for job ${jobId}, waiting for completion...`);
+      this.logger.log(
+        `🚀 n8n webhook triggered for job ${jobId}, waiting for completion...`,
+      );
 
       // Wait for n8n to complete by checking Redis completion signal
       // The webhook will set a Redis key when n8n completes
@@ -112,20 +125,20 @@ export class GenerationWorkerManager implements OnModuleInit {
       const pollInterval = 1000; // Check every 1 second
       const startTime = Date.now();
       const completionKey = `job:${jobId}:completed`;
-      
+
       while (Date.now() - startTime < maxWaitTime) {
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-        
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
         // Check Redis for completion signal
         const completionData = await this.redis.get(completionKey);
-        
+
         if (completionData) {
           const result = JSON.parse(completionData);
           this.logger.log(`✅ Job ${jobId} completed: ${result.status}`);
-          
+
           // Clean up the completion signal
           await this.redis.del(completionKey);
-          
+
           if (result.status === 'success') {
             await job.updateProgress(100);
             return {
@@ -138,18 +151,22 @@ export class GenerationWorkerManager implements OnModuleInit {
             throw new Error(result.error || 'n8n workflow failed');
           }
         }
-        
-        this.logger.log(`⏳ Waiting for n8n to complete job ${jobId}... (${Math.floor((Date.now() - startTime) / 1000)}s)`);
+
+        this.logger.log(
+          `⏳ Waiting for n8n to complete job ${jobId}... (${Math.floor((Date.now() - startTime) / 1000)}s)`,
+        );
       }
-      
+
       // Timeout - n8n didn't respond
-      this.logger.error(`⏰ Job ${jobId} timed out waiting for n8n (2 minutes)`);
+      this.logger.error(
+        `⏰ Job ${jobId} timed out waiting for n8n (2 minutes)`,
+      );
       await this.generationJobRepository.updateError(
         jobId,
         'n8n workflow timeout - no response after 2 minutes',
         0,
       );
-      
+
       throw new Error('n8n workflow timeout');
     } catch (error) {
       this.logger.error(
@@ -167,7 +184,7 @@ export class GenerationWorkerManager implements OnModuleInit {
       this.logger.log(
         `Job ${jobId} marked as failed. User can manually retry from UI.`,
       );
-      
+
       return {
         success: false,
         jobId,

@@ -9,10 +9,10 @@ export class SupabaseService {
 
   constructor(private configService: ConfigService) {
     const supabaseUrl = this.configService.get<string>('supabase.url') || '';
-    const supabaseAnonKey = this.configService.get<string>('supabase.anonKey') || '';
-    const supabaseServiceKey = this.configService.get<string>(
-      'supabase.serviceRoleKey',
-    ) || '';
+    const supabaseAnonKey =
+      this.configService.get<string>('supabase.anonKey') || '';
+    const supabaseServiceKey =
+      this.configService.get<string>('supabase.serviceRoleKey') || '';
 
     this.supabase = createClient(supabaseUrl, supabaseAnonKey);
     this.serviceRoleClient = createClient(supabaseUrl, supabaseServiceKey);

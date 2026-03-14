@@ -18,7 +18,9 @@ export class QuotaController {
   }
 
   @Get('check')
-  async checkQuota(@Req() req: any): Promise<{ hasQuota: boolean; quota: UserQuota }> {
+  async checkQuota(
+    @Req() req: any,
+  ): Promise<{ hasQuota: boolean; quota: UserQuota }> {
     const userId = req.user?.id;
     if (!userId) {
       throw new Error('User not authenticated');

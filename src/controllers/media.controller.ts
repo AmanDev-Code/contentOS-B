@@ -13,10 +13,14 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AuthGuard } from '../guards/auth.guard';
-import { MediaGenerationService, CarouselGenerationRequest } from '../services/media-generation.service';
+import {
+  MediaGenerationService,
+  CarouselGenerationRequest,
+} from '../services/media-generation.service';
 import { MinioService } from '../services/minio.service';
 import { SupabaseService } from '../services/supabase.service';
 import { QuotaService } from '../services/quota.service';
+import { NotificationService } from '../services/notification.service';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -34,6 +38,7 @@ export class MediaController {
     private readonly minioService: MinioService,
     private readonly supabaseService: SupabaseService,
     private readonly quotaService: QuotaService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   @Post('generate-image')
@@ -48,7 +53,10 @@ export class MediaController {
       // Check quota
       const hasQuota = await this.quotaService.checkQuotaAvailable(userId, 1.0);
       if (!hasQuota) {
-        throw new HttpException('Insufficient credits', HttpStatus.PAYMENT_REQUIRED);
+        throw new HttpException(
+          'Insufficient credits',
+          HttpStatus.PAYMENT_REQUIRED,
+        );
       }
 
       // IMMEDIATE CREDIT DEDUCTION for image generation
@@ -58,19 +66,21 @@ export class MediaController {
         'Image generation initiated (1.0 credits)',
         'generation',
         'image',
-        contentId
+        contentId,
       );
 
       try {
         // Generate image
-        const imageBuffer = await this.mediaGenerationService.generateSingleImage({
-          prompt,
-          size: '1024x1024',
-          quality: 'hd',
-        });
+        const imageBuffer =
+          await this.mediaGenerationService.generateSingleImage({
+            prompt,
+            size: '1024x1024',
+            quality: 'hd',
+          });
 
         // Optimize image
-        const optimizedBuffer = await this.mediaGenerationService.optimizeImage(imageBuffer);
+        const optimizedBuffer =
+          await this.mediaGenerationService.optimizeImage(imageBuffer);
 
         // Upload to MinIO
         const fileName = `image-${Date.now()}.jpg`;
@@ -82,7 +92,8 @@ export class MediaController {
         );
 
         // Save to database
-        const { data: mediaFile } = await this.supabaseService.getServiceClient()
+        const { data: mediaFile } = await this.supabaseService
+          .getServiceClient()
           .from('media_files')
           .insert({
             user_id: userId,
@@ -98,7 +109,8 @@ export class MediaController {
 
         // Update content if provided
         if (contentId) {
-          await this.supabaseService.getServiceClient()
+          await this.supabaseService
+            .getServiceClient()
             .from('generated_content')
             .update({
               visual_type: 'image',
@@ -116,7 +128,7 @@ export class MediaController {
           0,
           'Image generated successfully (1.0 credits total)',
           'generation',
-          'image'
+          'image',
         );
 
         return {
@@ -132,9 +144,9 @@ export class MediaController {
           'Refund for failed image generation (1.0 credits)',
           'refund',
           'image',
-          contentId
+          contentId,
         );
-        
+
         throw generationError;
       }
     } catch (error) {
@@ -151,16 +163,33 @@ export class MediaController {
     @Request() req: AuthenticatedRequest,
     @Body() body: { slides: any[]; contentId?: string },
   ) {
-    try {
-      const userId = req.user.id;
-      const { slides, contentId } = body;
+    const userId = req.user.id;
+    const { slides, contentId } = body;
 
-      // Check quota (carousel costs more)
-      const quotaCost = slides.length * 1.5;
-      const hasQuota = await this.quotaService.checkQuotaAvailable(userId, quotaCost);
+    // Check quota (carousel costs more)
+    const quotaCost = slides.length * 1.5;
+
+    try {
+      const hasQuota = await this.quotaService.checkQuotaAvailable(
+        userId,
+        quotaCost,
+      );
       if (!hasQuota) {
-        throw new HttpException('Insufficient credits', HttpStatus.PAYMENT_REQUIRED);
+        throw new HttpException(
+          'Insufficient credits',
+          HttpStatus.PAYMENT_REQUIRED,
+        );
       }
+
+      // IMMEDIATE CREDIT DEDUCTION for carousel generation
+      await this.quotaService.consumeCredits(
+        userId,
+        quotaCost,
+        `Carousel generation initiated (${quotaCost} credits)`,
+        'generation',
+        'carousel',
+        contentId,
+      );
 
       // Generate carousel PDF
       const pdfBuffer = await this.mediaGenerationService.generateCarouselPDF({
@@ -178,17 +207,20 @@ export class MediaController {
       );
 
       // Generate individual images for preview
-      const imageBuffers = await this.mediaGenerationService.generateCarouselImages({
-        slides,
-        style: 'professional',
-      });
+      const imageBuffers =
+        await this.mediaGenerationService.generateCarouselImages({
+          slides,
+          style: 'professional',
+        });
 
       const imageUrls: string[] = [];
       const mediaFiles: any[] = [];
 
       // Upload individual images
       for (let i = 0; i < imageBuffers.length; i++) {
-        const optimizedBuffer = await this.mediaGenerationService.optimizeImage(imageBuffers[i]);
+        const optimizedBuffer = await this.mediaGenerationService.optimizeImage(
+          imageBuffers[i],
+        );
         const imageFileName = `carousel-slide-${Date.now()}-${i + 1}.jpg`;
         const imageUrl = await this.mediaGenerationService.uploadToMinio(
           optimizedBuffer,
@@ -200,7 +232,8 @@ export class MediaController {
         imageUrls.push(imageUrl);
 
         // Save image to database
-        const { data: mediaFile } = await this.supabaseService.getServiceClient()
+        const { data: mediaFile } = await this.supabaseService
+          .getServiceClient()
           .from('media_files')
           .insert({
             user_id: userId,
@@ -218,7 +251,8 @@ export class MediaController {
       }
 
       // Save PDF to database
-      const { data: pdfMediaFile } = await this.supabaseService.getServiceClient()
+      const { data: pdfMediaFile } = await this.supabaseService
+        .getServiceClient()
         .from('media_files')
         .insert({
           user_id: userId,
@@ -234,7 +268,8 @@ export class MediaController {
 
       // Update content if provided
       if (contentId) {
-        await this.supabaseService.getServiceClient()
+        await this.supabaseService
+          .getServiceClient()
           .from('generated_content')
           .update({
             visual_type: 'carousel',
@@ -245,8 +280,16 @@ export class MediaController {
           .eq('user_id', userId);
       }
 
-      // Consume quota
-      await this.quotaService.consumeCredits(userId, quotaCost);
+      // Log successful transaction
+      await this.quotaService.logTransaction(
+        userId,
+        contentId || null,
+        'debit',
+        0,
+        `Carousel generated successfully (${quotaCost} credits total)`,
+        'generation',
+        'carousel',
+      );
 
       return {
         success: true,
@@ -255,6 +298,25 @@ export class MediaController {
         mediaFiles: [...mediaFiles, pdfMediaFile],
       };
     } catch (error) {
+      // REFUND CREDITS for failed carousel generation
+      try {
+        await this.quotaService.consumeCredits(
+          userId,
+          -quotaCost,
+          `Refund for failed carousel generation (${quotaCost} credits)`,
+          'refund',
+          'carousel',
+          contentId || undefined,
+        );
+        this.logger.log(
+          `Refunded ${quotaCost} credits to user ${userId} for failed carousel generation`,
+        );
+      } catch (refundError) {
+        this.logger.error(
+          `Failed to refund credits for user ${userId}: ${refundError.message}`,
+        );
+      }
+
       this.logger.error('Failed to generate carousel:', error.message);
       throw new HttpException(
         error.message || 'Failed to generate carousel',
@@ -276,7 +338,8 @@ export class MediaController {
       const limitNum = parseInt(limit, 10);
       const offset = (pageNum - 1) * limitNum;
 
-      let query = this.supabaseService.getServiceClient()
+      let query = this.supabaseService
+        .getServiceClient()
         .from('media_files')
         .select('*', { count: 'exact' })
         .eq('user_id', userId)
@@ -290,7 +353,10 @@ export class MediaController {
       const { data, error, count } = await query;
 
       if (error) {
-        throw new HttpException('Failed to fetch media files', HttpStatus.INTERNAL_SERVER_ERROR);
+        throw new HttpException(
+          'Failed to fetch media files',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
       }
 
       return {
@@ -319,7 +385,8 @@ export class MediaController {
       const userId = req.user.id;
 
       // Get file details
-      const { data: mediaFile, error } = await this.supabaseService.getServiceClient()
+      const { data: mediaFile, error } = await this.supabaseService
+        .getServiceClient()
         .from('media_files')
         .select('*')
         .eq('id', fileId)
@@ -331,10 +398,14 @@ export class MediaController {
       }
 
       // Delete from MinIO
-      await this.minioService.deleteFile('contentos-media', mediaFile.minio_path);
+      await this.minioService.deleteFile(
+        'contentos-media',
+        mediaFile.minio_path,
+      );
 
       // Delete from database
-      await this.supabaseService.getServiceClient()
+      await this.supabaseService
+        .getServiceClient()
         .from('media_files')
         .delete()
         .eq('id', fileId)
@@ -355,14 +426,20 @@ export class MediaController {
 
   @Post('upload')
   @UseGuards(AuthGuard)
-  async uploadMedia(@Request() req: AuthenticatedRequest, @Body() body: { image?: string; filename?: string; file?: any }) {
+  async uploadMedia(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: { image?: string; filename?: string; file?: any },
+  ) {
     try {
       const userId = req.user.id;
 
       // Check quota
       const hasQuota = await this.quotaService.checkQuotaAvailable(userId, 0.5);
       if (!hasQuota) {
-        throw new HttpException('Insufficient credits', HttpStatus.PAYMENT_REQUIRED);
+        throw new HttpException(
+          'Insufficient credits',
+          HttpStatus.PAYMENT_REQUIRED,
+        );
       }
 
       // Convert base64 to buffer if needed
@@ -378,7 +455,10 @@ export class MediaController {
         // Handle file upload (for future implementation)
         imageBuffer = Buffer.from(body.file);
       } else {
-        throw new HttpException('No image data provided', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'No image data provided',
+          HttpStatus.BAD_REQUEST,
+        );
       }
 
       // Generate filename and sanitize it
@@ -389,12 +469,12 @@ export class MediaController {
         .replace(/\s+/g, '-') // Replace spaces with hyphens
         .replace(/--+/g, '-') // Replace multiple hyphens with single
         .toLowerCase();
-      
+
       // Add timestamp to ensure uniqueness
       const ext = filename.split('.').pop();
       const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
       filename = `${nameWithoutExt}-${Date.now()}.${ext}`;
-      
+
       const minioPath = `user-uploads/${userId}/${filename}`;
 
       // Upload to MinIO
@@ -402,17 +482,18 @@ export class MediaController {
         this.minioService['bucketName'],
         minioPath,
         imageBuffer,
-        'image/jpeg'
+        'image/jpeg',
       );
 
       // Get public URL
       const publicUrl = await this.minioService.getPublicUrl(
         this.minioService['bucketName'],
-        minioPath
+        minioPath,
       );
 
       // Save to database
-      const { data: mediaFile, error } = await this.supabaseService.getServiceClient()
+      const { data: mediaFile, error } = await this.supabaseService
+        .getServiceClient()
         .from('media_files')
         .insert({
           user_id: userId,
@@ -427,7 +508,10 @@ export class MediaController {
         .single();
 
       if (error) {
-        throw new HttpException('Failed to save media record', HttpStatus.INTERNAL_SERVER_ERROR);
+        throw new HttpException(
+          'Failed to save media record',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
       }
 
       // Consume quota
@@ -436,13 +520,13 @@ export class MediaController {
       return {
         success: true,
         url: publicUrl,
-        mediaFile: mediaFile
+        mediaFile: mediaFile,
       };
     } catch (error) {
       this.logger.error('Media upload failed:', error.message);
       throw new HttpException(
         error.message || 'Media upload failed',
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
@@ -453,22 +537,35 @@ export class MediaController {
     try {
       const userId = req.user.id;
 
-      const { data, error } = await this.supabaseService.getServiceClient()
+      const { data, error } = await this.supabaseService
+        .getServiceClient()
         .from('media_files')
         .select('file_type, file_size')
         .eq('user_id', userId);
 
       if (error) {
-        throw new HttpException('Failed to get media usage', HttpStatus.INTERNAL_SERVER_ERROR);
+        throw new HttpException(
+          'Failed to get media usage',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
       }
 
       const usage = {
         totalFiles: data.length,
-        totalSizeMB: Math.round(data.reduce((sum, file) => sum + (file.file_size || 0), 0) / 1024 / 1024 * 100) / 100,
-        byType: data.reduce((acc, file) => {
-          acc[file.file_type] = (acc[file.file_type] || 0) + 1;
-          return acc;
-        }, {} as Record<string, number>),
+        totalSizeMB:
+          Math.round(
+            (data.reduce((sum, file) => sum + (file.file_size || 0), 0) /
+              1024 /
+              1024) *
+              100,
+          ) / 100,
+        byType: data.reduce(
+          (acc, file) => {
+            acc[file.file_type] = (acc[file.file_type] || 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>,
+        ),
       };
 
       return {

@@ -14,8 +14,12 @@ export class MinioService implements OnModuleInit {
     try {
       this.minioClient = new MinioClient({
         endPoint: this.configService.get<string>('MINIO_ENDPOINT', 'localhost'),
-        port: parseInt(this.configService.get<string>('MINIO_PORT', '9000'), 10),
-        useSSL: this.configService.get<string>('MINIO_USE_SSL', 'false') === 'true',
+        port: parseInt(
+          this.configService.get<string>('MINIO_PORT', '9000'),
+          10,
+        ),
+        useSSL:
+          this.configService.get<string>('MINIO_USE_SSL', 'false') === 'true',
         accessKey: this.configService.get<string>('MINIO_ACCESS_KEY'),
         secretKey: this.configService.get<string>('MINIO_SECRET_KEY'),
       });
@@ -34,7 +38,7 @@ export class MinioService implements OnModuleInit {
       const exists = await this.minioClient.bucketExists(bucketName);
       if (!exists) {
         await this.minioClient.makeBucket(bucketName, 'us-east-1');
-        
+
         // Set bucket policy for public read access
         const policy = {
           Version: '2012-10-17',
@@ -48,7 +52,10 @@ export class MinioService implements OnModuleInit {
           ],
         };
 
-        await this.minioClient.setBucketPolicy(bucketName, JSON.stringify(policy));
+        await this.minioClient.setBucketPolicy(
+          bucketName,
+          JSON.stringify(policy),
+        );
         this.logger.log(`Created bucket: ${bucketName}`);
       }
     } catch (error) {
@@ -89,20 +96,27 @@ export class MinioService implements OnModuleInit {
     try {
       // Check if a public URL is configured (for ngrok/proxy scenarios)
       const publicUrl = this.configService.get<string>('MINIO_PUBLIC_URL');
-      
+
       if (publicUrl) {
         // Use the configured public URL
         return `${publicUrl}/${bucketName}/${objectName}`;
       }
-      
+
       // Fallback to direct MinIO URL
-      const endpoint = this.configService.get<string>('MINIO_ENDPOINT', 'localhost');
+      const endpoint = this.configService.get<string>(
+        'MINIO_ENDPOINT',
+        'localhost',
+      );
       const port = this.configService.get<string>('MINIO_PORT', '9000');
-      const useSSL = this.configService.get<string>('MINIO_USE_SSL', 'false') === 'true';
-      
+      const useSSL =
+        this.configService.get<string>('MINIO_USE_SSL', 'false') === 'true';
+
       const protocol = useSSL ? 'https' : 'http';
-      const portSuffix = (useSSL && port === '443') || (!useSSL && port === '80') ? '' : `:${port}`;
-      
+      const portSuffix =
+        (useSSL && port === '443') || (!useSSL && port === '80')
+          ? ''
+          : `:${port}`;
+
       return `${protocol}://${endpoint}${portSuffix}/${bucketName}/${objectName}`;
     } catch (error) {
       this.logger.error(`Failed to generate public URL: ${error.message}`);
@@ -112,12 +126,16 @@ export class MinioService implements OnModuleInit {
 
   async getFileStream(bucketName: string, objectName: string): Promise<any> {
     try {
-      this.logger.log(`Getting file stream: bucket=${bucketName}, object=${objectName}`);
+      this.logger.log(
+        `Getting file stream: bucket=${bucketName}, object=${objectName}`,
+      );
       const stream = await this.minioClient.getObject(bucketName, objectName);
       this.logger.log(`File stream retrieved successfully`);
       return stream;
     } catch (error) {
-      this.logger.error(`Failed to get file stream from bucket=${bucketName}, object=${objectName}: ${error.message}`);
+      this.logger.error(
+        `Failed to get file stream from bucket=${bucketName}, object=${objectName}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -177,7 +195,11 @@ export class MinioService implements OnModuleInit {
     expiry = 7 * 24 * 60 * 60, // 7 days
   ): Promise<string> {
     try {
-      return await this.minioClient.presignedGetObject(bucketName, objectName, expiry);
+      return await this.minioClient.presignedGetObject(
+        bucketName,
+        objectName,
+        expiry,
+      );
     } catch (error) {
       this.logger.error(`Failed to generate presigned URL: ${error.message}`);
       throw error;

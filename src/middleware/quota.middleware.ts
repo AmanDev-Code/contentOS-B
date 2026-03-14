@@ -1,4 +1,9 @@
-import { Injectable, NestMiddleware, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  NestMiddleware,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { QuotaService } from '../services/quota.service';
 
@@ -16,8 +21,8 @@ export class QuotaMiddleware implements NestMiddleware {
   async use(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     // Skip quota check for non-generation endpoints
     const skipPaths = ['/auth', '/health', '/quota'];
-    const isSkipPath = skipPaths.some(path => req.path.startsWith(path));
-    
+    const isSkipPath = skipPaths.some((path) => req.path.startsWith(path));
+
     if (isSkipPath || req.method === 'GET') {
       return next();
     }
@@ -29,28 +34,35 @@ export class QuotaMiddleware implements NestMiddleware {
 
     try {
       // Check quota for generation endpoints
-      const isGenerationEndpoint = req.path.includes('/generation/') && 
-                                  (req.path.includes('/topics') || req.path.includes('/generate'));
+      const isGenerationEndpoint =
+        req.path.includes('/generation/') &&
+        (req.path.includes('/topics') || req.path.includes('/generate'));
 
       if (isGenerationEndpoint) {
-        const hasQuota = await this.quotaService.checkQuotaAvailable(req.user.id, 1);
-        
+        const hasQuota = await this.quotaService.checkQuotaAvailable(
+          req.user.id,
+          1,
+        );
+
         if (!hasQuota) {
           const quota = await this.quotaService.getUserQuota(req.user.id);
-          
-          throw new HttpException({
-            statusCode: HttpStatus.PAYMENT_REQUIRED,
-            message: 'Quota exceeded',
-            error: 'Insufficient credits',
-            quota: {
-              totalCredits: quota.totalCredits,
-              usedCredits: quota.usedCredits,
-              remainingCredits: quota.remainingCredits,
-              percentageUsed: quota.percentageUsed,
-              planType: quota.planType,
-              resetDate: quota.resetDate,
-            }
-          }, HttpStatus.PAYMENT_REQUIRED);
+
+          throw new HttpException(
+            {
+              statusCode: HttpStatus.PAYMENT_REQUIRED,
+              message: 'Quota exceeded',
+              error: 'Insufficient credits',
+              quota: {
+                totalCredits: quota.totalCredits,
+                usedCredits: quota.usedCredits,
+                remainingCredits: quota.remainingCredits,
+                percentageUsed: quota.percentageUsed,
+                planType: quota.planType,
+                resetDate: quota.resetDate,
+              },
+            },
+            HttpStatus.PAYMENT_REQUIRED,
+          );
         }
       }
 
@@ -59,7 +71,7 @@ export class QuotaMiddleware implements NestMiddleware {
       if (error instanceof HttpException) {
         throw error;
       }
-      
+
       console.error('Quota middleware error:', error);
       next(); // Continue on error to avoid blocking requests
     }

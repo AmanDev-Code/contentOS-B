@@ -48,10 +48,14 @@ export class N8nService {
         }
       } catch (parseError) {
         // Ignore JSON parse errors - n8n might return empty response
-        this.logger.log(`n8n webhook triggered (empty response) for job ${payload.jobId}`);
+        this.logger.log(
+          `n8n webhook triggered (empty response) for job ${payload.jobId}`,
+        );
       }
 
-      this.logger.log(`n8n webhook triggered successfully for job ${payload.jobId}`);
+      this.logger.log(
+        `n8n webhook triggered successfully for job ${payload.jobId}`,
+      );
 
       return {
         success: true,
@@ -65,9 +69,12 @@ export class N8nService {
 
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await fetch(this.webhookUrl.replace('/webhook/', '/healthz'), {
-        method: 'GET',
-      });
+      const response = await fetch(
+        this.webhookUrl.replace('/webhook/', '/healthz'),
+        {
+          method: 'GET',
+        },
+      );
       return response.ok;
     } catch (error) {
       this.logger.error(`n8n health check failed: ${error.message}`);

@@ -6,6 +6,7 @@ import { N8nService } from '../services/n8n.service';
 import { GenerationJobRepository } from '../repositories/generation-job.repository';
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
 import { QuotaService } from '../services/quota.service';
+import { NotificationService } from '../services/notification.service';
 import { QUEUE_NAMES, JOB_STAGES } from '../common/constants';
 import { JobStatus } from '../common/types';
 
@@ -19,6 +20,7 @@ export class GenerationWorker extends WorkerHost {
     private generationJobRepository: GenerationJobRepository,
     private generatedContentRepository: GeneratedContentRepository,
     private quotaService: QuotaService,
+    private notificationService: NotificationService,
   ) {
     super();
   }
@@ -39,7 +41,9 @@ export class GenerationWorker extends WorkerHost {
       await job.updateProgress(10);
 
       // Build callback URL for n8n to call when job completes
-      const baseUrl = this.configService.get<string>('app.baseUrl') || 'http://localhost:3000';
+      const baseUrl =
+        this.configService.get<string>('app.baseUrl') ||
+        'http://localhost:3000';
       const callbackUrl = `${baseUrl}/webhook/n8n-callback`;
 
       await this.n8nService.triggerContentGeneration({
@@ -58,28 +62,30 @@ export class GenerationWorker extends WorkerHost {
 
       await job.updateProgress(30);
 
-      this.logger.log(`n8n webhook triggered for job ${jobId}, waiting for completion...`);
+      this.logger.log(
+        `n8n webhook triggered for job ${jobId}, waiting for completion...`,
+      );
 
       // Wait for n8n to complete by polling the database
       // n8n will call our webhook which updates the job status
       const maxWaitTime = 120000; // 2 minutes max
       const pollInterval = 2000; // Check every 2 seconds
       const startTime = Date.now();
-      
+
       while (Date.now() - startTime < maxWaitTime) {
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-        
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
         // Check if job status was updated by webhook
         const currentJob = await this.generationJobRepository.findById(jobId);
-        
+
         if (!currentJob) {
           throw new Error('Job not found in database');
         }
-        
+
         // Check if n8n completed (webhook was called)
         if (currentJob.status === JobStatus.READY) {
           this.logger.log(`✅ Job ${jobId} completed successfully by n8n`);
-          
+
           // LOG SUCCESSFUL CREDIT TRANSACTION
           try {
             await this.quotaService.logTransaction(
@@ -89,13 +95,40 @@ export class GenerationWorker extends WorkerHost {
               0, // No additional charge, already deducted
               'Content generated successfully (1.5 credits total)',
               'generation',
-              'text'
+              'text',
             );
-            this.logger.log(`Logged successful generation transaction for user ${userId}`);
+            this.logger.log(
+              `Logged successful generation transaction for user ${userId}`,
+            );
           } catch (logError) {
-            this.logger.error(`Failed to log transaction for user ${userId}: ${logError.message}`);
+            this.logger.error(
+              `Failed to log transaction for user ${userId}: ${logError.message}`,
+            );
           }
-          
+
+          // SEND GENERATION SUCCESS NOTIFICATION
+          try {
+            if (currentJob.contentId) {
+              // Get content title from database
+              const content = await this.generatedContentRepository.findById(
+                currentJob.contentId,
+              );
+              const contentTitle = content?.title || 'Your content';
+              await this.notificationService.notifyGenerationComplete(
+                userId,
+                currentJob.contentId,
+                contentTitle,
+              );
+              this.logger.log(
+                `Sent generation success notification to user ${userId}`,
+              );
+            }
+          } catch (notificationError) {
+            this.logger.error(
+              `Failed to send generation success notification: ${notificationError.message}`,
+            );
+          }
+
           await job.updateProgress(100);
           return {
             success: true,
@@ -104,20 +137,24 @@ export class GenerationWorker extends WorkerHost {
             message: 'Content generated successfully',
           };
         }
-        
+
         if (currentJob.status === JobStatus.FAILED) {
-          this.logger.error(`❌ Job ${jobId} failed in n8n: ${currentJob.error}`);
+          this.logger.error(
+            `❌ Job ${jobId} failed in n8n: ${currentJob.error}`,
+          );
           throw new Error(currentJob.error || 'n8n workflow failed');
         }
-        
+
         // Update progress if changed
         if (currentJob.progress > 30) {
           await job.updateProgress(currentJob.progress);
         }
-        
-        this.logger.log(`⏳ Job ${jobId} still processing... (${currentJob.progress}%)`);
+
+        this.logger.log(
+          `⏳ Job ${jobId} still processing... (${currentJob.progress}%)`,
+        );
       }
-      
+
       // Timeout - n8n didn't respond
       this.logger.error(`⏰ Job ${jobId} timed out waiting for n8n`);
       await this.generationJobRepository.updateError(
@@ -125,7 +162,7 @@ export class GenerationWorker extends WorkerHost {
         'n8n workflow timeout - no response after 2 minutes',
         0,
       );
-      
+
       throw new Error('n8n workflow timeout');
     } catch (error) {
       this.logger.error(
@@ -139,11 +176,32 @@ export class GenerationWorker extends WorkerHost {
           -1.5, // Refund 1.5 credits
           'Refund for failed content generation (1.5 credits)',
           'refund',
-          'text'
+          'text',
         );
-        this.logger.log(`Refunded 1.5 credits to user ${userId} for failed job ${jobId}`);
+        this.logger.log(
+          `Refunded 1.5 credits to user ${userId} for failed job ${jobId}`,
+        );
       } catch (refundError) {
-        this.logger.error(`Failed to refund credits for user ${userId}: ${refundError.message}`);
+        this.logger.error(
+          `Failed to refund credits for user ${userId}: ${refundError.message}`,
+        );
+      }
+
+      // SEND GENERATION FAILURE NOTIFICATION
+      try {
+        await this.notificationService.notifyGenerationFailed(
+          userId,
+          jobId,
+          error.message,
+          1.5,
+        );
+        this.logger.log(
+          `Sent generation failure notification to user ${userId}`,
+        );
+      } catch (notificationError) {
+        this.logger.error(
+          `Failed to send generation failure notification: ${notificationError.message}`,
+        );
       }
 
       // Mark job as failed in database
@@ -158,7 +216,7 @@ export class GenerationWorker extends WorkerHost {
       this.logger.log(
         `Job ${jobId} marked as failed. User can manually retry from UI.`,
       );
-      
+
       return {
         success: false,
         jobId,

@@ -1,4 +1,9 @@
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Request } from 'express';
 import { SupabaseService } from '../services/supabase.service';
 
@@ -24,7 +29,10 @@ export class AuthGuard implements CanActivate {
 
     try {
       // Verify the JWT token with Supabase
-      const { data: { user }, error } = await this.supabaseService.getClient().auth.getUser(token);
+      const {
+        data: { user },
+        error,
+      } = await this.supabaseService.getClient().auth.getUser(token);
 
       if (error || !user) {
         throw new UnauthorizedException('Invalid or expired token');

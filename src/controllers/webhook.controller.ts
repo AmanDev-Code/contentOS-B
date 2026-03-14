@@ -21,15 +21,22 @@ export class WebhookController {
     // Create Redis client for signaling job completion to workers
     this.redis = new Redis({
       host: this.configService.get<string>('redis.host') || 'localhost',
-      port: parseInt(this.configService.get<string>('redis.port') || '6380', 10),
+      port: parseInt(
+        this.configService.get<string>('redis.port') || '6380',
+        10,
+      ),
       password: this.configService.get<string>('redis.password') || undefined,
     });
   }
 
   @Post('n8n-progress')
   @ApiOperation({ summary: 'Receive progress updates from n8n workflow' })
-  async handleN8nProgress(@Body() payload: { jobId: string; progress: number; stage?: string }) {
-    this.logger.log(`Received progress update for job ${payload.jobId}: ${payload.progress}%`);
+  async handleN8nProgress(
+    @Body() payload: { jobId: string; progress: number; stage?: string },
+  ) {
+    this.logger.log(
+      `Received progress update for job ${payload.jobId}: ${payload.progress}%`,
+    );
 
     try {
       await this.generationJobRepository.updateStatus(
@@ -45,7 +52,7 @@ export class WebhookController {
       };
     } catch (error) {
       this.logger.error(
-        `Error updating progress for job ${payload.jobId}: ${error.message}`,
+        `Error updating progress for job ${payload.jobId}: ${(error as Error).message}`,
       );
       return {
         success: false,
@@ -92,10 +99,10 @@ export class WebhookController {
           this.logger.log(
             `✅ Job ${payload.jobId} status updated to READY with content ${content.id}`,
           );
-          
+
           // Wait a bit to ensure Supabase write is committed and visible to all connections
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
+          await new Promise((resolve) => setTimeout(resolve, 500));
+
           // Signal completion to waiting worker via Redis
           const completionKey = `job:${payload.jobId}:completed`;
           await this.redis.setex(
@@ -107,11 +114,12 @@ export class WebhookController {
               timestamp: new Date().toISOString(),
             }),
           );
-          this.logger.log(`🔔 Redis completion signal set for job ${payload.jobId}`);
-          
+          this.logger.log(
+            `🔔 Redis completion signal set for job ${payload.jobId}`,
+          );
         } catch (updateError) {
           this.logger.error(
-            `❌ Failed to update job status to READY: ${updateError.message}`,
+            `❌ Failed to update job status to READY: ${(updateError as Error).message}`,
           );
           throw updateError;
         }
@@ -129,7 +137,7 @@ export class WebhookController {
         );
 
         this.logger.error(`❌ Job ${payload.jobId} failed: ${payload.error}`);
-        
+
         // Signal failure to waiting worker via Redis
         const completionKey = `job:${payload.jobId}:completed`;
         await this.redis.setex(
@@ -151,8 +159,8 @@ export class WebhookController {
       }
     } catch (error) {
       this.logger.error(
-        `Error processing n8n callback: ${error.message}`,
-        error.stack,
+        `Error processing n8n callback: ${(error as Error).message}`,
+        (error as Error).stack,
       );
       return {
         success: false,

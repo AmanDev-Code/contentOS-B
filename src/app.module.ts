@@ -17,6 +17,11 @@ import { MediaController } from './controllers/media.controller';
 import { PostsController } from './controllers/posts.controller';
 import { ContentController } from './controllers/content.controller';
 import { MinioProxyController } from './controllers/minio-proxy.controller';
+import { NotificationController } from './controllers/notification.controller';
+import { AdminController } from './controllers/admin.controller';
+import { EmailController } from './controllers/email.controller';
+import { EmailWebhookController } from './controllers/email-webhook.controller';
+import { AuthController } from './controllers/auth.controller';
 
 import { SupabaseService } from './services/supabase.service';
 import { GenerationService } from './services/generation.service';
@@ -28,6 +33,9 @@ import { SubscriptionService } from './services/subscription.service';
 import { MediaGenerationService } from './services/media-generation.service';
 import { MinioService } from './services/minio.service';
 import { PostSchedulingService } from './services/post-scheduling.service';
+import { NotificationService } from './services/notification.service';
+import { EmailService } from './services/email.service';
+import { AuthService } from './services/auth.service';
 
 import { ProfileRepository } from './repositories/profile.repository';
 import { GenerationJobRepository } from './repositories/generation-job.repository';
@@ -40,6 +48,7 @@ import { PostPublishingProcessor } from './processors/post-publishing.processor'
 import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
 
 import { QUEUE_NAMES } from './common/constants';
+import { MiddlewareConsumer, NestModule } from '@nestjs/common';
 
 @Module({
   imports: [
@@ -80,6 +89,11 @@ import { QUEUE_NAMES } from './common/constants';
     PostsController,
     ContentController,
     MinioProxyController,
+    NotificationController,
+    AdminController,
+    EmailController,
+    EmailWebhookController,
+    AuthController,
   ],
   providers: [
     AppService,
@@ -93,6 +107,12 @@ import { QUEUE_NAMES } from './common/constants';
     MediaGenerationService,
     MinioService,
     PostSchedulingService,
+    {
+      provide: NotificationService,
+      useClass: NotificationService,
+    },
+    EmailService,
+    AuthService,
     ProfileRepository,
     GenerationJobRepository,
     GeneratedContentRepository,
@@ -103,4 +123,8 @@ import { QUEUE_NAMES } from './common/constants';
     RateLimitMiddleware,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RateLimitMiddleware).forRoutes('*'); // Apply to all routes
+  }
+}

@@ -23,10 +23,7 @@ export class GenerationJobRepository {
     };
   }
 
-  async create(
-    userId: string,
-    webhookUrl?: string,
-  ): Promise<GenerationJob> {
+  async create(userId: string, webhookUrl?: string): Promise<GenerationJob> {
     const { data, error } = await this.supabaseService
       .getServiceClient()
       .from('generation_jobs')
@@ -41,13 +38,13 @@ export class GenerationJobRepository {
       .single();
 
     if (error) throw error;
-    
+
     return this.mapDatabaseToInterface(data);
   }
 
   async findById(jobId: string): Promise<GenerationJob | null> {
     console.log(`🔍 Fetching job ${jobId} from Supabase...`);
-    
+
     const { data, error } = await this.supabaseService
       .getServiceClient()
       .from('generation_jobs')
@@ -59,13 +56,15 @@ export class GenerationJobRepository {
       console.error(`❌ Error fetching job ${jobId}:`, error);
       return null;
     }
-    
+
     if (data) {
-      console.log(`✅ Found job ${jobId}: status=${data.status}, progress=${data.progress}`);
+      console.log(
+        `✅ Found job ${jobId}: status=${data.status}, progress=${data.progress}`,
+      );
     } else {
       console.log(`⚠️ Job ${jobId} not found in database`);
     }
-    
+
     return data ? this.mapDatabaseToInterface(data) : null;
   }
 
@@ -78,8 +77,8 @@ export class GenerationJobRepository {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    
-    return (data || []).map(item => this.mapDatabaseToInterface(item));
+
+    return (data || []).map((item) => this.mapDatabaseToInterface(item));
   }
 
   async updateStatus(
@@ -114,8 +113,10 @@ export class GenerationJobRepository {
     status: JobStatus,
     response?: Record<string, any>,
   ): Promise<GenerationJob> {
-    console.log(`📝 Updating job ${jobId} with content ${contentId}, status: ${status}`);
-    
+    console.log(
+      `📝 Updating job ${jobId} with content ${contentId}, status: ${status}`,
+    );
+
     const updatePayload = {
       content_id: contentId,
       status,
@@ -123,9 +124,9 @@ export class GenerationJobRepository {
       response,
       updated_at: new Date().toISOString(),
     };
-    
+
     console.log('Update payload:', JSON.stringify(updatePayload, null, 2));
-    
+
     const { data, error } = await this.supabaseService
       .getServiceClient()
       .from('generation_jobs')
@@ -138,9 +139,12 @@ export class GenerationJobRepository {
       console.error('❌ Supabase update error:', error);
       throw error;
     }
-    
-    console.log('✅ Supabase update successful, returned data:', JSON.stringify(data, null, 2));
-    
+
+    console.log(
+      '✅ Supabase update successful, returned data:',
+      JSON.stringify(data, null, 2),
+    );
+
     return this.mapDatabaseToInterface(data);
   }
 

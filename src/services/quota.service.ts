@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SupabaseService } from './supabase.service';
 import { CacheService } from './cache.service';
 
@@ -21,6 +21,7 @@ export interface QuotaLimits {
 
 @Injectable()
 export class QuotaService {
+  private readonly logger = new Logger(QuotaService.name);
   private readonly quotaLimits: QuotaLimits = {
     free: 50,
     standard: 500,
@@ -37,14 +38,15 @@ export class QuotaService {
     // Check cache first
     const cacheKey = `quota:${userId}`;
     const cachedQuota = await this.cacheService.get(cacheKey);
-    
+
     if (cachedQuota) {
       return JSON.parse(cachedQuota);
     }
 
     try {
       // Use the user_quota_view for efficient quota calculation
-      const { data: quotaData, error: quotaError } = await this.supabaseService.getServiceClient()
+      const { data: quotaData, error: quotaError } = await this.supabaseService
+        .getServiceClient()
         .from('user_quota_view')
         .select('*')
         .eq('user_id', userId)
@@ -83,7 +85,7 @@ export class QuotaService {
       return quota;
     } catch (error) {
       console.error('Error getting user quota:', error);
-      
+
       // Return default free plan quota on error
       return {
         userId,
@@ -98,22 +100,26 @@ export class QuotaService {
   }
 
   // Default generation cost: 1.5 credits per successful job
-  async checkQuotaAvailable(userId: string, creditsNeeded: number = 1.5): Promise<boolean> {
+  async checkQuotaAvailable(
+    userId: string,
+    creditsNeeded: number = 1.5,
+  ): Promise<boolean> {
     const quota = await this.getUserQuota(userId);
     return quota.remainingCredits >= creditsNeeded;
   }
 
   async consumeCredits(
-    userId: string, 
-    creditsUsed: number = 1.5, 
+    userId: string,
+    creditsUsed: number = 1.5,
     description: string = 'Credit consumption',
     operationType: string = 'generation',
     contentType?: string,
-    contentId?: string
+    contentId?: string,
   ): Promise<UserQuota> {
     try {
       // Log the credit transaction
-      const { error } = await this.supabaseService.getServiceClient()
+      const { error } = await this.supabaseService
+        .getServiceClient()
         .rpc('log_credit_transaction', {
           p_user_id: userId,
           p_content_id: contentId || null,
@@ -122,7 +128,7 @@ export class QuotaService {
           p_description: description,
           p_operation_type: operationType,
           p_content_type: contentType || null,
-          p_metadata: {}
+          p_metadata: {},
         });
 
       if (error) {
@@ -137,9 +143,13 @@ export class QuotaService {
     // Invalidate cache to force refresh
     const cacheKey = `quota:${userId}`;
     await this.cacheService.delete(cacheKey);
-    
-    // Return updated quota
-    return this.getUserQuota(userId);
+
+    // Get updated quota
+    const updatedQuota = await this.getUserQuota(userId);
+
+    // TODO: Handle low credits notification in controllers instead of here to avoid circular dependency
+
+    return updatedQuota;
   }
 
   async logTransaction(
@@ -149,10 +159,11 @@ export class QuotaService {
     amount: number,
     description: string,
     operationType: string,
-    contentType: string
+    contentType: string,
   ): Promise<void> {
     try {
-      const { error } = await this.supabaseService.getServiceClient()
+      const { error } = await this.supabaseService
+        .getServiceClient()
         .rpc('log_credit_transaction', {
           p_user_id: userId,
           p_content_id: contentId,
@@ -161,7 +172,7 @@ export class QuotaService {
           p_description: description,
           p_operation_type: operationType,
           p_content_type: contentType,
-          p_metadata: {}
+          p_metadata: {},
         });
 
       if (error) {

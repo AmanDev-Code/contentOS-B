@@ -19,13 +19,13 @@ export const PLAN_CONFIGURATIONS: PlanConfiguration[] = [
     name: 'Free Trial',
     description: '14-day free trial for new users',
     creditsLimit: 50,
-    priceMonthly: 0.00,
-    priceYearly: 0.00,
+    priceMonthly: 0.0,
+    priceYearly: 0.0,
     features: [
       '50 AI credits per month',
       'Basic content generation',
       'Community support',
-      '14-day trial'
+      '14-day trial',
     ],
     isPublic: false, // Hidden from billing page
     trialDays: 14,
@@ -35,14 +35,14 @@ export const PLAN_CONFIGURATIONS: PlanConfiguration[] = [
     name: 'Standard',
     description: 'Great for regular content creators',
     creditsLimit: 500,
-    priceMonthly: 15.00,
-    priceYearly: 150.00,
+    priceMonthly: 15.0,
+    priceYearly: 150.0,
     features: [
       '500 AI credits per month',
       'Advanced content generation',
       'Priority support',
       'Analytics dashboard',
-      'Content scheduling'
+      'Content scheduling',
     ],
     isPublic: true,
   },
@@ -51,8 +51,8 @@ export const PLAN_CONFIGURATIONS: PlanConfiguration[] = [
     name: 'Pro',
     description: 'Perfect for businesses and agencies',
     creditsLimit: 2000,
-    priceMonthly: 25.00,
-    priceYearly: 250.00,
+    priceMonthly: 25.0,
+    priceYearly: 250.0,
     features: [
       '2000 AI credits per month',
       'Premium content generation',
@@ -60,7 +60,7 @@ export const PLAN_CONFIGURATIONS: PlanConfiguration[] = [
       'Priority support',
       'Custom templates',
       'Team collaboration',
-      'API access'
+      'API access',
     ],
     isPublic: true,
   },
@@ -69,8 +69,8 @@ export const PLAN_CONFIGURATIONS: PlanConfiguration[] = [
     name: 'Ultimate',
     description: 'For enterprise and high-volume users',
     creditsLimit: 10000,
-    priceMonthly: 49.00,
-    priceYearly: 490.00,
+    priceMonthly: 49.0,
+    priceYearly: 490.0,
     features: [
       '10000 AI credits per month',
       'Unlimited content generation',
@@ -79,18 +79,21 @@ export const PLAN_CONFIGURATIONS: PlanConfiguration[] = [
       'Custom integrations',
       'White-label options',
       'Dedicated account manager',
-      'Custom workflows'
+      'Custom workflows',
     ],
     isPublic: true,
   },
 ];
 
 // Helper functions
-export const getPublicPlans = () => PLAN_CONFIGURATIONS.filter(plan => plan.isPublic);
+export const getPublicPlans = () =>
+  PLAN_CONFIGURATIONS.filter((plan) => plan.isPublic);
 
-export const getPlanConfig = (planType: string) => PLAN_CONFIGURATIONS.find(plan => plan.planType === planType);
+export const getPlanConfig = (planType: string) =>
+  PLAN_CONFIGURATIONS.find((plan) => plan.planType === planType);
 
-export const getFreePlan = () => PLAN_CONFIGURATIONS.find(plan => plan.planType === 'free');
+export const getFreePlan = () =>
+  PLAN_CONFIGURATIONS.find((plan) => plan.planType === 'free');
 
 export const calculateDiscount = (monthly: number, yearly: number) => {
   const monthlyTotal = monthly * 12;

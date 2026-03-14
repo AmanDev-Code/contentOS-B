@@ -10,7 +10,7 @@ export class CacheService {
    */
   get(key: string): any | null {
     const item = this.cache.get(key);
-    
+
     if (!item) {
       return null;
     }
@@ -28,7 +28,7 @@ export class CacheService {
    * Set data in cache
    */
   set(key: string, data: any, ttlSeconds: number = 3600): void {
-    const expires = Date.now() + (ttlSeconds * 1000);
+    const expires = Date.now() + ttlSeconds * 1000;
     this.cache.set(key, { data, expires });
     this.logger.log(`Cache set: ${key} (TTL: ${ttlSeconds}s)`);
   }
@@ -45,19 +45,38 @@ export class CacheService {
   }
 
   /**
+   * Delete all keys matching a prefix (e.g. for broadcast cache invalidation)
+   */
+  deleteByPrefix(prefix: string): number {
+    let count = 0;
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.cache.delete(key);
+        count++;
+      }
+    }
+    if (count > 0) {
+      this.logger.log(`Cache deleted ${count} keys with prefix: ${prefix}`);
+    }
+    return count;
+  }
+
+  /**
    * Invalidate all cache for a user
    */
   invalidateUser(userId: string): number {
     let deletedCount = 0;
-    
+
     for (const [key] of this.cache) {
       if (key.includes(userId)) {
         this.cache.delete(key);
         deletedCount++;
       }
     }
-    
-    this.logger.log(`Invalidated ${deletedCount} cache entries for user: ${userId}`);
+
+    this.logger.log(
+      `Invalidated ${deletedCount} cache entries for user: ${userId}`,
+    );
     return deletedCount;
   }
 
@@ -76,7 +95,7 @@ export class CacheService {
   getStats(): { size: number; keys: string[] } {
     return {
       size: this.cache.size,
-      keys: Array.from(this.cache.keys())
+      keys: Array.from(this.cache.keys()),
     };
   }
 }

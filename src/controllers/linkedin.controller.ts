@@ -46,9 +46,7 @@ export class LinkedinController {
       expiresIn,
     );
 
-    const frontendUrl =
-      process.env.FRONTEND_URL ||
-      'http://localhost:5173';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
     // Redirect back to frontend (Settings page) so UI updates immediately
     return {
@@ -67,14 +65,13 @@ export class LinkedinController {
   @Post('publish')
   @UseGuards(AuthGuard)
   @ApiOperation({ summary: 'Publish content to LinkedIn' })
-  async publishPost(
-    @Request() req,
-    @Body() body: { contentId: string },
-  ) {
+  async publishPost(@Request() req, @Body() body: { contentId: string }) {
     const userId = req.user?.id; // AuthGuard sets req.user.id
     // This method needs to be updated to work with the new publishPost signature
     // For now, return a placeholder
-    throw new BadRequestException('This endpoint needs to be updated for the new publishing system');
+    throw new BadRequestException(
+      'This endpoint needs to be updated for the new publishing system',
+    );
   }
 
   @Get('metrics')
@@ -116,19 +113,22 @@ export class LinkedinController {
   async disconnect(@Request() req) {
     console.log('🔗 LinkedIn disconnect endpoint hit');
     console.log('Request user:', req.user);
-    
+
     const userId = req.user?.id; // AuthGuard sets req.user.id
     if (!userId) {
       console.error('❌ No user ID found in request');
       throw new BadRequestException('User ID not found in request');
     }
-    
+
     console.log('✅ User ID found:', userId);
-    
+
     try {
       await this.linkedinService.disconnectLinkedIn(userId);
       console.log('✅ LinkedIn disconnect successful for user:', userId);
-      return { success: true, message: 'LinkedIn account disconnected successfully' };
+      return {
+        success: true,
+        message: 'LinkedIn account disconnected successfully',
+      };
     } catch (error) {
       console.error('❌ LinkedIn disconnect error:', error);
       throw new BadRequestException('Failed to disconnect LinkedIn account');

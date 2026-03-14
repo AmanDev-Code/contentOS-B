@@ -44,7 +44,9 @@ export class GenerationController {
   }
 
   @Post('job/:jobId/check-completion')
-  @ApiOperation({ summary: 'Check if job is complete in queue and sync status' })
+  @ApiOperation({
+    summary: 'Check if job is complete in queue and sync status',
+  })
   async checkJobCompletion(@Request() req, @Param('jobId') jobId: string) {
     const userId = req.user?.id || 'c9327732-05cd-41dc-9d4f-e0c17b7fbea3';
     return this.generationService.checkAndSyncJobCompletion(jobId, userId);
@@ -135,7 +137,11 @@ export class GenerationController {
     const offset = (pageNum - 1) * limitNum;
 
     const [content, totalCount] = await Promise.all([
-      this.generatedContentRepository.findScheduledContent(userId, limitNum, offset),
+      this.generatedContentRepository.findScheduledContent(
+        userId,
+        limitNum,
+        offset,
+      ),
       this.generatedContentRepository.countScheduledByUserId(userId),
     ]);
 

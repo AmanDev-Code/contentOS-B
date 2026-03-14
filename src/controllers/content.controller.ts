@@ -35,12 +35,13 @@ export class ContentController {
       const userId = req.user.id;
 
       // Verify ownership
-      const { data: existingContent, error: fetchError } = await this.supabaseService
-        .getServiceClient()
-        .from('generated_content')
-        .select('user_id')
-        .eq('id', contentId)
-        .single();
+      const { data: existingContent, error: fetchError } =
+        await this.supabaseService
+          .getServiceClient()
+          .from('generated_content')
+          .select('user_id')
+          .eq('id', contentId)
+          .single();
 
       if (fetchError || !existingContent) {
         throw new HttpException('Content not found', HttpStatus.NOT_FOUND);
@@ -68,7 +69,10 @@ export class ContentController {
         .single();
 
       if (error) {
-        throw new HttpException('Failed to update content', HttpStatus.INTERNAL_SERVER_ERROR);
+        throw new HttpException(
+          'Failed to update content',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
       }
 
       return {

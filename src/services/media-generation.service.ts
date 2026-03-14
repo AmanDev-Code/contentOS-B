@@ -39,7 +39,9 @@ export class MediaGenerationService {
 
   async generateSingleImage(request: ImageGenerationRequest): Promise<Buffer> {
     try {
-      this.logger.log(`Generating single image with prompt: ${request.prompt.substring(0, 50)}...`);
+      this.logger.log(
+        `Generating single image with prompt: ${request.prompt.substring(0, 50)}...`,
+      );
 
       const response = await axios.post(
         'https://api.openai.com/v1/images/generations',
@@ -54,11 +56,11 @@ export class MediaGenerationService {
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.openaiApiKey}`,
+            Authorization: `Bearer ${this.openaiApiKey}`,
             'Content-Type': 'application/json',
           },
           timeout: 60000, // 60 seconds
-        }
+        },
       );
 
       const base64Image = response.data.data[0].b64_json;
@@ -69,17 +71,21 @@ export class MediaGenerationService {
     }
   }
 
-  async generateCarouselImages(request: CarouselGenerationRequest): Promise<Buffer[]> {
+  async generateCarouselImages(
+    request: CarouselGenerationRequest,
+  ): Promise<Buffer[]> {
     try {
-      this.logger.log(`Generating carousel with ${request.slides.length} slides`);
+      this.logger.log(
+        `Generating carousel with ${request.slides.length} slides`,
+      );
 
-      const imagePromises = request.slides.map(slide =>
+      const imagePromises = request.slides.map((slide) =>
         this.generateSingleImage({
           prompt: slide.imagePrompt,
           size: '1024x1024',
           quality: 'hd',
           style: 'natural',
-        })
+        }),
       );
 
       return await Promise.all(imagePromises);
@@ -89,7 +95,10 @@ export class MediaGenerationService {
     }
   }
 
-  async createCarouselSlideHTML(slide: CarouselSlide, imageBase64: string): Promise<string> {
+  async createCarouselSlideHTML(
+    slide: CarouselSlide,
+    imageBase64: string,
+  ): Promise<string> {
     return `
       <div class="slide">
         <img class="bg" src="data:image/png;base64,${imageBase64}" />
@@ -102,19 +111,23 @@ export class MediaGenerationService {
     `;
   }
 
-  async generateCarouselPDF(request: CarouselGenerationRequest): Promise<Buffer> {
+  async generateCarouselPDF(
+    request: CarouselGenerationRequest,
+  ): Promise<Buffer> {
     try {
       this.logger.log('Generating carousel PDF using HTML2Image API');
 
       // Generate all images
       const imageBuffers = await this.generateCarouselImages(request);
-      
+
       // Convert images to base64
-      const imageBase64Array = imageBuffers.map(buffer => buffer.toString('base64'));
+      const imageBase64Array = imageBuffers.map((buffer) =>
+        buffer.toString('base64'),
+      );
 
       // Create HTML slides
       const slideHTMLPromises = request.slides.map((slide, index) =>
-        this.createCarouselSlideHTML(slide, imageBase64Array[index])
+        this.createCarouselSlideHTML(slide, imageBase64Array[index]),
       );
 
       const slidesHTML = await Promise.all(slideHTMLPromises);
@@ -212,7 +225,8 @@ export class MediaGenerationService {
   private async convertHTMLToPDF(html: string): Promise<Buffer> {
     try {
       // Use html2image.net API for PDF conversion
-      const response = await axios.post('https://www.html2image.net/api/api.php', 
+      const response = await axios.post(
+        'https://www.html2image.net/api/api.php',
         new URLSearchParams({
           key: 'h2i_15af0e0966edd0dfd227cb46dbcf12df', // Free API key
           type: 'pdf',
@@ -221,14 +235,14 @@ export class MediaGenerationService {
           fullpage: 'true',
           zoom: '1',
           margin: '0',
-          source: html
-        }), 
+          source: html,
+        }),
         {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           timeout: 60000, // 60 seconds
-        }
+        },
       );
 
       if (response.data && response.data.Link) {
@@ -244,7 +258,7 @@ export class MediaGenerationService {
       }
     } catch (error) {
       this.logger.error('HTML to PDF conversion failed:', error.message);
-      
+
       // Fallback: create a simple PDF-like image using Sharp
       return await this.createFallbackCarouselImage(html);
     }
@@ -253,11 +267,11 @@ export class MediaGenerationService {
   private async createFallbackCarouselImage(html: string): Promise<Buffer> {
     try {
       this.logger.log('Using fallback method to create carousel image');
-      
+
       // Create a simple image with text overlay as fallback
       const width = 1024;
       const height = 1024;
-      
+
       // Create a gradient background
       const gradientSvg = `
         <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -279,16 +293,18 @@ export class MediaGenerationService {
         </svg>
       `;
 
-      return await sharp(Buffer.from(gradientSvg))
-        .png()
-        .toBuffer();
+      return await sharp(Buffer.from(gradientSvg)).png().toBuffer();
     } catch (error) {
       this.logger.error('Fallback carousel generation failed:', error.message);
       throw new Error('All carousel generation methods failed');
     }
   }
 
-  async optimizeImage(imageBuffer: Buffer, maxWidth = 1024, quality = 90): Promise<Buffer> {
+  async optimizeImage(
+    imageBuffer: Buffer,
+    maxWidth = 1024,
+    quality = 90,
+  ): Promise<Buffer> {
     try {
       return await sharp(imageBuffer)
         .resize(maxWidth, maxWidth, {
@@ -313,11 +329,19 @@ export class MediaGenerationService {
       const bucketName = 'contentos-media';
       const objectName = `${userId}/${Date.now()}-${fileName}`;
 
-      await this.minioService.uploadFile(bucketName, objectName, buffer, contentType);
-      
+      await this.minioService.uploadFile(
+        bucketName,
+        objectName,
+        buffer,
+        contentType,
+      );
+
       // Generate public URL
-      const publicUrl = await this.minioService.getPublicUrl(bucketName, objectName);
-      
+      const publicUrl = await this.minioService.getPublicUrl(
+        bucketName,
+        objectName,
+      );
+
       return publicUrl;
     } catch (error) {
       this.logger.error('Failed to upload to MinIO:', error.message);
@@ -340,7 +364,7 @@ export class MediaGenerationService {
   async checkRateLimit(userId: string, endpoint: string): Promise<boolean> {
     const key = `rate_limit:${userId}:${endpoint}`;
     const current = await this.cacheService.get(key);
-    
+
     if (!current) {
       await this.cacheService.set(key, '1', 3600); // 1 hour
       return true;
@@ -348,7 +372,7 @@ export class MediaGenerationService {
 
     const count = parseInt(current, 10);
     const maxRequests = this.getMaxRequestsForEndpoint(endpoint);
-    
+
     if (count >= maxRequests) {
       return false;
     }

@@ -1,5 +1,8 @@
 import { Controller, Get } from '@nestjs/common';
-import { SubscriptionService, SubscriptionPlan } from '../services/subscription.service';
+import {
+  SubscriptionService,
+  SubscriptionPlan,
+} from '../services/subscription.service';
 
 @Controller('public')
 export class PublicController {
@@ -19,9 +22,13 @@ export class PublicController {
           name: 'Standard',
           description: 'Great for regular content creators',
           creditsLimit: 500,
-          priceMonthly: 15.00,
-          priceYearly: 150.00,
-          features: ['500 AI credits per month', 'Advanced content generation', 'Priority support'],
+          priceMonthly: 15.0,
+          priceYearly: 150.0,
+          features: [
+            '500 AI credits per month',
+            'Advanced content generation',
+            'Priority support',
+          ],
           isActive: true,
           sortOrder: 1,
         },
@@ -31,9 +38,13 @@ export class PublicController {
           name: 'Pro',
           description: 'Perfect for businesses and agencies',
           creditsLimit: 2000,
-          priceMonthly: 25.00,
-          priceYearly: 250.00,
-          features: ['2000 AI credits per month', 'Premium content generation', 'Advanced analytics'],
+          priceMonthly: 25.0,
+          priceYearly: 250.0,
+          features: [
+            '2000 AI credits per month',
+            'Premium content generation',
+            'Advanced analytics',
+          ],
           isActive: true,
           sortOrder: 2,
         },
@@ -43,9 +54,13 @@ export class PublicController {
           name: 'Ultimate',
           description: 'For enterprise and high-volume users',
           creditsLimit: 10000,
-          priceMonthly: 49.00,
-          priceYearly: 490.00,
-          features: ['10000 AI credits per month', 'Unlimited content generation', 'Enterprise analytics'],
+          priceMonthly: 49.0,
+          priceYearly: 490.0,
+          features: [
+            '10000 AI credits per month',
+            'Unlimited content generation',
+            'Enterprise analytics',
+          ],
           isActive: true,
           sortOrder: 3,
         },

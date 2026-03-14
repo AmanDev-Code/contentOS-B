@@ -33,8 +33,12 @@ export class GenerationService {
       const queue = new Queue(queueName, {
         connection: {
           host: this.configService.get<string>('redis.host') || 'localhost',
-          port: parseInt(this.configService.get<string>('redis.port') || '6380', 10),
-          password: this.configService.get<string>('redis.password') || undefined,
+          port: parseInt(
+            this.configService.get<string>('redis.port') || '6380',
+            10,
+          ),
+          password:
+            this.configService.get<string>('redis.password') || undefined,
         },
       });
       this.userQueues.set(userId, queue);
@@ -49,7 +53,9 @@ export class GenerationService {
     // Check quota and consume credits immediately (no more test user exception)
     const hasQuota = await this.quotaService.checkQuotaAvailable(userId, 1.5);
     if (!hasQuota) {
-      throw new BadRequestException('Insufficient credits. Content generation requires 1.5 credits. Please upgrade your plan.');
+      throw new BadRequestException(
+        'Insufficient credits. Content generation requires 1.5 credits. Please upgrade your plan.',
+      );
     }
 
     // IMMEDIATE CREDIT DEDUCTION for content generation
@@ -58,7 +64,7 @@ export class GenerationService {
       1.5,
       'Content generation initiated (1.5 credits)',
       'generation',
-      'text' // Default to text, will be updated based on actual content type
+      'text', // Default to text, will be updated based on actual content type
     );
 
     const job = await this.generationJobRepository.create(userId);
@@ -147,7 +153,7 @@ export class GenerationService {
 
     // Add back to user's queue
     const userQueue = this.getUserQueue(job.userId);
-    
+
     await userQueue.add(
       'generate-content',
       {
@@ -171,7 +177,12 @@ export class GenerationService {
   async checkAndSyncJobCompletion(
     jobId: string,
     userId: string,
-  ): Promise<{ synced: boolean; status: string; message: string; canRetry?: boolean }> {
+  ): Promise<{
+    synced: boolean;
+    status: string;
+    message: string;
+    canRetry?: boolean;
+  }> {
     // Get job from database
     const job = await this.generationJobRepository.findById(jobId);
     if (!job || job.userId !== userId) {
@@ -180,11 +191,20 @@ export class GenerationService {
 
     // If already completed, return
     if (job.status === JobStatus.READY) {
-      return { synced: false, status: job.status, message: 'Job already completed' };
+      return {
+        synced: false,
+        status: job.status,
+        message: 'Job already completed',
+      };
     }
-    
+
     if (job.status === JobStatus.FAILED) {
-      return { synced: false, status: job.status, message: 'Job already failed', canRetry: true };
+      return {
+        synced: false,
+        status: job.status,
+        message: 'Job already failed',
+        canRetry: true,
+      };
     }
 
     // Check if job exists in BullMQ queue
@@ -195,38 +215,42 @@ export class GenerationService {
       // Job not in queue - might be completed or removed
       // Check if there's any content generated for this job
       const content = await this.generatedContentRepository.findByJobId(jobId);
-      
+
       if (content && content.length > 0) {
         // Content exists! Update job to ready
         await this.generationJobRepository.updateWithContent(
           jobId,
           content[0].id,
           JobStatus.READY,
-          { message: 'Auto-synced from completed queue job' }
+          { message: 'Auto-synced from completed queue job' },
         );
-        
+
         // Consume quota credit for successful generation
         await this.quotaService.incrementUsage(userId);
-        
-        return { synced: true, status: 'ready', message: 'Job synced to ready with existing content' };
+
+        return {
+          synced: true,
+          status: 'ready',
+          message: 'Job synced to ready with existing content',
+        };
       }
 
       // Check if job has been stuck for too long (more than 2 minutes)
       const jobAge = Date.now() - new Date(job.createdAt).getTime();
       const TWO_MINUTES = 2 * 60 * 1000;
-      
+
       if (jobAge > TWO_MINUTES && job.status === JobStatus.GENERATING) {
         // Job is stuck - mark as failed
         await this.generationJobRepository.updateError(
           jobId,
           'Job timeout: n8n workflow did not complete within 2 minutes',
-          job.retryCount
+          job.retryCount,
         );
-        return { 
-          synced: true, 
-          status: 'failed', 
-          message: 'Job timed out - n8n workflow did not respond', 
-          canRetry: true 
+        return {
+          synced: true,
+          status: 'failed',
+          message: 'Job timed out - n8n workflow did not respond',
+          canRetry: true,
         };
       }
 
@@ -234,49 +258,53 @@ export class GenerationService {
       await this.generationJobRepository.updateError(
         jobId,
         'Job completed in queue but no content generated',
-        job.retryCount
+        job.retryCount,
       );
-      return { 
-        synced: true, 
-        status: 'failed', 
-        message: 'Job marked as failed - no content found', 
-        canRetry: true 
+      return {
+        synced: true,
+        status: 'failed',
+        message: 'Job marked as failed - no content found',
+        canRetry: true,
       };
     }
 
     // Job still in queue - check its state
     const state = await bullJob.getState();
-    
+
     if (state === 'completed') {
       // BullMQ says completed, but check if we have content
       const content = await this.generatedContentRepository.findByJobId(jobId);
-      
+
       if (content && content.length > 0) {
         // Content exists! Update job to ready
         await this.generationJobRepository.updateWithContent(
           jobId,
           content[0].id,
           JobStatus.READY,
-          { message: 'Auto-synced with content' }
+          { message: 'Auto-synced with content' },
         );
-        
+
         // Consume quota credit for successful generation
         await this.quotaService.incrementUsage(userId);
-        
-        return { synced: true, status: 'ready', message: 'Job synced to ready' };
+
+        return {
+          synced: true,
+          status: 'ready',
+          message: 'Job synced to ready',
+        };
       }
-      
+
       // Completed in queue but no content - n8n failed silently
       await this.generationJobRepository.updateError(
         jobId,
         'n8n workflow completed but did not generate content',
-        job.retryCount
+        job.retryCount,
       );
-      return { 
-        synced: true, 
-        status: 'failed', 
-        message: 'n8n workflow failed to generate content', 
-        canRetry: true 
+      return {
+        synced: true,
+        status: 'failed',
+        message: 'n8n workflow failed to generate content',
+        canRetry: true,
       };
     }
 
@@ -285,13 +313,13 @@ export class GenerationService {
       await this.generationJobRepository.updateError(
         jobId,
         failedReason,
-        job.retryCount
+        job.retryCount,
       );
-      return { 
-        synced: true, 
-        status: 'failed', 
-        message: `Job failed: ${failedReason}`, 
-        canRetry: true 
+      return {
+        synced: true,
+        status: 'failed',
+        message: `Job failed: ${failedReason}`,
+        canRetry: true,
       };
     }
 
@@ -305,13 +333,12 @@ export class GenerationService {
       throw new BadRequestException('User profile not found');
     }
 
-    const subscription =
-      await this.subscriptionRepository.findByUserId(userId);
+    const subscription = await this.subscriptionRepository.findByUserId(userId);
     if (!subscription || subscription.status !== SubscriptionStatus.ACTIVE) {
       throw new BadRequestException(ERROR_MESSAGES.INVALID_SUBSCRIPTION);
     }
 
-    const planLimits = PLAN_LIMITS[profile.plan as PlanType];
+    const planLimits = PLAN_LIMITS[profile.plan];
     if (!planLimits) {
       throw new BadRequestException('Invalid plan');
     }
