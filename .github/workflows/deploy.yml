@@ -19,6 +19,6 @@ jobs:
           script: |
             cd /home/workatkatana/postra-stack/contentos-backend
             git pull origin main
-            cd ..
+            cd /home/workatkatana/postra-stack
             docker compose build contentos-backend
             docker compose up -d contentos-backend
