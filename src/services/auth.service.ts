@@ -109,17 +109,12 @@ export class AuthService {
     try {
       this.logger.log(`Handling password reset request for: ${email}`);
 
-      // Generate reset token
-      const resetToken = this.generateToken();
-
-      // Get user by email
-      const { data: user } = await this.supabaseService
+      const { data } = await this.supabaseService
         .getServiceClient()
-        .from('profiles')
-        .select('id')
-        .eq('email', email)
-        .single();
+        .auth.admin.listUsers({ page: 1, perPage: 1000 });
 
+      const users = data?.users ?? [];
+      const user = users.find((u: { email?: string }) => u.email === email);
       if (!user) {
         this.logger.warn(
           `Password reset requested for non-existent email: ${email}`,
@@ -127,7 +122,8 @@ export class AuthService {
         return false;
       }
 
-      // Store reset token
+      const resetToken = this.generateToken();
+
       await this.supabaseService
         .getServiceClient()
         .from('user_verification_tokens')
@@ -135,17 +131,90 @@ export class AuthService {
           user_id: user.id,
           token: resetToken,
           type: 'password_reset',
-          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         });
 
-      // Send password reset email
       await this.emailService.sendPasswordResetEmail(email, resetToken);
-
       return true;
     } catch (error) {
       this.logger.error(
         `Error handling password reset request: ${error.message}`,
       );
+      return false;
+    }
+  }
+
+  /**
+   * Reset password using token
+   */
+  async resetPasswordWithToken(
+    token: string,
+    newPassword: string,
+  ): Promise<boolean> {
+    try {
+      const { data: row } = await this.supabaseService
+        .getServiceClient()
+        .from('user_verification_tokens')
+        .select('user_id, expires_at')
+        .eq('token', token)
+        .eq('type', 'password_reset')
+        .is('used_at', null)
+        .single();
+
+      if (!row || new Date(row.expires_at) < new Date()) {
+        return false;
+      }
+
+      await this.supabaseService
+        .getServiceClient()
+        .auth.admin.updateUserById(row.user_id, { password: newPassword });
+
+      await this.supabaseService
+        .getServiceClient()
+        .from('user_verification_tokens')
+        .update({ used_at: new Date().toISOString() })
+        .eq('token', token);
+
+      return true;
+    } catch (error) {
+      this.logger.error(`Error resetting password: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Verify email token and confirm user
+   */
+  async verifyEmailToken(token: string): Promise<boolean> {
+    try {
+      const { data: row } = await this.supabaseService
+        .getServiceClient()
+        .from('user_verification_tokens')
+        .select('user_id, expires_at')
+        .eq('token', token)
+        .eq('type', 'email_verification')
+        .is('used_at', null)
+        .single();
+
+      if (!row || new Date(row.expires_at) < new Date()) {
+        return false;
+      }
+
+      await this.supabaseService
+        .getServiceClient()
+        .auth.admin.updateUserById(row.user_id, {
+          email_confirm: true,
+        });
+
+      await this.supabaseService
+        .getServiceClient()
+        .from('user_verification_tokens')
+        .update({ used_at: new Date().toISOString() })
+        .eq('token', token);
+
+      return true;
+    } catch (error) {
+      this.logger.error(`Error verifying email: ${error.message}`);
       return false;
     }
   }
@@ -161,22 +230,17 @@ export class AuthService {
     try {
       this.logger.log(`Handling subscription upgrade for user: ${userId}`);
 
-      // Get user email
-      const { data: profile } = await this.supabaseService
+      const { data: { user } } = await this.supabaseService
         .getServiceClient()
-        .from('profiles')
-        .select('email')
-        .eq('id', userId)
-        .single();
+        .auth.admin.getUserById(userId);
 
-      if (!profile?.email) {
+      if (!user?.email) {
         this.logger.warn(`No email found for user: ${userId}`);
         return;
       }
 
-      // Send upgrade confirmation email
       await this.emailService.sendUpgradeConfirmationEmail(
-        profile.email,
+        user.email,
         planName,
         amount,
       );
@@ -212,22 +276,17 @@ export class AuthService {
         `Handling order completion for user: ${orderDetails.userId}`,
       );
 
-      // Get user email
-      const { data: profile } = await this.supabaseService
+      const { data: { user } } = await this.supabaseService
         .getServiceClient()
-        .from('profiles')
-        .select('email')
-        .eq('id', orderDetails.userId)
-        .single();
+        .auth.admin.getUserById(orderDetails.userId);
 
-      if (!profile?.email) {
+      if (!user?.email) {
         this.logger.warn(`No email found for user: ${orderDetails.userId}`);
         return;
       }
 
-      // Send order receipt email
       await this.emailService.sendOrderReceiptEmail(
-        profile.email,
+        user.email,
         orderDetails,
       );
 
@@ -256,23 +315,17 @@ export class AuthService {
         `Sending user invitation from ${inviterUserId} to ${email}`,
       );
 
-      // Get inviter details
-      const { data: inviter } = await this.supabaseService
+      const { data: { user: inviterUser } } = await this.supabaseService
         .getServiceClient()
-        .from('profiles')
-        .select('full_name, email')
-        .eq('id', inviterUserId)
-        .single();
+        .auth.admin.getUserById(inviterUserId);
 
-      if (!inviter) {
+      if (!inviterUser) {
         this.logger.warn(`Inviter not found: ${inviterUserId}`);
         return false;
       }
 
-      // Generate invitation token
       const inviteToken = this.generateToken();
 
-      // Store invitation
       await this.supabaseService
         .getServiceClient()
         .from('user_invitations')
@@ -282,11 +335,11 @@ export class AuthService {
           token: inviteToken,
           expires_at: new Date(
             Date.now() + 7 * 24 * 60 * 60 * 1000,
-          ).toISOString(), // 7 days
+          ).toISOString(),
         });
 
-      // Send invitation email
-      const inviterName = inviter.full_name || inviter.email.split('@')[0];
+      const inviterName =
+        inviterUser.user_metadata?.full_name || inviterUser.email?.split('@')[0] || 'Someone';
       await this.emailService.sendInvitationEmail(
         email,
         inviterName,

@@ -13,13 +13,17 @@ import { GetUser } from '../decorators/get-user.decorator';
 
 interface AuthWebhookPayload {
   type: string;
+  schema?: string;
+  table?: string;
   record: {
     id: string;
     email: string;
     email_confirmed_at?: string;
-    email_confirmed_at_old?: string;
     user_metadata?: any;
     raw_user_meta_data?: any;
+  };
+  old_record?: {
+    email_confirmed_at?: string;
   };
 }
 
@@ -63,8 +67,11 @@ export class AuthController {
           break;
 
         case 'UPDATE':
-          // Check if email was just confirmed
-          if (record.email_confirmed_at && !record.email_confirmed_at_old) {
+          // Check if email was just confirmed (Supabase sends old_record separately)
+          const wasJustConfirmed =
+            record.email_confirmed_at &&
+            !payload.old_record?.email_confirmed_at;
+          if (wasJustConfirmed) {
             await this.authService.handleEmailConfirmation({
               id: record.id,
               email: record.email,
@@ -138,7 +145,7 @@ export class AuthController {
   }
 
   /**
-   * Verify email token
+   * Verify email token (called when user clicks verification link)
    */
   @Get('verify-email')
   async verifyEmail(@Query('token') token: string) {
@@ -146,10 +153,11 @@ export class AuthController {
       if (!token) {
         return { success: false, message: 'Token is required' };
       }
-
-      // This would need to be implemented to verify the token
-      // For now, return a placeholder response
-      return { success: true, message: 'Email verified successfully' };
+      const success = await this.authService.verifyEmailToken(token);
+      if (success) {
+        return { success: true, message: 'Email verified successfully' };
+      }
+      return { success: false, message: 'Invalid or expired token' };
     } catch (error) {
       this.logger.error('Error verifying email:', (error as Error).message);
       return { success: false, message: 'Invalid or expired token' };
@@ -157,24 +165,39 @@ export class AuthController {
   }
 
   /**
-   * Verify password reset token
+   * Reset password with token (from our custom password reset email)
    */
-  @Get('verify-reset-token')
-  async verifyResetToken(@Query('token') token: string) {
+  @Post('reset-password')
+  async resetPassword(
+    @Body() body: { token: string; password: string },
+  ) {
     try {
-      if (!token) {
-        return { success: false, message: 'Token is required' };
+      if (!body.token || !body.password) {
+        return {
+          success: false,
+          message: 'Token and password are required',
+        };
       }
-
-      // This would need to be implemented to verify the token
-      // For now, return a placeholder response
-      return { success: true, message: 'Token is valid' };
+      const success = await this.authService.resetPasswordWithToken(
+        body.token,
+        body.password,
+      );
+      if (success) {
+        return { success: true, message: 'Password updated successfully' };
+      }
+      return {
+        success: false,
+        message: 'Invalid or expired token',
+      };
     } catch (error) {
       this.logger.error(
-        'Error verifying reset token:',
+        'Error resetting password:',
         (error as Error).message,
       );
-      return { success: false, message: 'Invalid or expired token' };
+      return {
+        success: false,
+        message: 'Failed to reset password',
+      };
     }
   }
 

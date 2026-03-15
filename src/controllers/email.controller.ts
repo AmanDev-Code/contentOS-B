@@ -28,7 +28,7 @@ interface WebhookPayload {
 
 interface TestEmailDto {
   to: string;
-  type: 'verification' | 'password-reset' | 'welcome' | 'upgrade';
+  type: 'verification' | 'password-reset' | 'welcome' | 'upgrade' | 'order-receipt' | 'invitation';
 }
 
 @Controller('email')
@@ -182,6 +182,22 @@ export class EmailController {
             body.to,
             'Pro Plan',
             29.99,
+          );
+          break;
+        case 'order-receipt':
+          result = await this.emailService.sendOrderReceiptEmail(body.to, {
+            orderId: 'ORD-TEST-12345',
+            planName: 'Pro Plan',
+            amount: 29.99,
+            credits: 1000,
+            date: new Date().toLocaleDateString(),
+          });
+          break;
+        case 'invitation':
+          result = await this.emailService.sendInvitationEmail(
+            body.to,
+            'Test Admin',
+            'test-invite-token-abc123',
           );
           break;
         default:

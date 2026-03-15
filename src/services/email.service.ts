@@ -1,6 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from './supabase.service';
+import {
+  getVerificationTemplate,
+  getPasswordResetTemplate,
+  getWelcomeTemplate,
+  getUpgradeTemplate,
+  getOrderReceiptTemplate,
+  getInvitationTemplate,
+} from '../templates/email';
 
 export interface EmailTemplate {
   id: string;
@@ -361,12 +369,12 @@ export class EmailService {
     email: string,
     verificationToken: string,
   ): Promise<boolean> {
-    const verificationUrl = `${this.configService.get('FRONTEND_URL')}/verify-email?token=${verificationToken}`;
+    const verificationUrl = `${this.configService.get('frontendUrl')}/verify-email?token=${verificationToken}`;
 
     const result = await this.sendEmail({
       to: email,
       subject: 'Welcome to Postra - Verify Your Email',
-      html_body: this.getVerificationEmailTemplate(verificationUrl),
+      html_body: getVerificationTemplate(verificationUrl),
       text_body: `Welcome to Postra! Please verify your email by visiting: ${verificationUrl}`,
       template_id: 'verification',
     });
@@ -381,12 +389,12 @@ export class EmailService {
     email: string,
     resetToken: string,
   ): Promise<boolean> {
-    const resetUrl = `${this.configService.get('FRONTEND_URL')}/reset-password?token=${resetToken}`;
+    const resetUrl = `${this.configService.get('frontendUrl')}/reset-password?token=${resetToken}`;
 
     const result = await this.sendEmail({
       to: email,
       subject: 'Reset Your Postra Password',
-      html_body: this.getPasswordResetEmailTemplate(resetUrl),
+      html_body: getPasswordResetTemplate(resetUrl),
       text_body: `Reset your password by visiting: ${resetUrl}`,
       template_id: 'password-reset',
     });
@@ -405,7 +413,7 @@ export class EmailService {
     const result = await this.sendEmail({
       to: email,
       subject: `Welcome to Postra ${planName}!`,
-      html_body: this.getUpgradeConfirmationTemplate(planName, amount),
+      html_body: getUpgradeTemplate(planName, amount),
       text_body: `Your account has been upgraded to ${planName} for $${amount}. Thank you for choosing Postra!`,
       template_id: 'upgrade',
     });
@@ -429,7 +437,7 @@ export class EmailService {
     const result = await this.sendEmail({
       to: email,
       subject: `Receipt for Your Postra ${orderDetails.planName} Purchase`,
-      html_body: this.getOrderReceiptTemplate(orderDetails),
+      html_body: getOrderReceiptTemplate(orderDetails),
       text_body: `Receipt: Order ${orderDetails.orderId} - ${orderDetails.planName} - $${orderDetails.amount}`,
       template_id: 'order-receipt',
     });
@@ -441,10 +449,11 @@ export class EmailService {
    * Send welcome email for new users
    */
   async sendWelcomeEmail(email: string, userName: string): Promise<boolean> {
+    const frontendUrl = this.configService.get('frontendUrl') || 'http://localhost:5173';
     const result = await this.sendEmail({
       to: email,
       subject: 'Welcome to Postra - Your AI Content Journey Begins!',
-      html_body: this.getWelcomeEmailTemplate(userName),
+      html_body: getWelcomeTemplate(userName, `${frontendUrl}/dashboard`),
       text_body: `Welcome to Postra, ${userName}! Start creating amazing content with AI.`,
       template_id: 'welcome',
     });
@@ -460,467 +469,16 @@ export class EmailService {
     inviterName: string,
     inviteToken: string,
   ): Promise<boolean> {
-    const inviteUrl = `${this.configService.get('FRONTEND_URL')}/invite?token=${inviteToken}`;
+    const inviteUrl = `${this.configService.get('frontendUrl')}/invite?token=${inviteToken}`;
 
     const result = await this.sendEmail({
       to: email,
       subject: `${inviterName} invited you to join Postra`,
-      html_body: this.getInvitationEmailTemplate(inviterName, inviteUrl),
+      html_body: getInvitationTemplate(inviterName, inviteUrl),
       text_body: `${inviterName} invited you to join Postra. Accept invitation: ${inviteUrl}`,
       template_id: 'invitation',
     });
 
     return result.success;
-  }
-
-  // Email Template Methods
-
-  private getVerificationEmailTemplate(verificationUrl: string): string {
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify Your Email - Postra</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-        .container { max-width: 600px; margin: 0 auto; background-color: white; }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center; }
-        .logo { color: white; font-size: 28px; font-weight: bold; margin-bottom: 10px; }
-        .header-text { color: rgba(255,255,255,0.9); font-size: 16px; }
-        .content { padding: 40px 30px; }
-        .title { font-size: 24px; font-weight: 600; color: #1a202c; margin-bottom: 20px; }
-        .text { color: #4a5568; line-height: 1.6; margin-bottom: 30px; }
-        .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; padding: 15px 30px; border-radius: 8px; font-weight: 600; margin: 20px 0; }
-        .footer { background-color: #f7fafc; padding: 30px; text-align: center; color: #718096; font-size: 14px; }
-        .divider { height: 1px; background-color: #e2e8f0; margin: 30px 0; }
-        @media (max-width: 600px) {
-            .container { margin: 0 10px; }
-            .header, .content, .footer { padding: 20px; }
-            .title { font-size: 20px; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">🚀 Postra</div>
-            <div class="header-text">AI-Powered Content Creation Platform</div>
-        </div>
-        
-        <div class="content">
-            <h1 class="title">Welcome to Postra!</h1>
-            <p class="text">
-                Thank you for joining Postra, the ultimate AI-powered content creation platform. 
-                To get started and unlock all features, please verify your email address.
-            </p>
-            
-            <div style="text-align: center;">
-                <a href="${verificationUrl}" class="button">Verify Email Address</a>
-            </div>
-            
-            <div class="divider"></div>
-            
-            <p class="text" style="font-size: 14px;">
-                If the button doesn't work, copy and paste this link into your browser:<br>
-                <a href="${verificationUrl}" style="color: #667eea; word-break: break-all;">${verificationUrl}</a>
-            </p>
-            
-            <p class="text" style="font-size: 14px; color: #718096;">
-                This verification link will expire in 24 hours. If you didn't create an account with Postra, 
-                you can safely ignore this email.
-            </p>
-        </div>
-        
-        <div class="footer">
-            <p>© 2026 Postra. All rights reserved.</p>
-            <p>Need help? Contact us at <a href="mailto:support@postra.katana-ai.com" style="color: #667eea;">support@postra.katana-ai.com</a></p>
-        </div>
-    </div>
-</body>
-</html>`;
-  }
-
-  private getPasswordResetEmailTemplate(resetUrl: string): string {
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reset Your Password - Postra</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-        .container { max-width: 600px; margin: 0 auto; background-color: white; }
-        .header { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 40px 30px; text-align: center; }
-        .logo { color: white; font-size: 28px; font-weight: bold; margin-bottom: 10px; }
-        .header-text { color: rgba(255,255,255,0.9); font-size: 16px; }
-        .content { padding: 40px 30px; }
-        .title { font-size: 24px; font-weight: 600; color: #1a202c; margin-bottom: 20px; }
-        .text { color: #4a5568; line-height: 1.6; margin-bottom: 30px; }
-        .button { display: inline-block; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; text-decoration: none; padding: 15px 30px; border-radius: 8px; font-weight: 600; margin: 20px 0; }
-        .footer { background-color: #f7fafc; padding: 30px; text-align: center; color: #718096; font-size: 14px; }
-        .alert { background-color: #fed7d7; border: 1px solid #feb2b2; color: #c53030; padding: 15px; border-radius: 8px; margin: 20px 0; }
-        @media (max-width: 600px) {
-            .container { margin: 0 10px; }
-            .header, .content, .footer { padding: 20px; }
-            .title { font-size: 20px; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">🔐 Postra</div>
-            <div class="header-text">Password Reset Request</div>
-        </div>
-        
-        <div class="content">
-            <h1 class="title">Reset Your Password</h1>
-            <p class="text">
-                We received a request to reset your password for your Postra account. 
-                Click the button below to create a new password.
-            </p>
-            
-            <div style="text-align: center;">
-                <a href="${resetUrl}" class="button">Reset Password</a>
-            </div>
-            
-            <div class="alert">
-                <strong>⚠️ Security Notice:</strong> This link will expire in 1 hour for your security. 
-                If you didn't request this reset, please ignore this email.
-            </div>
-            
-            <p class="text" style="font-size: 14px;">
-                If the button doesn't work, copy and paste this link:<br>
-                <a href="${resetUrl}" style="color: #f5576c; word-break: break-all;">${resetUrl}</a>
-            </p>
-        </div>
-        
-        <div class="footer">
-            <p>© 2026 Postra. All rights reserved.</p>
-            <p>Need help? Contact us at <a href="mailto:support@postra.katana-ai.com" style="color: #f5576c;">support@postra.katana-ai.com</a></p>
-        </div>
-    </div>
-</body>
-</html>`;
-  }
-
-  private getUpgradeConfirmationTemplate(
-    planName: string,
-    amount: number,
-  ): string {
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Account Upgraded - Postra</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-        .container { max-width: 600px; margin: 0 auto; background-color: white; }
-        .header { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); padding: 40px 30px; text-align: center; }
-        .logo { color: white; font-size: 28px; font-weight: bold; margin-bottom: 10px; }
-        .header-text { color: rgba(255,255,255,0.9); font-size: 16px; }
-        .content { padding: 40px 30px; }
-        .title { font-size: 24px; font-weight: 600; color: #1a202c; margin-bottom: 20px; }
-        .text { color: #4a5568; line-height: 1.6; margin-bottom: 30px; }
-        .highlight { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; margin: 30px 0; }
-        .features { background-color: #f7fafc; padding: 20px; border-radius: 8px; margin: 30px 0; }
-        .feature { display: flex; align-items: center; margin: 10px 0; }
-        .feature-icon { color: #48bb78; margin-right: 10px; }
-        .footer { background-color: #f7fafc; padding: 30px; text-align: center; color: #718096; font-size: 14px; }
-        @media (max-width: 600px) {
-            .container { margin: 0 10px; }
-            .header, .content, .footer { padding: 20px; }
-            .title { font-size: 20px; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">🎉 Postra</div>
-            <div class="header-text">Account Successfully Upgraded</div>
-        </div>
-        
-        <div class="content">
-            <h1 class="title">Welcome to ${planName}!</h1>
-            <p class="text">
-                Congratulations! Your account has been successfully upgraded to <strong>${planName}</strong>. 
-                You now have access to premium features and increased limits.
-            </p>
-            
-            <div class="highlight">
-                <h3 style="margin: 0 0 10px 0; font-size: 18px;">Upgrade Summary</h3>
-                <p style="margin: 0; font-size: 16px;"><strong>${planName}</strong> - $${amount}</p>
-            </div>
-            
-            <div class="features">
-                <h4 style="margin: 0 0 15px 0; color: #2d3748;">What's New:</h4>
-                <div class="feature">
-                    <span class="feature-icon">✅</span>
-                    <span>Increased AI credit limits</span>
-                </div>
-                <div class="feature">
-                    <span class="feature-icon">✅</span>
-                    <span>Priority content generation</span>
-                </div>
-                <div class="feature">
-                    <span class="feature-icon">✅</span>
-                    <span>Advanced scheduling features</span>
-                </div>
-                <div class="feature">
-                    <span class="feature-icon">✅</span>
-                    <span>Premium support</span>
-                </div>
-            </div>
-            
-            <p class="text">
-                Ready to create amazing content? Log in to your dashboard and start exploring your new features.
-            </p>
-        </div>
-        
-        <div class="footer">
-            <p>© 2026 Postra. All rights reserved.</p>
-            <p>Questions? Contact us at <a href="mailto:support@postra.katana-ai.com" style="color: #4facfe;">support@postra.katana-ai.com</a></p>
-        </div>
-    </div>
-</body>
-</html>`;
-  }
-
-  private getOrderReceiptTemplate(orderDetails: {
-    orderId: string;
-    planName: string;
-    amount: number;
-    credits: number;
-    date: string;
-  }): string {
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Order Receipt - Postra</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-        .container { max-width: 600px; margin: 0 auto; background-color: white; }
-        .header { background-color: #2d3748; padding: 40px 30px; text-align: center; }
-        .logo { color: white; font-size: 28px; font-weight: bold; margin-bottom: 10px; }
-        .header-text { color: rgba(255,255,255,0.8); font-size: 16px; }
-        .content { padding: 40px 30px; }
-        .title { font-size: 24px; font-weight: 600; color: #1a202c; margin-bottom: 20px; }
-        .receipt { background-color: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 25px; margin: 30px 0; }
-        .receipt-row { display: flex; justify-content: between; padding: 10px 0; border-bottom: 1px solid #e2e8f0; }
-        .receipt-row:last-child { border-bottom: none; font-weight: 600; }
-        .receipt-label { color: #4a5568; }
-        .receipt-value { color: #1a202c; font-weight: 500; margin-left: auto; }
-        .footer { background-color: #f7fafc; padding: 30px; text-align: center; color: #718096; font-size: 14px; }
-        @media (max-width: 600px) {
-            .container { margin: 0 10px; }
-            .header, .content, .footer { padding: 20px; }
-            .title { font-size: 20px; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">🧾 Postra</div>
-            <div class="header-text">Order Receipt</div>
-        </div>
-        
-        <div class="content">
-            <h1 class="title">Thank You for Your Purchase!</h1>
-            <p class="text">
-                Your payment has been processed successfully. Here are the details of your order:
-            </p>
-            
-            <div class="receipt">
-                <div class="receipt-row">
-                    <span class="receipt-label">Order ID:</span>
-                    <span class="receipt-value">${orderDetails.orderId}</span>
-                </div>
-                <div class="receipt-row">
-                    <span class="receipt-label">Plan:</span>
-                    <span class="receipt-value">${orderDetails.planName}</span>
-                </div>
-                <div class="receipt-row">
-                    <span class="receipt-label">Credits:</span>
-                    <span class="receipt-value">${orderDetails.credits.toLocaleString()}</span>
-                </div>
-                <div class="receipt-row">
-                    <span class="receipt-label">Date:</span>
-                    <span class="receipt-value">${orderDetails.date}</span>
-                </div>
-                <div class="receipt-row">
-                    <span class="receipt-label">Total:</span>
-                    <span class="receipt-value">$${orderDetails.amount}</span>
-                </div>
-            </div>
-            
-            <p class="text">
-                Your credits have been added to your account and are ready to use. 
-                Start creating amazing content with AI right away!
-            </p>
-        </div>
-        
-        <div class="footer">
-            <p>© 2026 Postra. All rights reserved.</p>
-            <p>Need support? Email us at <a href="mailto:support@postra.katana-ai.com" style="color: #2d3748;">support@postra.katana-ai.com</a></p>
-        </div>
-    </div>
-</body>
-</html>`;
-  }
-
-  private getWelcomeEmailTemplate(userName: string): string {
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to Postra</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-        .container { max-width: 600px; margin: 0 auto; background-color: white; }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center; }
-        .logo { color: white; font-size: 28px; font-weight: bold; margin-bottom: 10px; }
-        .header-text { color: rgba(255,255,255,0.9); font-size: 16px; }
-        .content { padding: 40px 30px; }
-        .title { font-size: 24px; font-weight: 600; color: #1a202c; margin-bottom: 20px; }
-        .text { color: #4a5568; line-height: 1.6; margin-bottom: 30px; }
-        .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; padding: 15px 30px; border-radius: 8px; font-weight: 600; margin: 20px 0; }
-        .steps { background-color: #f7fafc; padding: 25px; border-radius: 8px; margin: 30px 0; }
-        .step { margin: 15px 0; padding-left: 30px; position: relative; }
-        .step-number { position: absolute; left: 0; top: 0; background: #667eea; color: white; width: 20px; height: 20px; border-radius: 50%; text-align: center; font-size: 12px; line-height: 20px; font-weight: bold; }
-        .footer { background-color: #f7fafc; padding: 30px; text-align: center; color: #718096; font-size: 14px; }
-        @media (max-width: 600px) {
-            .container { margin: 0 10px; }
-            .header, .content, .footer { padding: 20px; }
-            .title { font-size: 20px; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">🎉 Postra</div>
-            <div class="header-text">Welcome to AI-Powered Content Creation</div>
-        </div>
-        
-        <div class="content">
-            <h1 class="title">Welcome, ${userName}!</h1>
-            <p class="text">
-                Thank you for joining Postra! You're now part of a community that's revolutionizing 
-                content creation with AI. Get ready to create engaging, viral content effortlessly.
-            </p>
-            
-            <div class="steps">
-                <h3 style="margin: 0 0 20px 0; color: #2d3748;">Getting Started:</h3>
-                <div class="step">
-                    <div class="step-number">1</div>
-                    <strong>Complete your profile</strong> - Add your LinkedIn account for seamless posting
-                </div>
-                <div class="step">
-                    <div class="step-number">2</div>
-                    <strong>Generate your first post</strong> - Use "Find Viral Topic" to get AI-generated content
-                </div>
-                <div class="step">
-                    <div class="step-number">3</div>
-                    <strong>Schedule or publish</strong> - Post immediately or schedule for optimal timing
-                </div>
-            </div>
-            
-            <div style="text-align: center;">
-                <a href="${this.configService.get('FRONTEND_URL')}/dashboard" class="button">Start Creating Content</a>
-            </div>
-            
-            <p class="text">
-                Need help getting started? Check out our <a href="#" style="color: #667eea;">quick start guide</a> 
-                or reach out to our support team.
-            </p>
-        </div>
-        
-        <div class="footer">
-            <p>© 2026 Postra. All rights reserved.</p>
-            <p>Follow us: <a href="#" style="color: #667eea;">LinkedIn</a> | <a href="#" style="color: #667eea;">Twitter</a></p>
-        </div>
-    </div>
-</body>
-</html>`;
-  }
-
-  private getInvitationEmailTemplate(
-    inviterName: string,
-    inviteUrl: string,
-  ): string {
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>You're Invited to Postra</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-        .container { max-width: 600px; margin: 0 auto; background-color: white; }
-        .header { background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); padding: 40px 30px; text-align: center; }
-        .logo { color: #2d3748; font-size: 28px; font-weight: bold; margin-bottom: 10px; }
-        .header-text { color: #4a5568; font-size: 16px; }
-        .content { padding: 40px 30px; }
-        .title { font-size: 24px; font-weight: 600; color: #1a202c; margin-bottom: 20px; }
-        .text { color: #4a5568; line-height: 1.6; margin-bottom: 30px; }
-        .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; padding: 15px 30px; border-radius: 8px; font-weight: 600; margin: 20px 0; }
-        .inviter { background-color: #edf2f7; padding: 20px; border-radius: 8px; margin: 30px 0; text-align: center; }
-        .footer { background-color: #f7fafc; padding: 30px; text-align: center; color: #718096; font-size: 14px; }
-        @media (max-width: 600px) {
-            .container { margin: 0 10px; }
-            .header, .content, .footer { padding: 20px; }
-            .title { font-size: 20px; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">📧 Postra</div>
-            <div class="header-text">You've Been Invited!</div>
-        </div>
-        
-        <div class="content">
-            <h1 class="title">Join Postra Today!</h1>
-            
-            <div class="inviter">
-                <p style="margin: 0; color: #2d3748;"><strong>${inviterName}</strong> has invited you to join Postra</p>
-            </div>
-            
-            <p class="text">
-                Postra is an AI-powered content creation platform that helps you generate viral, 
-                engaging content for LinkedIn and other social media platforms. Join thousands of 
-                creators who are already using AI to boost their content strategy.
-            </p>
-            
-            <div style="text-align: center;">
-                <a href="${inviteUrl}" class="button">Accept Invitation</a>
-            </div>
-            
-            <p class="text" style="font-size: 14px;">
-                This invitation will expire in 7 days. If you're not interested, you can safely ignore this email.
-            </p>
-        </div>
-        
-        <div class="footer">
-            <p>© 2026 Postra. All rights reserved.</p>
-            <p>Learn more at <a href="${this.configService.get('FRONTEND_URL')}" style="color: #667eea;">postra.katana-ai.com</a></p>
-        </div>
-    </div>
-</body>
-</html>`;
   }
 }
