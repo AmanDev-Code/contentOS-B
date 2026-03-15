@@ -13,7 +13,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { FastifyReply } from 'fastify';
 import {
   NotificationService,
   CreateNotificationDto,
@@ -153,9 +153,10 @@ export class NotificationController {
   })
   async streamNotifications(
     @Request() req: AuthenticatedRequest,
-    @Res() res: Response,
+    @Res() reply: FastifyReply,
   ) {
     const userId = req.user.id;
+    const res = reply.raw;
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -165,14 +166,10 @@ export class NotificationController {
       'Access-Control-Allow-Headers': 'Cache-Control',
     });
 
-    res.write(
-      `data: ${JSON.stringify({ type: 'connected' })}\n\n`,
-    );
+    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
 
-    // Register this connection for real-time pushes
     this.notificationService.addSSEClient(userId, res);
 
-    // Heartbeat every 30s to keep connection alive
     const heartbeat = setInterval(() => {
       try {
         res.write(`: heartbeat\n\n`);
@@ -181,10 +178,13 @@ export class NotificationController {
       }
     }, 30000);
 
-    (req as any).on('close', () => {
-      clearInterval(heartbeat);
-      this.notificationService.removeSSEClient(res);
-    });
+    const rawReq = (req as any).raw;
+    if (rawReq?.on) {
+      rawReq.on('close', () => {
+        clearInterval(heartbeat);
+        this.notificationService.removeSSEClient(res);
+      });
+    }
   }
 
   // Admin-only endpoints for broadcast notifications

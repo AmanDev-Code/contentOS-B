@@ -46,9 +46,9 @@ export interface Notification {
   updated_at: string;
 }
 
-import type { Response } from 'express';
+import type { ServerResponse } from 'http';
 
-type SSEClient = { userId: string; res: Response };
+type SSEClient = { userId: string; res: ServerResponse };
 
 @Injectable()
 export class NotificationService {
@@ -57,12 +57,12 @@ export class NotificationService {
 
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  addSSEClient(userId: string, res: Response): void {
+  addSSEClient(userId: string, res: ServerResponse): void {
     this.sseClients.push({ userId, res });
     this.logger.log(`SSE client connected: ${userId} (total: ${this.sseClients.length})`);
   }
 
-  removeSSEClient(res: Response): void {
+  removeSSEClient(res: ServerResponse): void {
     this.sseClients = this.sseClients.filter(c => c.res !== res);
     this.logger.log(`SSE client disconnected (total: ${this.sseClients.length})`);
   }
