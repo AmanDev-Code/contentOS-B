@@ -21,10 +21,19 @@ interface AuthWebhookPayload {
     email_confirmed_at?: string;
     user_metadata?: any;
     raw_user_meta_data?: any;
+    app_metadata?: any;
+    raw_app_meta_data?: any;
   };
   old_record?: {
     email_confirmed_at?: string;
   };
+}
+
+interface RegisterDto {
+  email: string;
+  password: string;
+  username?: string;
+  fullName?: string;
 }
 
 interface ForgotPasswordDto {
@@ -42,6 +51,42 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   /**
+   * Register a new user via Admin API (no Supabase email sent).
+   * Returns userId; frontend then signs in with signInWithPassword.
+   */
+  @Post('register')
+  async register(@Body() body: RegisterDto) {
+    try {
+      if (!body.email || !body.password) {
+        return { success: false, message: 'Email and password are required' };
+      }
+      if (body.password.length < 6) {
+        return {
+          success: false,
+          message: 'Password must be at least 6 characters',
+        };
+      }
+
+      const result = await this.authService.registerUser({
+        email: body.email,
+        password: body.password,
+        username: body.username,
+        fullName: body.fullName,
+      });
+
+      return { success: true, userId: result.userId };
+    } catch (error) {
+      const msg = (error as Error).message;
+      this.logger.error('Registration error:', msg);
+
+      if (msg.includes('already been registered') || msg.includes('duplicate')) {
+        return { success: false, message: 'An account with this email already exists' };
+      }
+      return { success: false, message: msg || 'Registration failed' };
+    }
+  }
+
+  /**
    * Handle Supabase auth webhooks
    * This endpoint receives webhooks from Supabase about user events
    */
@@ -57,27 +102,24 @@ export class AuthController {
 
       switch (type) {
         case 'INSERT':
-          // New user signup
           await this.authService.handleUserSignup({
             id: record.id,
             email: record.email,
             email_confirmed_at: record.email_confirmed_at,
             user_metadata: record.user_metadata || record.raw_user_meta_data,
+            app_metadata:
+              record.app_metadata || record.raw_app_meta_data || {},
           });
           break;
 
         case 'UPDATE':
-          // Check if email was just confirmed (Supabase sends old_record separately)
-          const wasJustConfirmed =
-            record.email_confirmed_at &&
-            !payload.old_record?.email_confirmed_at;
-          if (wasJustConfirmed) {
-            await this.authService.handleEmailConfirmation({
-              id: record.id,
-              email: record.email,
-              user_metadata: record.user_metadata || record.raw_user_meta_data,
-            });
-          }
+          // With "Confirm email: OFF", Supabase auto-sets email_confirmed_at
+          // on signup. We ignore this entirely — welcome email and "Email
+          // Verified" notification are sent only when the user completes
+          // our OTP verification (in verifyEmailToken).
+          this.logger.log(
+            `Ignoring UPDATE webhook for ${record.email} — verification handled via OTP`,
+          );
           break;
 
         default:
@@ -145,7 +187,63 @@ export class AuthController {
   }
 
   /**
-   * Verify email token (called when user clicks verification link)
+   * Send OTP for a newly signed-up user (called by frontend right after signUp)
+   */
+  @Post('send-otp')
+  @UseGuards(AuthGuard)
+  async sendOtp(@GetUser() user: { id: string }) {
+    try {
+      const success = await this.authService.resendVerificationOtp(user.id);
+      if (success) {
+        return { success: true, message: 'Verification code sent' };
+      }
+      return { success: false, message: 'Could not send verification code' };
+    } catch (error) {
+      this.logger.error('Error sending OTP:', (error as Error).message);
+      return { success: false, message: 'Could not send verification code' };
+    }
+  }
+
+  /**
+   * Verify email with OTP code
+   */
+  @Post('verify-otp')
+  async verifyOtp(@Body() body: { otp: string }) {
+    try {
+      if (!body.otp || body.otp.length !== 6) {
+        return { success: false, message: 'A 6-digit code is required' };
+      }
+      const success = await this.authService.verifyEmailToken(body.otp);
+      if (success) {
+        return { success: true, message: 'Email verified successfully' };
+      }
+      return { success: false, message: 'Invalid or expired code' };
+    } catch (error) {
+      this.logger.error('Error verifying OTP:', (error as Error).message);
+      return { success: false, message: 'Invalid or expired code' };
+    }
+  }
+
+  /**
+   * Resend OTP verification code
+   */
+  @Post('resend-otp')
+  @UseGuards(AuthGuard)
+  async resendOtp(@GetUser() user: { id: string }) {
+    try {
+      const success = await this.authService.resendVerificationOtp(user.id);
+      if (success) {
+        return { success: true, message: 'Verification code sent' };
+      }
+      return { success: false, message: 'Could not send verification code' };
+    } catch (error) {
+      this.logger.error('Error resending OTP:', (error as Error).message);
+      return { success: false, message: 'Could not send verification code' };
+    }
+  }
+
+  /**
+   * Verify email token (legacy link-based, kept for backward compat)
    */
   @Get('verify-email')
   async verifyEmail(@Query('token') token: string) {

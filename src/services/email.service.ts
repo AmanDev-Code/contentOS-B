@@ -363,19 +363,17 @@ export class EmailService {
   // Email Templates
 
   /**
-   * Send user verification email
+   * Send user verification email with OTP code
    */
   async sendVerificationEmail(
     email: string,
-    verificationToken: string,
+    otp: string,
   ): Promise<boolean> {
-    const verificationUrl = `${this.configService.get('frontendUrl')}/verify-email?token=${verificationToken}`;
-
     const result = await this.sendEmail({
       to: email,
-      subject: 'Welcome to Postra - Verify Your Email',
-      html_body: getVerificationTemplate(verificationUrl),
-      text_body: `Welcome to Postra! Please verify your email by visiting: ${verificationUrl}`,
+      subject: `${otp} is your Postra verification code`,
+      html_body: getVerificationTemplate(otp),
+      text_body: `Your Postra verification code is: ${otp}. This code expires in 10 minutes.`,
       template_id: 'verification',
     });
 
@@ -453,7 +451,7 @@ export class EmailService {
     const result = await this.sendEmail({
       to: email,
       subject: 'Welcome to Postra - Your AI Content Journey Begins!',
-      html_body: getWelcomeTemplate(userName, `${frontendUrl}/dashboard`),
+      html_body: getWelcomeTemplate(userName, frontendUrl),
       text_body: `Welcome to Postra, ${userName}! Start creating amazing content with AI.`,
       template_id: 'welcome',
     });

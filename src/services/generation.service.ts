@@ -240,12 +240,12 @@ export class GenerationService {
       const TWO_MINUTES = 2 * 60 * 1000;
 
       if (jobAge > TWO_MINUTES && job.status === JobStatus.GENERATING) {
-        // Job is stuck - mark as failed
         await this.generationJobRepository.updateError(
           jobId,
           'Job timeout: n8n workflow did not complete within 2 minutes',
           job.retryCount,
         );
+        await this.refundGenerationCredits(userId, jobId, 'timeout');
         return {
           synced: true,
           status: 'failed',
@@ -254,12 +254,12 @@ export class GenerationService {
         };
       }
 
-      // Job removed from queue but no content - likely failed
       await this.generationJobRepository.updateError(
         jobId,
         'Job completed in queue but no content generated',
         job.retryCount,
       );
+      await this.refundGenerationCredits(userId, jobId, 'no content generated');
       return {
         synced: true,
         status: 'failed',
@@ -300,6 +300,7 @@ export class GenerationService {
         'n8n workflow completed but did not generate content',
         job.retryCount,
       );
+      await this.refundGenerationCredits(userId, jobId, 'n8n silent failure');
       return {
         synced: true,
         status: 'failed',
@@ -315,6 +316,7 @@ export class GenerationService {
         failedReason,
         job.retryCount,
       );
+      await this.refundGenerationCredits(userId, jobId, failedReason);
       return {
         synced: true,
         status: 'failed',
@@ -325,6 +327,27 @@ export class GenerationService {
 
     // Job still processing
     return { synced: false, status: state, message: `Job still ${state}` };
+  }
+
+  private async refundGenerationCredits(
+    userId: string,
+    jobId: string,
+    reason: string,
+  ): Promise<void> {
+    try {
+      await this.quotaService.consumeCredits(
+        userId,
+        -1.5,
+        `Refund for failed generation job ${jobId} (${reason})`,
+        'refund',
+        'text',
+      );
+    } catch (error) {
+      // Log but don't throw — the job already failed, refund is best-effort
+      console.error(
+        `Failed to refund 1.5 credits for user ${userId}, job ${jobId}: ${error.message}`,
+      );
+    }
   }
 
   private async checkQuotaAndSubscription(userId: string): Promise<void> {

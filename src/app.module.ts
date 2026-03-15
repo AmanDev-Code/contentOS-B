@@ -22,6 +22,7 @@ import { AdminController } from './controllers/admin.controller';
 import { EmailController } from './controllers/email.controller';
 import { EmailWebhookController } from './controllers/email-webhook.controller';
 import { AuthController } from './controllers/auth.controller';
+import { ProfileController } from './controllers/profile.controller';
 
 import { SupabaseService } from './services/supabase.service';
 import { GenerationService } from './services/generation.service';
@@ -38,6 +39,7 @@ import { EmailService } from './services/email.service';
 import { AuthService } from './services/auth.service';
 
 import { ProfileRepository } from './repositories/profile.repository';
+import { OptionalAuthGuard } from './guards/optional-auth.guard';
 import { GenerationJobRepository } from './repositories/generation-job.repository';
 import { GeneratedContentRepository } from './repositories/generated-content.repository';
 import { SubscriptionRepository } from './repositories/subscription.repository';
@@ -94,6 +96,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     EmailController,
     EmailWebhookController,
     AuthController,
+    ProfileController,
   ],
   providers: [
     AppService,
@@ -114,6 +117,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     EmailService,
     AuthService,
     ProfileRepository,
+    OptionalAuthGuard,
     GenerationJobRepository,
     GeneratedContentRepository,
     SubscriptionRepository,

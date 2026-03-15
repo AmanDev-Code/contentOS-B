@@ -82,4 +82,41 @@ export class ProfileRepository {
 
     if (error) throw error;
   }
+
+  async isUsernameTaken(username: string, excludeUserId?: string): Promise<boolean> {
+    let query = this.supabaseService
+      .getServiceClient()
+      .from('profiles')
+      .select('id')
+      .eq('username', username.toLowerCase().trim())
+      .limit(1);
+
+    if (excludeUserId) {
+      query = query.neq('id', excludeUserId);
+    }
+
+    const { data } = await query;
+    return (data?.length ?? 0) > 0;
+  }
+
+  async updateProfile(
+    userId: string,
+    updates: { username?: string; full_name?: string; avatar_url?: string },
+  ): Promise<Profile> {
+    const payload: Record<string, unknown> = { updated_at: new Date() };
+    if (updates.username !== undefined) payload.username = updates.username?.trim() || null;
+    if (updates.full_name !== undefined) payload.full_name = updates.full_name?.trim() || null;
+    if (updates.avatar_url !== undefined) payload.avatar_url = updates.avatar_url?.trim() || null;
+
+    const { data, error } = await this.supabaseService
+      .getServiceClient()
+      .from('profiles')
+      .update(payload)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
 }

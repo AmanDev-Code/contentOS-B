@@ -16,64 +16,166 @@ export class AuthService {
   ) {}
 
   /**
-   * Handle user signup event
-   * This should be called when a user signs up (can be triggered by Supabase webhook)
+   * Register a new user via Admin API (bypasses Supabase built-in emails entirely).
+   * Creates the user, verification token, sends OTP, and creates notification.
+   */
+  async registerUser(data: {
+    email: string;
+    password: string;
+    username?: string;
+    fullName?: string;
+  }): Promise<{ userId: string }> {
+    const { email, password, username, fullName } = data;
+
+    const { data: newUser, error } = await this.supabaseService
+      .getServiceClient()
+      .auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          username: username || undefined,
+          full_name: fullName || undefined,
+        },
+      });
+
+    if (error) {
+      this.logger.error(`Admin createUser failed: ${error.message}`);
+      throw new Error(error.message);
+    }
+
+    const userId = newUser.user.id;
+
+    const otp = this.generateOtp();
+
+    await this.supabaseService
+      .getServiceClient()
+      .from('user_verification_tokens')
+      .delete()
+      .eq('user_id', userId)
+      .eq('type', 'email_verification');
+
+    await this.supabaseService
+      .getServiceClient()
+      .from('user_verification_tokens')
+      .insert({
+        user_id: userId,
+        token: otp,
+        type: 'email_verification',
+        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      });
+
+    // Fire email + notification in background so the response returns fast
+    this.emailService.sendVerificationEmail(email, otp).catch((err) => {
+      this.logger.error(`Background OTP email failed: ${err.message}`);
+    });
+
+    this.notificationService
+      .createNotification({
+        userId,
+        title: 'Verify your email',
+        message:
+          'Enter the 6-digit verification code to access your dashboard.',
+        type: 'info',
+        category: 'system',
+      })
+      .catch((err) => {
+        this.logger.error(`Background notification failed: ${err.message}`);
+      });
+
+    return { userId };
+  }
+
+  /**
+   * Handle user signup event (from Supabase webhook INSERT).
+   * For email signups registered via /auth/register, the token and OTP
+   * are already created — this handler skips duplicate work.
    */
   async handleUserSignup(userData: {
     id: string;
     email: string;
     email_confirmed_at?: string;
     user_metadata?: any;
+    app_metadata?: any;
   }): Promise<void> {
     try {
       this.logger.log(`Handling user signup for: ${userData.email}`);
 
-      // If email is not confirmed, send verification email
-      if (!userData.email_confirmed_at) {
-        // Generate verification token (you might want to use Supabase's built-in confirmation)
-        const verificationToken = this.generateToken();
+      const provider =
+        userData.app_metadata?.provider ||
+        userData.app_metadata?.providers?.[0];
 
-        // Store token in database for verification
+      if (provider === 'email') {
+        // Check if registerUser() already created a verification token
+        const { data: existingToken } = await this.supabaseService
+          .getServiceClient()
+          .from('user_verification_tokens')
+          .select('id')
+          .eq('user_id', userData.id)
+          .eq('type', 'email_verification')
+          .is('used_at', null)
+          .gt('expires_at', new Date().toISOString())
+          .maybeSingle();
+
+        if (existingToken) {
+          this.logger.log(
+            `Verification token already exists for ${userData.email} — skipping webhook duplicate`,
+          );
+          return;
+        }
+
+        const placeholder = this.generateOtp();
+
+        await this.supabaseService
+          .getServiceClient()
+          .from('user_verification_tokens')
+          .delete()
+          .eq('user_id', userData.id)
+          .eq('type', 'email_verification');
+
         await this.supabaseService
           .getServiceClient()
           .from('user_verification_tokens')
           .insert({
             user_id: userData.id,
-            token: verificationToken,
+            token: placeholder,
             type: 'email_verification',
             expires_at: new Date(
-              Date.now() + 24 * 60 * 60 * 1000,
-            ).toISOString(), // 24 hours
+              Date.now() + 10 * 60 * 1000,
+            ).toISOString(),
           });
 
-        // Send verification email
-        await this.emailService.sendVerificationEmail(
-          userData.email,
-          verificationToken,
-        );
+        await this.notificationService.createNotification({
+          userId: userData.id,
+          title: 'Verify your email',
+          message:
+            'Enter the 6-digit verification code to access your dashboard.',
+          type: 'info',
+          category: 'system',
+        });
       } else {
-        // Email is already confirmed, send welcome email
         const userName =
           userData.user_metadata?.full_name || userData.email.split('@')[0];
         await this.emailService.sendWelcomeEmail(userData.email, userName);
-      }
 
-      // Create welcome notification
-      await this.notificationService.createNotification({
-        userId: userData.id,
-        title: 'Welcome to Postra!',
-        message:
-          'Your account has been created successfully. Start creating amazing content with AI.',
-        type: 'success',
-        category: 'system',
-      });
+        await this.notificationService.createNotification({
+          userId: userData.id,
+          title: 'Welcome to Postra!',
+          message:
+            'Your account has been created successfully. Start creating amazing content with AI.',
+          type: 'success',
+          category: 'system',
+        });
+      }
     } catch (error) {
       this.logger.error(`Error handling user signup: ${error.message}`);
     }
   }
 
   /**
-   * Handle email confirmation event
+   * Handle email confirmation event (from Supabase webhook UPDATE)
+   * Only fires welcome/notification if user has completed our OTP verification
+   * (no pending verification tokens remain).
    */
   async handleEmailConfirmation(userData: {
     id: string;
@@ -83,12 +185,27 @@ export class AuthService {
     try {
       this.logger.log(`Handling email confirmation for: ${userData.email}`);
 
-      // Send welcome email
+      const { data: pendingToken } = await this.supabaseService
+        .getServiceClient()
+        .from('user_verification_tokens')
+        .select('id')
+        .eq('user_id', userData.id)
+        .eq('type', 'email_verification')
+        .is('used_at', null)
+        .gt('expires_at', new Date().toISOString())
+        .maybeSingle();
+
+      if (pendingToken) {
+        this.logger.log(
+          `Skipping email-confirmed notification for ${userData.email} — OTP verification still pending`,
+        );
+        return;
+      }
+
       const userName =
         userData.user_metadata?.full_name || userData.email.split('@')[0];
       await this.emailService.sendWelcomeEmail(userData.email, userName);
 
-      // Create notification
       await this.notificationService.createNotification({
         userId: userData.id,
         title: 'Email Verified!',
@@ -183,7 +300,7 @@ export class AuthService {
   }
 
   /**
-   * Verify email token and confirm user
+   * Verify email with OTP code
    */
   async verifyEmailToken(token: string): Promise<boolean> {
     try {
@@ -191,7 +308,7 @@ export class AuthService {
         .getServiceClient()
         .from('user_verification_tokens')
         .select('user_id, expires_at')
-        .eq('token', token)
+        .eq('token', token.trim())
         .eq('type', 'email_verification')
         .is('used_at', null)
         .single();
@@ -202,19 +319,77 @@ export class AuthService {
 
       await this.supabaseService
         .getServiceClient()
-        .auth.admin.updateUserById(row.user_id, {
-          email_confirm: true,
-        });
-
-      await this.supabaseService
-        .getServiceClient()
         .from('user_verification_tokens')
         .update({ used_at: new Date().toISOString() })
-        .eq('token', token);
+        .eq('token', token.trim());
+
+      const {
+        data: { user },
+      } = await this.supabaseService
+        .getServiceClient()
+        .auth.admin.getUserById(row.user_id);
+
+      if (user?.email) {
+        const userName =
+          user.user_metadata?.full_name || user.email.split('@')[0];
+        await this.emailService.sendWelcomeEmail(user.email, userName);
+
+        await this.notificationService.createNotification({
+          userId: row.user_id,
+          title: 'Email Verified!',
+          message:
+            'Your email has been verified successfully. You can now access all features.',
+          type: 'success',
+          category: 'system',
+        });
+      }
 
       return true;
     } catch (error) {
       this.logger.error(`Error verifying email: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Resend OTP verification code
+   */
+  async resendVerificationOtp(userId: string): Promise<boolean> {
+    try {
+      const {
+        data: { user },
+      } = await this.supabaseService
+        .getServiceClient()
+        .auth.admin.getUserById(userId);
+
+      if (!user?.email) return false;
+
+      await this.supabaseService
+        .getServiceClient()
+        .from('user_verification_tokens')
+        .delete()
+        .eq('user_id', userId)
+        .eq('type', 'email_verification');
+
+      const otp = this.generateOtp();
+
+      await this.supabaseService
+        .getServiceClient()
+        .from('user_verification_tokens')
+        .insert({
+          user_id: userId,
+          token: otp,
+          type: 'email_verification',
+          expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        });
+
+      this.emailService.sendVerificationEmail(user.email, otp).catch((err) => {
+        this.logger.error(`Background resend OTP email failed: ${err.message}`);
+      });
+
+      return true;
+    } catch (error) {
+      this.logger.error(`Error resending OTP: ${error.message}`);
       return false;
     }
   }
@@ -358,5 +533,12 @@ export class AuthService {
    */
   private generateToken(): string {
     return require('crypto').randomBytes(32).toString('hex');
+  }
+
+  /**
+   * Generate a 6-digit OTP code
+   */
+  private generateOtp(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
   }
 }
