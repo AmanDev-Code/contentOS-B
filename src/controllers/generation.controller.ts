@@ -114,7 +114,7 @@ export class GenerationController {
   @ApiOperation({ summary: 'Clear all cache for current user' })
   async clearUserCache(@Request() req) {
     const userId = req.user?.id || 'c9327732-05cd-41dc-9d4f-e0c17b7fbea3';
-    const count = this.cacheService.invalidateUser(userId);
+    const count = await this.cacheService.invalidateUser(userId);
     return { message: 'User cache cleared successfully', deletedCount: count };
   }
 

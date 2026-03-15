@@ -22,8 +22,8 @@ export class CacheController {
   @Get(':key')
   @ApiOperation({ summary: 'Get cached data by key' })
   @ApiParam({ name: 'key', description: 'Cache key' })
-  getCachedData(@Param('key') key: string) {
-    const data = this.cacheService.get(key);
+  async getCachedData(@Param('key') key: string) {
+    const data = await this.cacheService.get(key);
 
     if (data === null) {
       return { success: false, message: 'Cache miss' };
@@ -46,10 +46,10 @@ export class CacheController {
     },
   })
   @HttpCode(HttpStatus.OK)
-  setCachedData(@Body() body: { key: string; data: any; ttl?: number }) {
+  async setCachedData(@Body() body: { key: string; data: any; ttl?: number }) {
     const { key, data, ttl = 3600 } = body;
 
-    this.cacheService.set(key, data, ttl);
+    await this.cacheService.set(key, data, ttl);
 
     return { success: true, message: 'Data cached successfully' };
   }
@@ -58,8 +58,8 @@ export class CacheController {
   @ApiOperation({ summary: 'Delete cached data by key' })
   @ApiParam({ name: 'key', description: 'Cache key' })
   @HttpCode(HttpStatus.OK)
-  deleteCachedData(@Param('key') key: string) {
-    const deleted = this.cacheService.delete(key);
+  async deleteCachedData(@Param('key') key: string) {
+    const deleted = await this.cacheService.delete(key);
 
     return {
       success: deleted,
@@ -71,8 +71,8 @@ export class CacheController {
   @ApiOperation({ summary: 'Invalidate all cache for a user' })
   @ApiParam({ name: 'userId', description: 'User ID' })
   @HttpCode(HttpStatus.OK)
-  invalidateUserCache(@Param('userId') userId: string) {
-    const deletedCount = this.cacheService.invalidateUser(userId);
+  async invalidateUserCache(@Param('userId') userId: string) {
+    const deletedCount = await this.cacheService.invalidateUser(userId);
 
     return {
       success: true,
@@ -90,8 +90,8 @@ export class CacheController {
   @Delete('clear/all')
   @ApiOperation({ summary: 'Clear all cache (for testing)' })
   @HttpCode(HttpStatus.OK)
-  clearAllCache() {
-    this.cacheService.clear();
+  async clearAllCache() {
+    await this.cacheService.clear();
     return { success: true, message: 'All cache cleared' };
   }
 }

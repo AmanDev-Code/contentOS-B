@@ -46,11 +46,50 @@ export interface Notification {
   updated_at: string;
 }
 
+import type { Response } from 'express';
+
+type SSEClient = { userId: string; res: Response };
+
 @Injectable()
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
+  private sseClients: SSEClient[] = [];
 
   constructor(private readonly supabaseService: SupabaseService) {}
+
+  addSSEClient(userId: string, res: Response): void {
+    this.sseClients.push({ userId, res });
+    this.logger.log(`SSE client connected: ${userId} (total: ${this.sseClients.length})`);
+  }
+
+  removeSSEClient(res: Response): void {
+    this.sseClients = this.sseClients.filter(c => c.res !== res);
+    this.logger.log(`SSE client disconnected (total: ${this.sseClients.length})`);
+  }
+
+  private pushToUser(userId: string, event: string, data: any): void {
+    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const client of this.sseClients) {
+      if (client.userId === userId) {
+        try {
+          client.res.write(payload);
+        } catch {
+          // client gone, will be cleaned up on disconnect
+        }
+      }
+    }
+  }
+
+  private pushToAll(event: string, data: any): void {
+    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const client of this.sseClients) {
+      try {
+        client.res.write(payload);
+      } catch {
+        // client gone, will be cleaned up on disconnect
+      }
+    }
+  }
 
   /**
    * Create a new notification
@@ -84,6 +123,14 @@ export class NotificationService {
       this.logger.log(
         `Created notification: ${dto.title} for user: ${dto.userId || 'broadcast'}`,
       );
+
+      // Push real-time via SSE
+      if (dto.userId) {
+        this.pushToUser(dto.userId, 'notification', data);
+      } else if (dto.isBroadcast) {
+        this.pushToAll('notification', data);
+      }
+
       return data;
     } catch (error) {
       this.logger.error('Error creating notification:', error.message);

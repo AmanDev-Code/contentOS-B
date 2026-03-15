@@ -12,10 +12,12 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '../guards/auth.guard';
 import { PostSchedulingService } from '../services/post-scheduling.service';
 import { QuotaService } from '../services/quota.service';
 import { NotificationService } from '../services/notification.service';
+import { CacheService } from '../services/cache.service';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -32,6 +34,7 @@ export class PostsController {
     private readonly postSchedulingService: PostSchedulingService,
     private readonly quotaService: QuotaService,
     private readonly notificationService: NotificationService,
+    private readonly cacheService: CacheService,
   ) {}
 
   @Post('publish')
@@ -185,6 +188,9 @@ export class PostsController {
           .single();
 
         const contentTitle = contentData.data?.title || 'Your post';
+
+        // Invalidate cache
+        await this.cacheService.invalidateUser(userId);
 
         // SEND SUCCESS NOTIFICATION
         await this.notificationService.notifyPostPublished(
@@ -374,21 +380,8 @@ export class PostsController {
           .eq('user_id', userId);
       }
 
-      // Update status to 'scheduled'
-      await this.postSchedulingService['supabaseService']
-        .getServiceClient()
-        .from('generated_content')
-        .update({
-          publish_status: 'scheduled',
-          scheduled_for: scheduledDate.toISOString(),
-          is_scheduled: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', contentId)
-        .eq('user_id', userId);
-
       try {
-        // Schedule post
+        // Schedule post (service handles cancelling old entries)
         const jobId = await this.postSchedulingService.schedulePost({
           contentId,
           userId,
@@ -416,6 +409,9 @@ export class PostsController {
           .single();
 
         const contentTitle = contentData.data?.title || 'Your post';
+
+        // Invalidate scheduled posts cache
+        await this.cacheService.invalidateUser(userId);
 
         // SEND SCHEDULING SUCCESS NOTIFICATION
         await this.notificationService.notifyPostScheduled(
@@ -514,88 +510,6 @@ export class PostsController {
     }
   }
 
-  @Get('scheduled')
-  async getScheduledPosts(
-    @Request() req: AuthenticatedRequest,
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-  ) {
-    try {
-      const userId = req.user.id;
-      const pageNum = parseInt(page, 10);
-      const limitNum = parseInt(limit, 10);
-
-      const result = await this.postSchedulingService.getScheduledPosts(
-        userId,
-        pageNum,
-        limitNum,
-      );
-
-      return {
-        success: true,
-        ...result,
-      };
-    } catch (error) {
-      this.logger.error('Failed to get scheduled posts:', error.message);
-      throw new HttpException(
-        error.message || 'Failed to get scheduled posts',
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Get('published')
-  async getPublishedPosts(
-    @Request() req: AuthenticatedRequest,
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-  ) {
-    try {
-      const userId = req.user.id;
-      const pageNum = parseInt(page, 10);
-      const limitNum = parseInt(limit, 10);
-
-      const result = await this.postSchedulingService.getPublishedPosts(
-        userId,
-        pageNum,
-        limitNum,
-      );
-
-      return {
-        success: true,
-        ...result,
-      };
-    } catch (error) {
-      this.logger.error('Failed to get published posts:', error.message);
-      throw new HttpException(
-        error.message || 'Failed to get published posts',
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Delete('scheduled/:jobId')
-  async cancelScheduledPost(
-    @Request() req: AuthenticatedRequest,
-    @Param('jobId') jobId: string,
-  ) {
-    try {
-      const userId = req.user.id;
-
-      await this.postSchedulingService.cancelScheduledPost(jobId, userId);
-
-      return {
-        success: true,
-        message: 'Scheduled post cancelled successfully',
-      };
-    } catch (error) {
-      this.logger.error('Failed to cancel scheduled post:', error.message);
-      throw new HttpException(
-        error.message || 'Failed to cancel scheduled post',
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
 
   @Get('calendar')
   async getCalendarPosts(
@@ -779,6 +693,206 @@ export class PostsController {
       this.logger.error('Failed to get post analytics:', error.message);
       throw new HttpException(
         error.message || 'Failed to get post analytics',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('scheduled')
+  @ApiOperation({ summary: 'Get scheduled posts with pagination' })
+  async getScheduledPosts(
+    @Request() req: AuthenticatedRequest,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '20',
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    const userId = req.user.id;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 20));
+    const offset = (pageNum - 1) * limitNum;
+
+    try {
+      // Check cache
+      const cacheKey = `user:${userId}:scheduled:${pageNum}:${limitNum}:${status || 'all'}:${search || ''}`;
+      const cached = await this.cacheService.get(cacheKey);
+      if (cached) return cached;
+
+      let query = this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('scheduled_posts')
+        .select(`
+          *,
+          generated_content (
+            id,
+            title,
+            content,
+            hashtags,
+            visual_url,
+            ai_score
+          )
+        `)
+        .eq('user_id', userId)
+        .order('scheduled_for', { ascending: true });
+
+      // Apply status filter
+      if (status && status !== 'all') {
+        query = query.eq('status', status);
+      }
+
+      // Get total count
+      const countQuery = this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('scheduled_posts')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId);
+        
+      if (search) {
+        countQuery.or(`generated_content.title.ilike.%${search}%,generated_content.content.ilike.%${search}%`);
+      }
+      
+      if (status) {
+        countQuery.eq('status', status);
+      }
+      
+      const { count } = await countQuery;
+
+      // Get paginated data
+      const { data, error } = await query.range(offset, offset + limitNum - 1);
+
+      if (error) {
+        throw new Error(`Failed to fetch scheduled posts: ${error.message}`);
+      }
+
+      const totalPages = Math.ceil((count || 0) / limitNum);
+
+      const result = {
+        data: data || [],
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: count || 0,
+          totalPages,
+          hasMore: pageNum < totalPages,
+          hasPrev: pageNum > 1,
+        },
+      };
+
+      // Cache for 60s
+      await this.cacheService.set(cacheKey, result, 60);
+
+      return result;
+    } catch (error) {
+      this.logger.error('Failed to fetch scheduled posts:', error.message);
+      throw new HttpException(
+        'Failed to fetch scheduled posts',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('scheduled/:id/cancel')
+  @ApiOperation({ summary: 'Cancel a scheduled post' })
+  async cancelScheduledPost(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') postId: string,
+  ) {
+    const userId = req.user.id;
+
+    try {
+      // Verify ownership
+      const { data: scheduledPost, error: fetchError } = await this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('scheduled_posts')
+        .select('*')
+        .eq('id', postId)
+        .eq('user_id', userId)
+        .single();
+
+      if (fetchError || !scheduledPost) {
+        throw new HttpException('Scheduled post not found', HttpStatus.NOT_FOUND);
+      }
+
+      if (scheduledPost.status !== 'scheduled') {
+        throw new HttpException('Post cannot be cancelled', HttpStatus.BAD_REQUEST);
+      }
+
+      // Update status to cancelled
+      const { error: updateError } = await this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('scheduled_posts')
+        .update({ 
+          status: 'cancelled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', postId);
+
+      if (updateError) {
+        throw new Error(`Failed to cancel post: ${updateError.message}`);
+      }
+
+      await this.cacheService.invalidateUser(userId);
+
+      return {
+        success: true,
+        message: 'Post cancelled successfully',
+      };
+    } catch (error) {
+      this.logger.error('Failed to cancel scheduled post:', error.message);
+      throw new HttpException(
+        error.message || 'Failed to cancel scheduled post',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Delete('scheduled/:id')
+  @ApiOperation({ summary: 'Delete a scheduled post' })
+  async deleteScheduledPost(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') postId: string,
+  ) {
+    const userId = req.user.id;
+
+    try {
+      // Verify ownership and status
+      const { data: scheduledPost, error: fetchError } = await this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('scheduled_posts')
+        .select('*')
+        .eq('id', postId)
+        .eq('user_id', userId)
+        .single();
+
+      if (fetchError || !scheduledPost) {
+        throw new HttpException('Scheduled post not found', HttpStatus.NOT_FOUND);
+      }
+
+      if (scheduledPost.status === 'scheduled' || scheduledPost.status === 'processing') {
+        throw new HttpException('Cannot delete active scheduled post. Cancel it first.', HttpStatus.BAD_REQUEST);
+      }
+
+      // Delete the scheduled post
+      const { error: deleteError } = await this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('scheduled_posts')
+        .delete()
+        .eq('id', postId);
+
+      if (deleteError) {
+        throw new Error(`Failed to delete post: ${deleteError.message}`);
+      }
+
+      await this.cacheService.invalidateUser(userId);
+
+      return {
+        success: true,
+        message: 'Post deleted successfully',
+      };
+    } catch (error) {
+      this.logger.error('Failed to delete scheduled post:', error.message);
+      throw new HttpException(
+        error.message || 'Failed to delete scheduled post',
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

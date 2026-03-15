@@ -157,7 +157,6 @@ export class NotificationController {
   ) {
     const userId = req.user.id;
 
-    // Set SSE headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -166,26 +165,26 @@ export class NotificationController {
       'Access-Control-Allow-Headers': 'Cache-Control',
     });
 
-    // Send initial connection message
     res.write(
-      `data: ${JSON.stringify({ type: 'connected', message: 'Connected to notifications stream' })}\n\n`,
+      `data: ${JSON.stringify({ type: 'connected' })}\n\n`,
     );
 
-    // Keep connection alive with heartbeat
-    const heartbeat = setInterval(() => {
-      res.write(
-        `data: ${JSON.stringify({ type: 'heartbeat', timestamp: Date.now() })}\n\n`,
-      );
-    }, 30000); // 30 seconds
+    // Register this connection for real-time pushes
+    this.notificationService.addSSEClient(userId, res);
 
-    // Handle client disconnect
+    // Heartbeat every 30s to keep connection alive
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`: heartbeat\n\n`);
+      } catch {
+        clearInterval(heartbeat);
+      }
+    }, 30000);
+
     (req as any).on('close', () => {
       clearInterval(heartbeat);
+      this.notificationService.removeSSEClient(res);
     });
-
-    // In a real implementation, you would listen for new notifications
-    // and send them to the client. For now, this establishes the connection.
-    // You could integrate with a message queue or database triggers.
   }
 
   // Admin-only endpoints for broadcast notifications
