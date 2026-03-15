@@ -168,7 +168,7 @@ export class NotificationService {
         return { notifications: [], total: 0 };
       }
 
-      // Get broadcast notifications (not read by this user)
+      // Get ALL broadcast notifications (keep read ones, just mark read: true)
       const { data: broadcastNotifications, error: broadcastError } =
         await this.supabaseService
           .getServiceClient()
@@ -190,19 +190,20 @@ export class NotificationService {
         );
       }
 
-      // Filter broadcast notifications that haven't been read by this user
-      const unreadBroadcast =
-        broadcastNotifications?.filter(
-          (notification) =>
-            !notification.notification_reads?.some(
-              (read: any) => read.user_id === userId,
-            ),
-        ) || [];
+      // Include ALL broadcasts; add read: true/false based on notification_reads
+      const allBroadcasts = (broadcastNotifications || []).map((n: any) => {
+        const reads = n.notification_reads;
+        const read = Array.isArray(reads)
+          ? reads.some((r: any) => r?.user_id === userId)
+          : reads?.user_id === userId;
+        const { notification_reads, ...rest } = n;
+        return { ...rest, read: !!read };
+      });
 
-      // Combine and sort all notifications
+      // Combine and sort all notifications (read and unread)
       const allNotifications = [
         ...(personalNotifications || []),
-        ...unreadBroadcast,
+        ...allBroadcasts,
       ]
         .sort(
           (a, b) =>
