@@ -17,13 +17,20 @@ async function bootstrap() {
     { rawBody: true },
   );
 
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const corsOriginsFromEnv = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+
   app.enableCors({
     origin: (origin, callback) => {
       // Allow same-origin/non-browser requests
       if (!origin) return callback(null, true);
 
       const exactAllowed = new Set([
-        process.env.FRONTEND_URL || 'http://localhost:5173',
+        frontendUrl,
+        ...corsOriginsFromEnv,
         'http://localhost:8080',
         'http://localhost:3000',
         'http://localhost:5173',
