@@ -17,8 +17,8 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            cd /home/workatkatana/postra-stack/contentos-backend
+            cd /home/workatkatana/trndinn-stack/contentos-backend
             git pull origin main
-            cd /home/workatkatana/postra-stack
+            cd /home/workatkatana/trndinn-stack
             docker compose build contentos-backend
             docker compose up -d contentos-backend

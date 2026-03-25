@@ -160,7 +160,7 @@ export class AuthService {
 
         await this.notificationService.createNotification({
           userId: userData.id,
-          title: 'Welcome to Postra!',
+          title: 'Welcome to Trndinn!',
           message:
             'Your account has been created successfully. Start creating amazing content with AI.',
           type: 'success',

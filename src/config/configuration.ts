@@ -42,4 +42,26 @@ export default () => ({
     secret: process.env.JWT_SECRET || 'change-this-secret',
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
+
+  /** When true, free-plan image uploads/generation get the brand JPEG watermark. Default off until launch. */
+  watermark: {
+    freePlanEnabled:
+      process.env.WATERMARK_FREE_PLAN_ENABLED === 'true' ||
+      process.env.WATERMARK_FREE_PLAN_ENABLED === '1',
+  },
+
+  paddle: {
+    env: process.env.PADDLE_ENV || 'sandbox',
+    apiKey: process.env.PADDLE_API_KEY || '',
+    webhookSecret: process.env.PADDLE_WEBHOOK_SECRET || '',
+    webhookUrl: process.env.PADDLE_WEBHOOK_URL || '',
+    prices: {
+      standardMonthly: process.env.PADDLE_PRICE_STANDARD_MONTHLY || '',
+      standardYearly: process.env.PADDLE_PRICE_STANDARD_YEARLY || '',
+      proMonthly: process.env.PADDLE_PRICE_PRO_MONTHLY || '',
+      proYearly: process.env.PADDLE_PRICE_PRO_YEARLY || '',
+      ultimateMonthly: process.env.PADDLE_PRICE_ULTIMATE_MONTHLY || '',
+      ultimateYearly: process.env.PADDLE_PRICE_ULTIMATE_YEARLY || '',
+    },
+  },
 });

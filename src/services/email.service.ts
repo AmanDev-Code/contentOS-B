@@ -65,9 +65,9 @@ export class EmailService {
       'https://api.smtp2go.com/v3';
     this.fromEmail =
       this.configService.get<string>('SMTP2GO_FROM_EMAIL') ||
-      'noreply@postra.katana-ai.com';
+      'noreply@trndinn.com';
     this.fromName =
-      this.configService.get<string>('SMTP2GO_FROM_NAME') || 'Postra Team';
+      this.configService.get<string>('SMTP2GO_FROM_NAME') || 'Trndinn Team';
 
     if (!this.apiKey) {
       this.logger.warn(
@@ -371,9 +371,9 @@ export class EmailService {
   ): Promise<boolean> {
     const result = await this.sendEmail({
       to: email,
-      subject: `${otp} is your Postra verification code`,
+      subject: `${otp} is your Trndinn verification code`,
       html_body: getVerificationTemplate(otp),
-      text_body: `Your Postra verification code is: ${otp}. This code expires in 10 minutes.`,
+      text_body: `Your Trndinn verification code is: ${otp}. This code expires in 10 minutes.`,
       template_id: 'verification',
     });
 
@@ -391,7 +391,7 @@ export class EmailService {
 
     const result = await this.sendEmail({
       to: email,
-      subject: 'Reset Your Postra Password',
+      subject: 'Reset Your Trndinn Password',
       html_body: getPasswordResetTemplate(resetUrl),
       text_body: `Reset your password by visiting: ${resetUrl}`,
       template_id: 'password-reset',
@@ -410,9 +410,9 @@ export class EmailService {
   ): Promise<boolean> {
     const result = await this.sendEmail({
       to: email,
-      subject: `Welcome to Postra ${planName}!`,
+      subject: `Welcome to Trndinn ${planName}!`,
       html_body: getUpgradeTemplate(planName, amount),
-      text_body: `Your account has been upgraded to ${planName} for $${amount}. Thank you for choosing Postra!`,
+      text_body: `Your account has been upgraded to ${planName} for $${amount}. Thank you for choosing Trndinn!`,
       template_id: 'upgrade',
     });
 
@@ -434,7 +434,7 @@ export class EmailService {
   ): Promise<boolean> {
     const result = await this.sendEmail({
       to: email,
-      subject: `Receipt for Your Postra ${orderDetails.planName} Purchase`,
+      subject: `Receipt for Your Trndinn ${orderDetails.planName} Purchase`,
       html_body: getOrderReceiptTemplate(orderDetails),
       text_body: `Receipt: Order ${orderDetails.orderId} - ${orderDetails.planName} - $${orderDetails.amount}`,
       template_id: 'order-receipt',
@@ -450,9 +450,9 @@ export class EmailService {
     const frontendUrl = this.configService.get('frontendUrl') || 'http://localhost:5173';
     const result = await this.sendEmail({
       to: email,
-      subject: 'Welcome to Postra - Your AI Content Journey Begins!',
+      subject: 'Welcome to Trndinn - Your AI Content Journey Begins!',
       html_body: getWelcomeTemplate(userName, frontendUrl),
-      text_body: `Welcome to Postra, ${userName}! Start creating amazing content with AI.`,
+      text_body: `Welcome to Trndinn, ${userName}! Start creating amazing content with AI.`,
       template_id: 'welcome',
     });
 
@@ -471,9 +471,9 @@ export class EmailService {
 
     const result = await this.sendEmail({
       to: email,
-      subject: `${inviterName} invited you to join Postra`,
+      subject: `${inviterName} invited you to join Trndinn`,
       html_body: getInvitationTemplate(inviterName, inviteUrl),
-      text_body: `${inviterName} invited you to join Postra. Accept invitation: ${inviteUrl}`,
+      text_body: `${inviterName} invited you to join Trndinn. Accept invitation: ${inviteUrl}`,
       template_id: 'invitation',
     });
 

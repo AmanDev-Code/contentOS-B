@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '../guards/auth.guard';
+import { PaywallGuard } from '../guards/paywall.guard';
 import { PostSchedulingService } from '../services/post-scheduling.service';
 import { QuotaService } from '../services/quota.service';
 import { NotificationService } from '../services/notification.service';
@@ -26,7 +27,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 @Controller('posts')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PaywallGuard)
 export class PostsController {
   private readonly logger = new Logger(PostsController.name);
 

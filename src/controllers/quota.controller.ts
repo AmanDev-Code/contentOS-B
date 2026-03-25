@@ -1,9 +1,10 @@
 import { Controller, Get, UseGuards, Req } from '@nestjs/common';
 import { QuotaService, UserQuota } from '../services/quota.service';
 import { AuthGuard } from '../guards/auth.guard';
+import { PaywallGuard } from '../guards/paywall.guard';
 
 @Controller('quota')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PaywallGuard)
 export class QuotaController {
   constructor(private readonly quotaService: QuotaService) {}
 

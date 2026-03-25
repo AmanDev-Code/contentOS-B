@@ -19,6 +19,7 @@ import {
   CreateNotificationDto,
 } from '../services/notification.service';
 import { AuthGuard } from '../guards/auth.guard';
+import { PaywallGuard } from '../guards/paywall.guard';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -29,7 +30,7 @@ interface AuthenticatedRequest extends Request {
 
 @ApiTags('notifications')
 @Controller('notifications')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PaywallGuard)
 @ApiBearerAuth()
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
@@ -156,15 +157,19 @@ export class NotificationController {
     @Res() reply: FastifyReply,
   ) {
     const userId = req.user.id;
+    // Tell Fastify we are taking full control of raw response lifecycle (SSE).
+    reply.hijack();
     const res = reply.raw;
+    const origin = (req as any)?.headers?.origin || '*';
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Cache-Control',
-    });
+    // Keep SSE headers minimal; global CORS middleware handles CORS headers.
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    // For hijacked Fastify responses, set CORS headers explicitly.
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.writeHead(200);
 
     res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
 
@@ -175,16 +180,16 @@ export class NotificationController {
         res.write(`: heartbeat\n\n`);
       } catch {
         clearInterval(heartbeat);
+        this.notificationService.removeSSEClient(res);
       }
     }, 30000);
 
-    const rawReq = (req as any).raw;
-    if (rawReq?.on) {
-      rawReq.on('close', () => {
-        clearInterval(heartbeat);
-        this.notificationService.removeSSEClient(res);
-      });
-    }
+    // Listen on response/socket close (not request close), otherwise
+    // Fastify can emit request close early and drop SSE immediately.
+    res.on('close', () => {
+      clearInterval(heartbeat);
+      this.notificationService.removeSSEClient(res);
+    });
   }
 
   // Admin-only endpoints for broadcast notifications

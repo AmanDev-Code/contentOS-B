@@ -23,6 +23,8 @@ import { EmailController } from './controllers/email.controller';
 import { EmailWebhookController } from './controllers/email-webhook.controller';
 import { AuthController } from './controllers/auth.controller';
 import { ProfileController } from './controllers/profile.controller';
+import { OnboardingController } from './controllers/onboarding.controller';
+import { PaddleController } from './controllers/paddle.controller';
 
 import { SupabaseService } from './services/supabase.service';
 import { GenerationService } from './services/generation.service';
@@ -37,6 +39,8 @@ import { PostSchedulingService } from './services/post-scheduling.service';
 import { NotificationService } from './services/notification.service';
 import { EmailService } from './services/email.service';
 import { AuthService } from './services/auth.service';
+import { OnboardingService } from './services/onboarding.service';
+import { PaddleService } from './services/paddle.service';
 
 import { ProfileRepository } from './repositories/profile.repository';
 import { OptionalAuthGuard } from './guards/optional-auth.guard';
@@ -48,6 +52,8 @@ import { GenerationWorker } from './workers/generation.worker';
 import { GenerationWorkerManager } from './workers/generation-worker-manager';
 import { PostPublishingProcessor } from './processors/post-publishing.processor';
 import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
+import { PaywallGuard } from './guards/paywall.guard';
+import { Reflector } from '@nestjs/core';
 
 import { QUEUE_NAMES } from './common/constants';
 import { MiddlewareConsumer, NestModule } from '@nestjs/common';
@@ -97,6 +103,8 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     EmailWebhookController,
     AuthController,
     ProfileController,
+    OnboardingController,
+    PaddleController,
   ],
   providers: [
     AppService,
@@ -116,6 +124,8 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     },
     EmailService,
     AuthService,
+    OnboardingService,
+    PaddleService,
     ProfileRepository,
     OptionalAuthGuard,
     GenerationJobRepository,
@@ -125,6 +135,8 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     GenerationWorkerManager,
     PostPublishingProcessor,
     RateLimitMiddleware,
+    PaywallGuard,
+    Reflector,
   ],
 })
 export class AppModule implements NestModule {

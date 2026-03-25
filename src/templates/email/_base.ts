@@ -35,15 +35,15 @@ export function wrapEmail(content: string, title: string): string {
 <body style="margin:0;padding:0;">
   <div class="wrapper">
     <div class="header">
-      <div class="logo">Postra</div>
+      <div class="logo">Trndinn</div>
       <div class="header-tagline">AI-Powered Content Creation Platform</div>
     </div>
     <div class="content">
       ${content}
     </div>
     <div class="footer">
-      <p style="margin:0 0 8px;">© 2026 Postra. All rights reserved.</p>
-      <p style="margin:0;"><a href="mailto:support@postra.katana-ai.com">support@postra.katana-ai.com</a></p>
+      <p style="margin:0 0 8px;">© 2026 Trndinn. All rights reserved.</p>
+      <p style="margin:0;"><a href="mailto:support@trndinn.com">support@trndinn.com</a></p>
     </div>
   </div>
 </body>

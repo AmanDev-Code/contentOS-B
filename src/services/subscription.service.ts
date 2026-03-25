@@ -6,6 +6,7 @@ import {
 import { SupabaseService } from './supabase.service';
 import { CacheService } from './cache.service';
 import { getPublicPlans, getPlanConfig } from '../config/plans.config';
+import { PaddleService } from './paddle.service';
 
 export interface UserSubscription {
   id: string;
@@ -19,8 +20,12 @@ export interface UserSubscription {
   subscriptionStartDate: string;
   subscriptionEndDate: string | null;
   resetDate: string;
+  paddleSubscriptionId?: string;
+  paddleCustomerId?: string;
+  // Backward compatibility during rollout.
   stripeSubscriptionId?: string;
   stripeCustomerId?: string;
+  trialConsumed?: boolean;
 }
 
 export interface SubscriptionPlan {
@@ -50,6 +55,15 @@ export interface BillingInfo {
     amount: number;
     currency: string;
     paymentMethod?: string;
+    history?: Array<{
+      id: string;
+      date: string;
+      description: string;
+      amount: string;
+      status: string;
+      invoice?: string;
+      invoiceUrl?: string;
+    }>;
   };
 }
 
@@ -58,12 +72,32 @@ export class SubscriptionService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly cacheService: CacheService,
+    private readonly paddleService: PaddleService,
   ) {}
 
-  async getUserSubscription(userId: string): Promise<UserSubscription | null> {
+  private formatBillingAmount(
+    amount: number | string,
+    currency: string,
+    formattedFromProvider?: string,
+  ): string {
+    if (formattedFromProvider && typeof formattedFromProvider === 'string') {
+      const numeric = formattedFromProvider.match(/-?\d+(?:\.\d+)?/);
+      if (numeric?.[0]) {
+        return `${Number.parseFloat(numeric[0]).toFixed(2)} ${currency}`;
+      }
+    }
+    const raw = Number(amount);
+    if (!Number.isFinite(raw)) return `${amount} ${currency}`;
+    return `${raw.toFixed(2)} ${currency}`;
+  }
+
+  async getUserSubscription(
+    userId: string,
+    options?: { bypassCache?: boolean },
+  ): Promise<UserSubscription | null> {
     // Security: Only allow users to access their own subscription
     const cacheKey = `subscription:${userId}`;
-    const cached = await this.cacheService.get(cacheKey);
+    const cached = options?.bypassCache ? null : await this.cacheService.get(cacheKey);
 
     if (cached) {
       return JSON.parse(cached);
@@ -98,8 +132,12 @@ export class SubscriptionService {
         subscriptionStartDate: data.subscription_start_date,
         subscriptionEndDate: data.subscription_end_date,
         resetDate: data.reset_date,
+        paddleSubscriptionId:
+          data.paddle_subscription_id || data.stripe_subscription_id,
+        paddleCustomerId: data.paddle_customer_id || data.stripe_customer_id,
         stripeSubscriptionId: data.stripe_subscription_id,
         stripeCustomerId: data.stripe_customer_id,
+        trialConsumed: data.trial_consumed ?? false,
       };
 
       // Cache for 5 minutes
@@ -188,13 +226,34 @@ export class SubscriptionService {
   }
 
   async getBillingInfo(userId: string): Promise<BillingInfo> {
-    const subscription = await this.getUserSubscription(userId);
+    // Billing must always read fresh subscription state right after webhook updates.
+    const subscription = await this.getUserSubscription(userId, {
+      bypassCache: true,
+    });
     if (!subscription) {
       throw new NotFoundException('No active subscription found');
     }
 
+    // IMPORTANT: billing must resolve plan even when it's not public (e.g. free/trial).
     const plans = await this.getSubscriptionPlans();
-    const plan = plans.find((p) => p.planType === subscription.planType);
+    let plan = plans.find((p) => p.planType === subscription.planType);
+    if (!plan) {
+      const cfg = getPlanConfig(subscription.planType);
+      if (cfg) {
+        plan = {
+          id: `cfg-${cfg.planType}`,
+          planType: cfg.planType,
+          name: cfg.name,
+          description: cfg.description,
+          creditsLimit: cfg.creditsLimit,
+          priceMonthly: cfg.priceMonthly,
+          priceYearly: cfg.priceYearly,
+          features: cfg.features,
+          isActive: true,
+          sortOrder: 0,
+        };
+      }
+    }
     if (!plan) {
       throw new NotFoundException('Subscription plan not found');
     }
@@ -227,10 +286,75 @@ export class SubscriptionService {
           ? subscription.priceYearly
           : subscription.priceMonthly,
       currency: 'USD',
-      paymentMethod: subscription.stripeCustomerId
-        ? 'Card ending in ****'
-        : undefined,
+      paymentMethod: undefined as string | undefined,
+      history: [] as Array<{
+        id: string;
+        date: string;
+        description: string;
+        amount: string;
+        status: string;
+        invoice?: string;
+        invoiceUrl?: string;
+      }>,
     };
+
+    // Primary source: persisted invoice/payment records from webhooks.
+    const { data: storedInvoices } = await this.supabaseService
+      .getServiceClient()
+      .from('billing_invoices')
+      .select('*')
+      .eq('user_id', userId)
+      .order('issued_at', { ascending: false })
+      .limit(20);
+    if (storedInvoices?.length) {
+      billing.history = storedInvoices.map((row) => ({
+        id: row.paddle_transaction_id,
+        date: row.issued_at || row.created_at,
+        description: `${plan.name} Plan - ${subscription.billingCycle}`,
+        amount: this.formatBillingAmount(
+          row.amount,
+          row.currency,
+          row?.metadata?.transaction_details?.details?.totals?.total_formatted ||
+            row?.metadata?.webhook?.details?.totals?.total_formatted,
+        ),
+        status: row.status,
+        invoice: row.invoice_number || undefined,
+        invoiceUrl: row.minio_url || row.invoice_url || undefined,
+      }));
+    } else if (subscription.paddleCustomerId) {
+      // Fallback when webhook persistence is not available yet.
+      const txns = await this.paddleService.getCustomerTransactions(
+        subscription.paddleCustomerId,
+      );
+      billing.history = txns.map((t) => ({
+        id: t.id,
+        date: t.createdAt,
+        description: `${plan.name} Plan - ${subscription.billingCycle}`,
+        amount: this.formatBillingAmount(t.amount, t.currency),
+        status: t.status,
+        invoice: t.invoiceNumber,
+        invoiceUrl: t.invoiceUrl,
+      }));
+    }
+
+    const { data: storedMethod } = await this.supabaseService
+      .getServiceClient()
+      .from('billing_payment_methods')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_primary', true)
+      .maybeSingle();
+    if (storedMethod?.card_last4) {
+      billing.paymentMethod = `Card ending in ${storedMethod.card_last4}`;
+    } else {
+      const paymentMethod = await this.paddleService.getPaymentMethodSummary(
+        subscription.paddleSubscriptionId,
+        subscription.paddleCustomerId,
+      );
+      if (paymentMethod) {
+        billing.paymentMethod = paymentMethod;
+      }
+    }
 
     return {
       subscription,
@@ -299,8 +423,12 @@ export class SubscriptionService {
         subscriptionStartDate: data.subscription_start_date,
         subscriptionEndDate: data.subscription_end_date,
         resetDate: data.reset_date,
+        paddleSubscriptionId:
+          data.paddle_subscription_id || data.stripe_subscription_id,
+        paddleCustomerId: data.paddle_customer_id || data.stripe_customer_id,
         stripeSubscriptionId: data.stripe_subscription_id,
         stripeCustomerId: data.stripe_customer_id,
+        trialConsumed: data.trial_consumed ?? false,
       };
 
       return subscription;
@@ -333,5 +461,55 @@ export class SubscriptionService {
       console.error('Error canceling subscription:', error);
       throw error;
     }
+  }
+
+  async changePlanForExistingSubscription(
+    userId: string,
+    planType: 'standard' | 'pro' | 'ultimate',
+    billingCycle: 'monthly' | 'yearly',
+  ): Promise<void> {
+    const current = await this.getUserSubscription(userId);
+    if (!current?.paddleSubscriptionId) {
+      throw new Error('No active Paddle subscription found');
+    }
+    const ok = await this.paddleService.changeSubscriptionPlan(
+      current.paddleSubscriptionId,
+      planType,
+      billingCycle,
+    );
+    if (!ok) {
+      throw new Error('Failed to update subscription on Paddle');
+    }
+  }
+
+  async resolveInvoiceDownloadUrl(
+    userId: string,
+    transactionId: string,
+  ): Promise<string | null> {
+    const { data: invoice } = await this.supabaseService
+      .getServiceClient()
+      .from('billing_invoices')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('paddle_transaction_id', transactionId)
+      .maybeSingle();
+
+    if (!invoice) return null;
+    if (invoice.minio_url) return invoice.minio_url;
+    if (invoice.invoice_url) return invoice.invoice_url;
+
+    const fetchedUrl = await this.paddleService.getTransactionInvoiceUrl(
+      transactionId,
+    );
+    if (!fetchedUrl) return null;
+
+    await this.supabaseService
+      .getServiceClient()
+      .from('billing_invoices')
+      .update({ invoice_url: fetchedUrl, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('paddle_transaction_id', transactionId);
+
+    return fetchedUrl;
   }
 }

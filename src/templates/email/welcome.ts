@@ -26,5 +26,5 @@ export function getWelcomeTemplate(userName: string, dashboardUrl: string): stri
     </p>
     <p class="text" style="font-size: 14px; color: #71717a;">Need help getting started? Reach out to our support team anytime.</p>
   `;
-  return wrapEmail(content, 'Welcome to Postra');
+  return wrapEmail(content, 'Welcome to Trndinn');
 }

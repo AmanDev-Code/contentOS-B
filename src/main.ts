@@ -14,21 +14,38 @@ async function bootstrap() {
       logger: true,
       bodyLimit: 10485760, // 10MB limit for file uploads
     }),
+    { rawBody: true },
   );
 
   app.enableCors({
-    origin: [
-      process.env.FRONTEND_URL || 'http://localhost:5173',
-      'http://localhost:8080',
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'https://alfonso-pseudooriental-cyclonically.ngrok-free.dev',
-    ],
+    origin: (origin, callback) => {
+      // Allow same-origin/non-browser requests
+      if (!origin) return callback(null, true);
+
+      const exactAllowed = new Set([
+        process.env.FRONTEND_URL || 'http://localhost:5173',
+        'http://localhost:8080',
+        'http://localhost:3000',
+        'http://localhost:5173',
+        'https://alfonso-pseudooriental-cyclonically.ngrok-free.dev',
+      ]);
+
+      const isLocalhost = /^http:\/\/localhost:\d+$/.test(origin);
+      const isNgrok = /^https:\/\/[a-z0-9-]+\.ngrok-free\.dev$/.test(origin);
+
+      if (exactAllowed.has(origin) || isLocalhost || isNgrok) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS blocked origin: ${origin}`), false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
+      'Accept',
+      'Cache-Control',
+      'Connection',
       'ngrok-skip-browser-warning',
     ],
   });
@@ -42,7 +59,7 @@ async function bootstrap() {
   );
 
   const config = new DocumentBuilder()
-    .setTitle('Postra AI API')
+    .setTitle('Trndinn API')
     .setDescription('AI-powered content intelligence and automation platform')
     .setVersion('1.0')
     .addBearerAuth()
@@ -54,7 +71,7 @@ async function bootstrap() {
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
 
-  console.log(`🚀 Postra AI Backend running on: http://localhost:${port}`);
+  console.log(`🚀 Trndinn Backend running on: http://localhost:${port}`);
   console.log(`📚 API Documentation: http://localhost:${port}/api`);
 }
 

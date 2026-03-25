@@ -13,6 +13,7 @@ import { EmailService, EmailDeliveryStatus } from '../services/email.service';
 import { AuthGuard } from '../guards/auth.guard';
 import { AdminGuard } from '../guards/admin.guard';
 import { GetUser } from '../decorators/get-user.decorator';
+import { PaywallGuard } from '../guards/paywall.guard';
 
 interface WebhookPayload {
   email_id?: string;
@@ -80,7 +81,7 @@ export class EmailController {
    * Get email delivery logs (admin only)
    */
   @Get('logs')
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
   async getEmailLogs(
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '50',
@@ -122,7 +123,7 @@ export class EmailController {
    * Get email statistics (admin only)
    */
   @Get('stats')
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
   async getEmailStats(
     @Query('from_date') from_date?: string,
     @Query('to_date') to_date?: string,
@@ -150,7 +151,7 @@ export class EmailController {
    * Test email sending (admin only)
    */
   @Post('test')
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
   async sendTestEmail(
     @Body() body: TestEmailDto,
     @GetUser() _user: { id: string },

@@ -12,7 +12,13 @@ import {
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { LinkedinService } from '../services/linkedin.service';
 import { AuthGuard } from '../guards/auth.guard';
+import { PaywallGuard } from '../guards/paywall.guard';
 
+/**
+ * OAuth routes (`/auth`, `/callback`) must NOT use AuthGuard: the browser follows
+ * redirects without an `Authorization: Bearer` header. Only API calls from the
+ * app (fetch with token) include JWT — this was causing 401 on LinkedIn connect.
+ */
 @ApiTags('linkedin')
 @Controller('linkedin')
 export class LinkedinController {
@@ -55,7 +61,7 @@ export class LinkedinController {
   }
 
   @Get('status')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PaywallGuard)
   @ApiOperation({ summary: 'Get LinkedIn connection status for current user' })
   async getStatus(@Request() req) {
     const userId = req.user?.id; // AuthGuard sets req.user.id
@@ -63,7 +69,7 @@ export class LinkedinController {
   }
 
   @Post('publish')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PaywallGuard)
   @ApiOperation({ summary: 'Publish content to LinkedIn' })
   async publishPost(@Request() req, @Body() body: { contentId: string }) {
     const userId = req.user?.id; // AuthGuard sets req.user.id
@@ -75,7 +81,7 @@ export class LinkedinController {
   }
 
   @Get('metrics')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PaywallGuard)
   @ApiOperation({ summary: 'Get LinkedIn profile metrics' })
   async getMetrics(@Request() req) {
     const userId = req.user?.id; // AuthGuard sets req.user.id
@@ -83,7 +89,7 @@ export class LinkedinController {
   }
 
   @Get('analytics')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PaywallGuard)
   @ApiOperation({ summary: 'Get LinkedIn post analytics' })
   async getAnalytics(@Request() req, @Query('limit') limit?: string) {
     const userId = req.user?.id; // AuthGuard sets req.user.id
@@ -92,7 +98,7 @@ export class LinkedinController {
   }
 
   @Get('dashboard')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PaywallGuard)
   @ApiOperation({ summary: 'Get LinkedIn metrics for dashboard' })
   async getDashboardMetrics(@Request() req) {
     const userId = req.user?.id; // AuthGuard sets req.user.id
@@ -100,7 +106,7 @@ export class LinkedinController {
   }
 
   @Get('organization')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PaywallGuard)
   @ApiOperation({ summary: 'Get LinkedIn organization analytics' })
   async getOrganizationAnalytics(@Request() req) {
     const userId = req.user?.id; // AuthGuard sets req.user.id
@@ -108,7 +114,7 @@ export class LinkedinController {
   }
 
   @Post('disconnect')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PaywallGuard)
   @ApiOperation({ summary: 'Disconnect LinkedIn account' })
   async disconnect(@Request() req) {
     console.log('🔗 LinkedIn disconnect endpoint hit');

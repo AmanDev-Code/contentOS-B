@@ -24,5 +24,5 @@ export function getOrderReceiptTemplate(orderDetails: {
     </div>
     <p class="text" style="font-size: 14px; color: #71717a;">Start creating content with AI right away from your dashboard.</p>
   `;
-  return wrapEmail(content, 'Order Receipt - Postra');
+  return wrapEmail(content, 'Order Receipt - Trndinn');
 }

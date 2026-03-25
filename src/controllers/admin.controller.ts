@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Put,
   Body,
   UseGuards,
   Request,
@@ -10,8 +11,10 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationService } from '../services/notification.service';
+import { OnboardingService } from '../services/onboarding.service';
 import { AuthGuard } from '../guards/auth.guard';
 import { AdminGuard } from '../guards/admin.guard';
+import { PaywallGuard } from '../guards/paywall.guard';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -29,12 +32,43 @@ interface CreateBroadcastDto {
   expiresAt?: string;
 }
 
+interface UpdateOnboardingConfigDto {
+  enabled?: boolean;
+  enabledAt?: string | null;
+  questionVersion?: number;
+  tourVersion?: number;
+  tourSteps?: Record<string, boolean>;
+}
+
 @ApiTags('admin')
 @Controller('admin')
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, PaywallGuard, AdminGuard)
 @ApiBearerAuth()
 export class AdminController {
-  constructor(private readonly notificationService: NotificationService) {}
+  constructor(
+    private readonly notificationService: NotificationService,
+    private readonly onboardingService: OnboardingService,
+  ) {}
+
+  @Get('onboarding/config')
+  @ApiOperation({ summary: 'Get onboarding feature flag config' })
+  async getOnboardingConfig() {
+    const data = await this.onboardingService.getConfig();
+    return { success: true, data };
+  }
+
+  @Put('onboarding/config')
+  @ApiOperation({ summary: 'Update onboarding feature flag config' })
+  async updateOnboardingConfig(@Body() body: UpdateOnboardingConfigDto) {
+    const data = await this.onboardingService.updateConfig({
+      enabled: body.enabled,
+      enabledAt: body.enabledAt,
+      questionVersion: body.questionVersion,
+      tourVersion: body.tourVersion,
+      tourSteps: body.tourSteps,
+    });
+    return { success: true, data };
+  }
 
   @Post('notifications/broadcast')
   @ApiOperation({ summary: 'Create a broadcast notification for all users' })

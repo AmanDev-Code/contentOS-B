@@ -12,7 +12,9 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '../guards/auth.guard';
+import { PaywallGuard } from '../guards/paywall.guard';
 import {
   MediaGenerationService,
   CarouselGenerationRequest,
@@ -29,7 +31,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 @Controller('media')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PaywallGuard)
 export class MediaController {
   private readonly logger = new Logger(MediaController.name);
 
@@ -39,7 +41,14 @@ export class MediaController {
     private readonly supabaseService: SupabaseService,
     private readonly quotaService: QuotaService,
     private readonly notificationService: NotificationService,
+    private readonly configService: ConfigService,
   ) {}
+
+  /** Free-plan watermark only when env WATERMARK_FREE_PLAN_ENABLED is true. */
+  private shouldApplyFreePlanWatermark(isFreePlan: boolean): boolean {
+    if (!isFreePlan) return false;
+    return this.configService.get<boolean>('watermark.freePlanEnabled', false);
+  }
 
   @Post('generate-image')
   async generateImage(
@@ -70,6 +79,9 @@ export class MediaController {
       );
 
       try {
+        const quotaInfo = await this.quotaService.getUserQuota(userId);
+        const isFreePlan = quotaInfo.planType === 'free';
+
         // Generate image
         const imageBuffer =
           await this.mediaGenerationService.generateSingleImage({
@@ -78,9 +90,11 @@ export class MediaController {
             quality: 'hd',
           });
 
-        // Optimize image
-        const optimizedBuffer =
-          await this.mediaGenerationService.optimizeImage(imageBuffer);
+        const optimizedBuffer = this.shouldApplyFreePlanWatermark(isFreePlan)
+          ? await this.mediaGenerationService.optimizeImageWithWatermark(
+              imageBuffer,
+            )
+          : await this.mediaGenerationService.optimizeImage(imageBuffer);
 
         // Upload to MinIO
         const fileName = `image-${Date.now()}.jpg`;
@@ -166,6 +180,9 @@ export class MediaController {
     const userId = req.user.id;
     const { slides, contentId } = body;
 
+    const quotaInfo = await this.quotaService.getUserQuota(userId);
+    const isFreePlan = quotaInfo.planType === 'free';
+
     // Check quota (carousel costs more)
     const quotaCost = slides.length * 1.5;
 
@@ -218,9 +235,11 @@ export class MediaController {
 
       // Upload individual images
       for (let i = 0; i < imageBuffers.length; i++) {
-        const optimizedBuffer = await this.mediaGenerationService.optimizeImage(
-          imageBuffers[i],
-        );
+        const optimizedBuffer = this.shouldApplyFreePlanWatermark(isFreePlan)
+          ? await this.mediaGenerationService.optimizeImageWithWatermark(
+              imageBuffers[i],
+            )
+          : await this.mediaGenerationService.optimizeImage(imageBuffers[i]);
         const imageFileName = `carousel-slide-${Date.now()}-${i + 1}.jpg`;
         const imageUrl = await this.mediaGenerationService.uploadToMinio(
           optimizedBuffer,
@@ -470,10 +489,20 @@ export class MediaController {
         .replace(/--+/g, '-') // Replace multiple hyphens with single
         .toLowerCase();
 
-      // Add timestamp to ensure uniqueness
-      const ext = filename.split('.').pop();
-      const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
-      filename = `${nameWithoutExt}-${Date.now()}.${ext}`;
+      // Add timestamp; stored bytes are always JPEG after optimize
+      const baseName = filename.includes('.')
+        ? filename.slice(0, filename.lastIndexOf('.'))
+        : filename;
+      filename = `${baseName}-${Date.now()}.jpg`;
+
+      const quotaInfo = await this.quotaService.getUserQuota(userId);
+      const isFreePlan = quotaInfo.planType === 'free';
+
+      const uploadBuffer = this.shouldApplyFreePlanWatermark(isFreePlan)
+        ? await this.mediaGenerationService.optimizeImageWithWatermark(
+            imageBuffer,
+          )
+        : await this.mediaGenerationService.optimizeImage(imageBuffer);
 
       const minioPath = `user-uploads/${userId}/${filename}`;
 
@@ -481,7 +510,7 @@ export class MediaController {
       const uploadResult = await this.minioService.uploadFile(
         this.minioService['bucketName'],
         minioPath,
-        imageBuffer,
+        uploadBuffer,
         'image/jpeg',
       );
 
@@ -499,7 +528,7 @@ export class MediaController {
           user_id: userId,
           file_name: filename,
           file_type: 'image',
-          file_size: imageBuffer.length,
+          file_size: uploadBuffer.length,
           minio_path: minioPath,
           public_url: publicUrl,
           content_id: null, // User uploaded, not generated

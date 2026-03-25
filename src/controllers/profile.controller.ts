@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../guards/auth.guard';
 import { OptionalAuthGuard } from '../guards/optional-auth.guard';
+import { PaywallGuard } from '../guards/paywall.guard';
 import { GetUser } from '../decorators/get-user.decorator';
 import { ProfileRepository } from '../repositories/profile.repository';
 
@@ -49,7 +50,7 @@ export class ProfileController {
    * Update profile (username, full_name, avatar_url)
    */
   @Patch()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PaywallGuard)
   async updateProfile(
     @Body() body: { username?: string; full_name?: string; avatar_url?: string },
     @GetUser() user: { id: string },

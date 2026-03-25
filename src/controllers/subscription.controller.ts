@@ -10,6 +10,7 @@ import {
   HttpStatus,
   ValidationPipe,
   UsePipes,
+  Param,
 } from '@nestjs/common';
 import {
   SubscriptionService,
@@ -19,6 +20,7 @@ import {
 } from '../services/subscription.service';
 import { AuthService } from '../services/auth.service';
 import { AuthGuard } from '../guards/auth.guard';
+import { PaywallGuard } from '../guards/paywall.guard';
 import { IsString, IsIn, IsOptional } from 'class-validator';
 
 class UpdateSubscriptionDto {
@@ -35,8 +37,18 @@ class UpdateSubscriptionDto {
   stripePaymentMethodId?: string;
 }
 
+class ChangePlanDto {
+  @IsString()
+  @IsIn(['standard', 'pro', 'ultimate'])
+  planType: 'standard' | 'pro' | 'ultimate';
+
+  @IsString()
+  @IsIn(['monthly', 'yearly'])
+  billingCycle: 'monthly' | 'yearly';
+}
+
 @Controller('subscription')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PaywallGuard)
 export class SubscriptionController {
   constructor(
     private readonly subscriptionService: SubscriptionService,
@@ -178,6 +190,37 @@ export class SubscriptionController {
     }
   }
 
+  @Post('change-plan')
+  @UsePipes(new ValidationPipe({ transform: true }))
+  async changePlan(
+    @Req() req: any,
+    @Body() body: ChangePlanDto,
+  ): Promise<{ success: boolean; message: string }> {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException(
+        'User not authenticated',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    try {
+      await this.subscriptionService.changePlanForExistingSubscription(
+        userId,
+        body.planType,
+        body.billingCycle,
+      );
+      return {
+        success: true,
+        message: 'Subscription change submitted. Syncing with Paddle events.',
+      };
+    } catch (error) {
+      throw new HttpException(
+        error?.message || 'Failed to change subscription plan',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Get('usage')
   async getUsageStats(@Req() req: any): Promise<{
     currentPeriodUsage: number;
@@ -212,5 +255,24 @@ export class SubscriptionController {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  @Get('invoice/:transactionId')
+  async getInvoiceDownloadUrl(
+    @Req() req: any,
+    @Param('transactionId') transactionId: string,
+  ): Promise<{ url: string }> {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('User not authenticated', HttpStatus.UNAUTHORIZED);
+    }
+    const url = await this.subscriptionService.resolveInvoiceDownloadUrl(
+      userId,
+      transactionId,
+    );
+    if (!url) {
+      throw new HttpException('Invoice URL not available', HttpStatus.NOT_FOUND);
+    }
+    return { url };
   }
 }
