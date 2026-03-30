@@ -1,6 +1,9 @@
 export enum ContentStatus {
   DRAFT = 'draft',
   GENERATING = 'generating',
+  MEDIA_GENERATING = 'media_generating',
+  MEDIA_READY = 'media_ready',
+  PUBLISHING = 'publishing',
   READY = 'ready',
   PUBLISHED = 'published',
   FAILED = 'failed',
@@ -9,6 +12,9 @@ export enum ContentStatus {
 export enum JobStatus {
   PENDING = 'pending',
   GENERATING = 'generating',
+  MEDIA_GENERATING = 'media_generating',
+  MEDIA_READY = 'media_ready',
+  PUBLISHING = 'publishing',
   READY = 'ready',
   FAILED = 'failed',
 }

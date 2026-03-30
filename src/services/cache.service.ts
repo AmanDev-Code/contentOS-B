@@ -59,6 +59,34 @@ export class CacheService implements OnModuleInit {
     this.fallback.set(key, { data, expires: Date.now() + ttlSeconds * 1000 });
   }
 
+  async setIfAbsent(
+    key: string,
+    data: any,
+    ttlSeconds = 300,
+  ): Promise<boolean> {
+    if (this.redis) {
+      try {
+        const result = await this.redis.set(
+          CACHE_PREFIX + key,
+          JSON.stringify(data),
+          'EX',
+          ttlSeconds,
+          'NX',
+        );
+        return result === 'OK';
+      } catch (e) {
+        this.logger.warn(`Redis SETNX failed for ${key}: ${e.message}`);
+      }
+    }
+
+    const existing = this.fallback.get(key);
+    if (existing && Date.now() <= existing.expires) {
+      return false;
+    }
+    this.fallback.set(key, { data, expires: Date.now() + ttlSeconds * 1000 });
+    return true;
+  }
+
   async delete(key: string): Promise<boolean> {
     if (this.redis) {
       try {

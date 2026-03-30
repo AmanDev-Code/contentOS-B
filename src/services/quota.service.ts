@@ -116,28 +116,27 @@ export class QuotaService {
     contentType?: string,
     contentId?: string,
   ): Promise<UserQuota> {
+    const txType: 'debit' | 'refund' = creditsUsed >= 0 ? 'debit' : 'refund';
+    const amount = Math.abs(creditsUsed);
+
     try {
-      // Log the credit transaction
       const { error } = await this.supabaseService
         .getServiceClient()
         .rpc('log_credit_transaction', {
           p_user_id: userId,
           p_content_id: contentId || null,
-          p_transaction_type: 'debit',
-          p_amount: creditsUsed,
+          p_transaction_type: txType,
+          p_amount: amount,
           p_description: description,
           p_operation_type: operationType,
           p_content_type: contentType || null,
           p_metadata: {},
         });
-
       if (error) {
         console.error('Failed to log credit transaction:', error);
-        // Continue anyway - don't fail the operation
       }
     } catch (error) {
       console.error('Error logging credit transaction:', error);
-      // Continue anyway - don't fail the operation
     }
 
     // Invalidate cache to force refresh
@@ -181,6 +180,52 @@ export class QuotaService {
     } catch (error) {
       console.error('Error logging transaction:', error);
     }
+  }
+
+  async debitOnce(params: {
+    userId: string;
+    operationId: string;
+    amount: number;
+    description: string;
+    operationType: string;
+    contentType: string;
+    contentId?: string;
+  }): Promise<boolean> {
+    const key = `quota:debit:${params.userId}:${params.operationId}`;
+    const locked = await this.cacheService.setIfAbsent(key, { at: Date.now() }, 86400);
+    if (!locked) return false;
+    await this.consumeCredits(
+      params.userId,
+      params.amount,
+      params.description,
+      params.operationType,
+      params.contentType,
+      params.contentId,
+    );
+    return true;
+  }
+
+  async refundOnce(params: {
+    userId: string;
+    operationId: string;
+    amount: number;
+    description: string;
+    operationType: string;
+    contentType: string;
+    contentId?: string;
+  }): Promise<boolean> {
+    const key = `quota:refund:${params.userId}:${params.operationId}`;
+    const locked = await this.cacheService.setIfAbsent(key, { at: Date.now() }, 86400);
+    if (!locked) return false;
+    await this.consumeCredits(
+      params.userId,
+      -Math.abs(params.amount),
+      params.description,
+      params.operationType,
+      params.contentType,
+      params.contentId,
+    );
+    return true;
   }
 
   async incrementUsage(userId: string): Promise<void> {

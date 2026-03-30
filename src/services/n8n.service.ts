@@ -15,8 +15,15 @@ export class N8nService {
 
   async triggerContentGeneration(
     payload: N8nWebhookPayload,
+    options?: { webhookUrlOverride?: string },
   ): Promise<{ success: boolean; message: string }> {
     try {
+      const targetUrl =
+        options?.webhookUrlOverride?.trim() || this.webhookUrl;
+      if (!targetUrl) {
+        throw new Error('n8n webhook URL is not configured');
+      }
+
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
@@ -25,7 +32,7 @@ export class N8nService {
         headers['Authorization'] = `Bearer ${this.apiKey}`;
       }
 
-      const response = await fetch(this.webhookUrl, {
+      const response = await fetch(targetUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),

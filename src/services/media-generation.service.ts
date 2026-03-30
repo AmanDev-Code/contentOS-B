@@ -3,16 +3,19 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import sharp from 'sharp';
-// Removed puppeteer - using lighter HTML to image conversion
+import PDFDocument from 'pdfkit';
+import { PassThrough } from 'stream';
 import { MinioService } from './minio.service';
 import { CacheService } from './cache.service';
 
 export interface ImageGenerationRequest {
   prompt: string;
-  size?: '1024x1024' | '1792x1024' | '1024x1792';
-  quality?: 'standard' | 'hd';
+  size?: '1024x1024' | '1792x1024' | '1024x1792' | '1536x1024' | '1024x1536';
+  quality?: 'low' | 'medium' | 'high' | 'standard' | 'hd';
   style?: 'vivid' | 'natural';
+  model?: 'dall-e-3' | 'gpt-image-1' | 'gpt-image-1-mini';
 }
 
 export interface CarouselSlide {
@@ -24,6 +27,12 @@ export interface CarouselSlide {
 export interface CarouselGenerationRequest {
   slides: CarouselSlide[];
   style?: 'professional' | 'creative' | 'minimal';
+  includePdf?: boolean;
+}
+
+export interface CarouselGenerationBundle {
+  imageBuffers: Buffer[];
+  pdfBuffer?: Buffer;
 }
 
 @Injectable()
@@ -41,31 +50,55 @@ export class MediaGenerationService {
 
   async generateSingleImage(request: ImageGenerationRequest): Promise<Buffer> {
     try {
+      const cacheKey = this.buildImageCacheKey(request);
+      const cached = await this.cacheService.get(cacheKey);
+      if (cached) {
+        this.logger.log('Cache HIT for image prompt');
+        return Buffer.from(cached, 'base64');
+      }
+
+      const model = request.model
+        || this.configService.get<string>('MEDIA_IMAGE_MODEL')
+        || 'gpt-image-1-mini';
+
+      const optimizedPrompt = this.buildProductionImagePrompt(request.prompt);
       this.logger.log(
-        `Generating single image with prompt: ${request.prompt.substring(0, 50)}...`,
+        `Generating image [${model}]: ${optimizedPrompt.substring(0, 60)}...`,
       );
+
+      const isGptImage = model.startsWith('gpt-image');
+
+      const body: Record<string, unknown> = {
+        model,
+        prompt: optimizedPrompt,
+        n: 1,
+        size: request.size || '1024x1024',
+      };
+
+      if (isGptImage) {
+        const qMap: Record<string, string> = { hd: 'high', standard: 'medium' };
+        body.quality = qMap[request.quality as string] || request.quality || 'medium';
+        body.output_format = 'png';
+      } else {
+        body.quality = request.quality || 'hd';
+        body.style = request.style || 'natural';
+        body.response_format = 'b64_json';
+      }
 
       const response = await axios.post(
         'https://api.openai.com/v1/images/generations',
-        {
-          model: 'dall-e-3',
-          prompt: request.prompt,
-          size: request.size || '1024x1024',
-          quality: request.quality || 'hd',
-          style: request.style || 'natural',
-          response_format: 'b64_json',
-          n: 1,
-        },
+        body,
         {
           headers: {
             Authorization: `Bearer ${this.openaiApiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 60000, // 60 seconds
+          timeout: 90000,
         },
       );
 
       const base64Image = response.data.data[0].b64_json;
+      await this.cacheService.set(cacheKey, base64Image, 6 * 60 * 60);
       return Buffer.from(base64Image, 'base64');
     } catch (error) {
       this.logger.error('Failed to generate image:', error.message);
@@ -77,229 +110,199 @@ export class MediaGenerationService {
     request: CarouselGenerationRequest,
   ): Promise<Buffer[]> {
     try {
-      this.logger.log(
-        `Generating carousel with ${request.slides.length} slides`,
-      );
+      const total = request.slides.length;
+      this.logger.log(`Generating carousel with ${total} slides`);
 
-      const imagePromises = request.slides.map((slide) =>
-        this.generateSingleImage({
-          prompt: slide.imagePrompt,
-          size: '1024x1024',
-          quality: 'hd',
-          style: 'natural',
-        }),
+      const maxConcurrency = Number(
+        this.configService.get<string>('MEDIA_CAROUSEL_CONCURRENCY') || 4,
       );
+      const carouselModel =
+        this.configService.get<string>('MEDIA_CAROUSEL_MODEL') ||
+        this.configService.get<string>('MEDIA_IMAGE_MODEL') ||
+        'gpt-image-1-mini';
+      const carouselQuality =
+        this.configService.get<string>('MEDIA_CAROUSEL_QUALITY') || 'medium';
 
-      return await Promise.all(imagePromises);
+      const generated: Buffer[] = [];
+
+      for (let i = 0; i < total; i += maxConcurrency) {
+        const batch = request.slides.slice(i, i + maxConcurrency);
+        const results = await Promise.all(
+          batch.map(async (slide) => {
+            const raw = await this.generateSingleImage({
+              prompt: slide.imagePrompt,
+              size: '1024x1024',
+              quality: carouselQuality as ImageGenerationRequest['quality'],
+              model: carouselModel as ImageGenerationRequest['model'],
+            });
+            return this.renderSafeCarouselSlide(slide, raw, request.style);
+          }),
+        );
+        generated.push(...results);
+      }
+
+      return generated;
     } catch (error) {
       this.logger.error('Failed to generate carousel images:', error.message);
       throw new Error(`Carousel generation failed: ${error.message}`);
     }
   }
 
-  async createCarouselSlideHTML(
-    slide: CarouselSlide,
-    imageBase64: string,
-  ): Promise<string> {
-    return `
-      <div class="slide">
-        <img class="bg" src="data:image/png;base64,${imageBase64}" />
-        <div class="overlay"></div>
-        <div class="content">
-          <h1>${this.escapeHtml(slide.headline)}</h1>
-          <p>${this.escapeHtml(slide.body)}</p>
-        </div>
-      </div>
-    `;
-  }
-
   async generateCarouselPDF(
     request: CarouselGenerationRequest,
   ): Promise<Buffer> {
     try {
-      this.logger.log('Generating carousel PDF using HTML2Image API');
-
-      // Generate all images
+      this.logger.log('Generating carousel PDF using local renderer');
       const imageBuffers = await this.generateCarouselImages(request);
-
-      // Convert images to base64
-      const imageBase64Array = imageBuffers.map((buffer) =>
-        buffer.toString('base64'),
-      );
-
-      // Create HTML slides
-      const slideHTMLPromises = request.slides.map((slide, index) =>
-        this.createCarouselSlideHTML(slide, imageBase64Array[index]),
-      );
-
-      const slidesHTML = await Promise.all(slideHTMLPromises);
-
-      // Create complete HTML document
-      const fullHTML = `
-        <html>
-        <head>
-          <meta charset="UTF-8" />
-          <style>
-            html, body {
-              margin: 0;
-              padding: 0;
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-              width: 1024px;
-              height: ${request.slides.length * 1024}px;
-            }
-            
-            * {
-              box-sizing: border-box;
-            }
-            
-            .slide {
-              width: 1024px;
-              height: 1024px;
-              position: relative;
-              overflow: hidden;
-              display: block;
-            }
-            
-            .bg {
-              position: absolute;
-              top: 0;
-              left: 0;
-              width: 1024px;
-              height: 1024px;
-              object-fit: cover;
-            }
-            
-            .overlay {
-              position: absolute;
-              top: 0;
-              left: 0;
-              width: 1024px;
-              height: 1024px;
-              background: linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 100%);
-            }
-            
-            .content {
-              position: absolute;
-              bottom: 80px;
-              left: 60px;
-              right: 60px;
-              color: white;
-              z-index: 10;
-            }
-            
-            h1 {
-              font-size: 48px;
-              font-weight: 700;
-              margin: 0;
-              line-height: 1.1;
-              color: white;
-              text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-              margin-bottom: 20px;
-            }
-            
-            p {
-              font-size: 24px;
-              font-weight: 400;
-              margin: 0;
-              line-height: 1.3;
-              color: white;
-              text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
-            }
-          </style>
-        </head>
-        <body>
-          ${slidesHTML.join('')}
-        </body>
-        </html>
-      `;
-
-      // Use HTML2Image API to convert HTML to PDF
-      const pdfBuffer = await this.convertHTMLToPDF(fullHTML);
-
-      this.logger.log('Carousel PDF generated successfully');
-      return pdfBuffer;
+      return this.buildPdfFromImages(imageBuffers);
     } catch (error) {
       this.logger.error('Failed to generate carousel PDF:', error.message);
       throw new Error(`Carousel PDF generation failed: ${error.message}`);
     }
   }
 
-  private async convertHTMLToPDF(html: string): Promise<Buffer> {
-    try {
-      // Use html2image.net API for PDF conversion
-      const response = await axios.post(
-        'https://www.html2image.net/api/api.php',
-        new URLSearchParams({
-          key: 'h2i_15af0e0966edd0dfd227cb46dbcf12df', // Free API key
-          type: 'pdf',
-          width: '1024',
-          height: '1024',
-          fullpage: 'true',
-          zoom: '1',
-          margin: '0',
-          source: html,
-        }),
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          timeout: 60000, // 60 seconds
-        },
-      );
-
-      if (response.data && response.data.Link) {
-        // Download the generated PDF
-        const pdfResponse = await axios.get(response.data.Link, {
-          responseType: 'arraybuffer',
-          timeout: 30000,
-        });
-
-        return Buffer.from(pdfResponse.data);
-      } else {
-        throw new Error('Failed to get PDF download link from HTML2Image API');
-      }
-    } catch (error) {
-      this.logger.error('HTML to PDF conversion failed:', error.message);
-
-      // Fallback: create a simple PDF-like image using Sharp
-      return await this.createFallbackCarouselImage(html);
-    }
+  async generateCarouselBundle(
+    request: CarouselGenerationRequest,
+  ): Promise<CarouselGenerationBundle> {
+    const imageBuffers = await this.generateCarouselImages(request);
+    const pdfBuffer = request.includePdf === false
+      ? undefined
+      : await this.buildPdfFromImages(imageBuffers);
+    return { imageBuffers, pdfBuffer };
   }
 
-  private async createFallbackCarouselImage(html: string): Promise<Buffer> {
-    try {
-      this.logger.log('Using fallback method to create carousel image');
+  private async renderSafeCarouselSlide(
+    slide: CarouselSlide,
+    baseImage: Buffer,
+    style: CarouselGenerationRequest['style'] = 'professional',
+  ): Promise<Buffer> {
+    const headline = (slide.headline || '').trim();
+    const body = (slide.body || '').trim();
 
-      // Create a simple image with text overlay as fallback
-      const width = 1024;
-      const height = 1024;
+    const overlayOpacity =
+      style === 'creative' ? 0.28 : style === 'minimal' ? 0.2 : 0.35;
 
-      // Create a gradient background
-      const gradientSvg = `
-        <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
-              <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
-            </linearGradient>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grad)" />
-          <text x="50%" y="50%" font-family="Arial, sans-serif" font-size="48" font-weight="bold" 
-                text-anchor="middle" dominant-baseline="middle" fill="white">
-            Carousel Content
-          </text>
-          <text x="50%" y="70%" font-family="Arial, sans-serif" font-size="24" 
-                text-anchor="middle" dominant-baseline="middle" fill="rgba(255,255,255,0.8)">
-            Generated by Trndinn
-          </text>
-        </svg>
-      `;
+    const CANVAS = 1024;
+    const PAD_X = 72;
+    const TEXT_W = CANVAS - PAD_X * 2;
 
-      return await sharp(Buffer.from(gradientSvg)).png().toBuffer();
-    } catch (error) {
-      this.logger.error('Fallback carousel generation failed:', error.message);
-      throw new Error('All carousel generation methods failed');
+    const HEAD_FONT = 48;
+    const HEAD_LINE_H = 58;
+    const BODY_FONT = 28;
+    const BODY_LINE_H = 38;
+
+    const headLines = this.wrapSvgText(headline, HEAD_FONT, TEXT_W, 2);
+    const bodyLines = this.wrapSvgText(body, BODY_FONT, TEXT_W, 4);
+
+    const GAP = 16;
+    const contentH =
+      headLines.length * HEAD_LINE_H +
+      GAP +
+      bodyLines.length * BODY_LINE_H;
+    const BOX_PAD_Y = 32;
+    const boxH = contentH + BOX_PAD_Y * 2;
+    const BOX_BOTTOM_MARGIN = 80;
+    const boxY = CANVAS - boxH - BOX_BOTTOM_MARGIN;
+    const boxX = 40;
+    const boxW = CANVAS - boxX * 2;
+
+    let textY = boxY + BOX_PAD_Y + HEAD_LINE_H * 0.78;
+
+    const tspans: string[] = [];
+    for (const line of headLines) {
+      tspans.push(
+        `<text x="${PAD_X}" y="${Math.round(textY)}" fill="#ffffff" font-size="${HEAD_FONT}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${this.escapeHtml(line)}</text>`,
+      );
+      textY += HEAD_LINE_H;
     }
+    textY += GAP;
+    for (const line of bodyLines) {
+      tspans.push(
+        `<text x="${PAD_X}" y="${Math.round(textY)}" fill="rgba(255,255,255,0.9)" font-size="${BODY_FONT}" font-weight="400" font-family="Arial, Helvetica, sans-serif">${this.escapeHtml(line)}</text>`,
+      );
+      textY += BODY_LINE_H;
+    }
+
+    const svg = `<svg width="${CANVAS}" height="${CANVAS}" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="${CANVAS}" height="${CANVAS}" fill="rgba(0,0,0,${overlayOpacity})"/>
+  <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="24" fill="rgba(0,0,0,0.68)"/>
+  ${tspans.join('\n  ')}
+</svg>`;
+
+    return sharp(baseImage)
+      .resize(CANVAS, CANVAS, { fit: 'cover' })
+      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+      .sharpen()
+      .jpeg({ quality: 92, mozjpeg: true, chromaSubsampling: '4:4:4' })
+      .toBuffer();
+  }
+
+  private wrapSvgText(
+    text: string,
+    fontSize: number,
+    maxWidth: number,
+    maxLines: number,
+  ): string[] {
+    const avgCharW = fontSize * 0.52;
+    const maxChars = Math.floor(maxWidth / avgCharW);
+    const words = text.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let current = '';
+
+    for (const word of words) {
+      const test = current ? `${current} ${word}` : word;
+      if (test.length > maxChars && current) {
+        lines.push(current);
+        current = word;
+        if (lines.length >= maxLines) break;
+      } else {
+        current = test;
+      }
+    }
+    if (current && lines.length < maxLines) lines.push(current);
+    if (lines.length === maxLines && words.length > 0) {
+      const last = lines[maxLines - 1];
+      if (last.length > maxChars - 3) {
+        lines[maxLines - 1] = last.slice(0, maxChars - 3) + '...';
+      }
+    }
+    return lines.length > 0 ? lines : [''];
+  }
+
+  private buildImageCacheKey(request: ImageGenerationRequest): string {
+    const hash = createHash('sha256')
+      .update(JSON.stringify(request))
+      .digest('hex')
+      .slice(0, 24);
+    return `media:image:${hash}`;
+  }
+
+  private buildProductionImagePrompt(prompt: string): string {
+    return [
+      'Create a high-quality, photorealistic LinkedIn visual.',
+      'CRITICAL: Do NOT include any text, letters, numbers, logos, or watermarks inside the generated image.',
+      'Use clean composition, balanced lighting, and professional business aesthetics.',
+      'Avoid distorted objects and avoid surreal artifacts.',
+      `Scene brief: ${prompt}`,
+    ].join(' ');
+  }
+
+  private async buildPdfFromImages(images: Buffer[]): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ autoFirstPage: false, compress: true });
+      const chunks: Buffer[] = [];
+      const stream = new PassThrough();
+      stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+      stream.on('error', reject);
+
+      doc.pipe(stream);
+      for (const image of images) {
+        doc.addPage({ size: [1024, 1024], margin: 0 });
+        doc.image(image, 0, 0, { width: 1024, height: 1024 });
+      }
+      doc.end();
+    });
   }
 
   async optimizeImage(

@@ -11,8 +11,11 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  Headers,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
 import {
@@ -23,6 +26,10 @@ import { MinioService } from '../services/minio.service';
 import { SupabaseService } from '../services/supabase.service';
 import { QuotaService } from '../services/quota.service';
 import { NotificationService } from '../services/notification.service';
+import { IdempotencyService } from '../services/idempotency.service';
+import { CacheService } from '../services/cache.service';
+import { QUEUE_NAMES } from '../common/constants';
+import { CarouselJobData } from '../workers/media-carousel.worker';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -42,6 +49,10 @@ export class MediaController {
     private readonly quotaService: QuotaService,
     private readonly notificationService: NotificationService,
     private readonly configService: ConfigService,
+    private readonly idempotencyService: IdempotencyService,
+    private readonly cacheService: CacheService,
+    @InjectQueue(QUEUE_NAMES.MEDIA_CAROUSEL)
+    private readonly carouselQueue: Queue,
   ) {}
 
   /** Free-plan watermark only when env WATERMARK_FREE_PLAN_ENABLED is true. */
@@ -53,11 +64,31 @@ export class MediaController {
   @Post('generate-image')
   async generateImage(
     @Request() req: AuthenticatedRequest,
-    @Body() body: { prompt: string; contentId?: string },
+    @Body() body: { prompt: string; contentId?: string; idempotencyKey?: string },
+    @Headers('x-idempotency-key') idemHeader?: string,
   ) {
     try {
       const userId = req.user.id;
       const { prompt, contentId } = body;
+      const idempotencyKey = body.idempotencyKey || idemHeader;
+      if (idempotencyKey) {
+        const existing = await this.idempotencyService.getResult(
+          'media-image',
+          idempotencyKey,
+          userId,
+        );
+        if (existing?.status === 'completed' && existing.result) {
+          return existing.result;
+        }
+        const locked = await this.idempotencyService.lock(
+          'media-image',
+          idempotencyKey,
+          userId,
+        );
+        if (!locked) {
+          throw new HttpException('Duplicate request in progress', HttpStatus.CONFLICT);
+        }
+      }
 
       // Check quota
       const hasQuota = await this.quotaService.checkQuotaAvailable(userId, 1.0);
@@ -69,14 +100,16 @@ export class MediaController {
       }
 
       // IMMEDIATE CREDIT DEDUCTION for image generation
-      await this.quotaService.consumeCredits(
+      const operationId = idempotencyKey || `image:${userId}:${Date.now()}`;
+      await this.quotaService.debitOnce({
         userId,
-        1.0,
-        'Image generation initiated (1.0 credits)',
-        'generation',
-        'image',
+        operationId,
+        amount: 1.0,
+        description: 'Image generation initiated (1.0 credits)',
+        operationType: 'generation',
+        contentType: 'image',
         contentId,
-      );
+      });
 
       try {
         const quotaInfo = await this.quotaService.getUserQuota(userId);
@@ -145,21 +178,31 @@ export class MediaController {
           'image',
         );
 
-        return {
+        const result = {
           success: true,
           mediaFile,
           publicUrl,
         };
+        if (idempotencyKey) {
+          await this.idempotencyService.setResult(
+            'media-image',
+            idempotencyKey,
+            userId,
+            result,
+          );
+        }
+        return result;
       } catch (generationError) {
         // REFUND CREDITS if generation fails
-        await this.quotaService.consumeCredits(
+        await this.quotaService.refundOnce({
           userId,
-          -1.0,
-          'Refund for failed image generation (1.0 credits)',
-          'refund',
-          'image',
+          operationId,
+          amount: 1.0,
+          description: 'Refund for failed image generation (1.0 credits)',
+          operationType: 'refund',
+          contentType: 'image',
           contentId,
-        );
+        });
 
         throw generationError;
       }
@@ -175,10 +218,36 @@ export class MediaController {
   @Post('generate-carousel')
   async generateCarousel(
     @Request() req: AuthenticatedRequest,
-    @Body() body: { slides: any[]; contentId?: string },
+    @Body()
+    body: {
+      slides: any[];
+      contentId?: string;
+      idempotencyKey?: string;
+      includePdf?: boolean;
+    },
+    @Headers('x-idempotency-key') idemHeader?: string,
   ) {
     const userId = req.user.id;
-    const { slides, contentId } = body;
+    const { slides, contentId, includePdf = true } = body;
+    const idempotencyKey = body.idempotencyKey || idemHeader;
+    if (idempotencyKey) {
+      const existing = await this.idempotencyService.getResult(
+        'media-carousel',
+        idempotencyKey,
+        userId,
+      );
+      if (existing?.status === 'completed' && existing.result) {
+        return existing.result;
+      }
+      const locked = await this.idempotencyService.lock(
+        'media-carousel',
+        idempotencyKey,
+        userId,
+      );
+      if (!locked) {
+        throw new HttpException('Duplicate request in progress', HttpStatus.CONFLICT);
+      }
+    }
 
     const quotaInfo = await this.quotaService.getUserQuota(userId);
     const isFreePlan = quotaInfo.planType === 'free';
@@ -199,91 +268,89 @@ export class MediaController {
       }
 
       // IMMEDIATE CREDIT DEDUCTION for carousel generation
-      await this.quotaService.consumeCredits(
+      const operationId = idempotencyKey || `carousel:${userId}:${Date.now()}`;
+      await this.quotaService.debitOnce({
         userId,
-        quotaCost,
-        `Carousel generation initiated (${quotaCost} credits)`,
-        'generation',
-        'carousel',
+        operationId,
+        amount: quotaCost,
+        description: `Carousel generation initiated (${quotaCost} credits)`,
+        operationType: 'generation',
+        contentType: 'carousel',
         contentId,
-      );
-
-      // Generate carousel PDF
-      const pdfBuffer = await this.mediaGenerationService.generateCarouselPDF({
-        slides,
-        style: 'professional',
       });
 
-      // Upload PDF to MinIO
-      const pdfFileName = `carousel-${Date.now()}.pdf`;
-      const pdfUrl = await this.mediaGenerationService.uploadToMinio(
-        pdfBuffer,
-        pdfFileName,
-        'application/pdf',
-        userId,
-      );
+      // Generate carousel images (and optional PDF) in a single pass.
+      const { imageBuffers, pdfBuffer } =
+        await this.mediaGenerationService.generateCarouselBundle({
+        slides,
+        style: 'professional',
+        includePdf,
+      });
 
-      // Generate individual images for preview
-      const imageBuffers =
-        await this.mediaGenerationService.generateCarouselImages({
-          slides,
-          style: 'professional',
-        });
-
-      const imageUrls: string[] = [];
-      const mediaFiles: any[] = [];
-
-      // Upload individual images
-      for (let i = 0; i < imageBuffers.length; i++) {
-        const optimizedBuffer = this.shouldApplyFreePlanWatermark(isFreePlan)
-          ? await this.mediaGenerationService.optimizeImageWithWatermark(
-              imageBuffers[i],
-            )
-          : await this.mediaGenerationService.optimizeImage(imageBuffers[i]);
-        const imageFileName = `carousel-slide-${Date.now()}-${i + 1}.jpg`;
-        const imageUrl = await this.mediaGenerationService.uploadToMinio(
-          optimizedBuffer,
-          imageFileName,
-          'image/jpeg',
+      let pdfUrl: string | undefined;
+      let pdfMediaFile: any | undefined;
+      if (includePdf && pdfBuffer) {
+        const pdfFileName = `carousel-${Date.now()}.pdf`;
+        pdfUrl = await this.mediaGenerationService.uploadToMinio(
+          pdfBuffer,
+          pdfFileName,
+          'application/pdf',
           userId,
         );
-
-        imageUrls.push(imageUrl);
-
-        // Save image to database
-        const { data: mediaFile } = await this.supabaseService
+        const savedPdf = await this.supabaseService
           .getServiceClient()
           .from('media_files')
           .insert({
             user_id: userId,
             content_id: contentId,
-            file_name: imageFileName,
-            file_type: 'image',
-            file_size: optimizedBuffer.length,
-            minio_path: `${userId}/${imageFileName}`,
-            public_url: imageUrl,
+            file_name: pdfFileName,
+            file_type: 'pdf',
+            file_size: pdfBuffer.length,
+            minio_path: `${userId}/${pdfFileName}`,
+            public_url: pdfUrl,
           })
           .select()
           .single();
-
-        mediaFiles.push(mediaFile);
+        pdfMediaFile = savedPdf.data;
       }
 
-      // Save PDF to database
-      const { data: pdfMediaFile } = await this.supabaseService
-        .getServiceClient()
-        .from('media_files')
-        .insert({
-          user_id: userId,
-          content_id: contentId,
-          file_name: pdfFileName,
-          file_type: 'pdf',
-          file_size: pdfBuffer.length,
-          minio_path: `${userId}/${pdfFileName}`,
-          public_url: pdfUrl,
-        })
-        .select()
-        .single();
+      const imageUrls: string[] = [];
+      const mediaFiles: any[] = [];
+
+      const batchTs = Date.now();
+      const imageUploadResults = await Promise.all(
+        imageBuffers.map(async (buffer, i) => {
+          const optimizedBuffer = this.shouldApplyFreePlanWatermark(isFreePlan)
+            ? await this.mediaGenerationService.optimizeImageWithWatermark(buffer)
+            : await this.mediaGenerationService.optimizeImage(buffer);
+          const imageFileName = `carousel-slide-${batchTs}-${i + 1}.jpg`;
+          const imageUrl = await this.mediaGenerationService.uploadToMinio(
+            optimizedBuffer,
+            imageFileName,
+            'image/jpeg',
+            userId,
+          );
+          const { data: mediaFile } = await this.supabaseService
+            .getServiceClient()
+            .from('media_files')
+            .insert({
+              user_id: userId,
+              content_id: contentId,
+              file_name: imageFileName,
+              file_type: 'image',
+              file_size: optimizedBuffer.length,
+              minio_path: `${userId}/${imageFileName}`,
+              public_url: imageUrl,
+            })
+            .select()
+            .single();
+          return { imageUrl, mediaFile };
+        }),
+      );
+      imageUploadResults.forEach((r) => {
+        imageUrls.push(r.imageUrl);
+        mediaFiles.push(r.mediaFile);
+      });
 
       // Update content if provided
       if (contentId) {
@@ -293,7 +360,7 @@ export class MediaController {
           .update({
             visual_type: 'carousel',
             carousel_urls: imageUrls,
-            pdf_url: pdfUrl,
+            ...(pdfUrl ? { pdf_url: pdfUrl } : {}),
           })
           .eq('id', contentId)
           .eq('user_id', userId);
@@ -310,23 +377,33 @@ export class MediaController {
         'carousel',
       );
 
-      return {
+      const result = {
         success: true,
-        pdfUrl,
+        ...(pdfUrl ? { pdfUrl } : {}),
         imageUrls,
-        mediaFiles: [...mediaFiles, pdfMediaFile],
+        mediaFiles: pdfMediaFile ? [...mediaFiles, pdfMediaFile] : mediaFiles,
       };
+      if (idempotencyKey) {
+        await this.idempotencyService.setResult(
+          'media-carousel',
+          idempotencyKey,
+          userId,
+          result,
+        );
+      }
+      return result;
     } catch (error) {
       // REFUND CREDITS for failed carousel generation
       try {
-        await this.quotaService.consumeCredits(
+        await this.quotaService.refundOnce({
           userId,
-          -quotaCost,
-          `Refund for failed carousel generation (${quotaCost} credits)`,
-          'refund',
-          'carousel',
-          contentId || undefined,
-        );
+          operationId: idempotencyKey || `carousel:${userId}`,
+          amount: quotaCost,
+          description: `Refund for failed carousel generation (${quotaCost} credits)`,
+          operationType: 'refund',
+          contentType: 'carousel',
+          contentId: contentId || undefined,
+        });
         this.logger.log(
           `Refunded ${quotaCost} credits to user ${userId} for failed carousel generation`,
         );
@@ -342,6 +419,136 @@ export class MediaController {
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  @Post('generate-carousel-async')
+  async generateCarouselAsync(
+    @Request() req: AuthenticatedRequest,
+    @Body()
+    body: {
+      slides: any[];
+      contentId: string;
+      idempotencyKey?: string;
+      includePdf?: boolean;
+      /** e.g. professional | creative | minimal | bold (bold maps to creative) */
+      style?: string;
+    },
+    @Headers('x-idempotency-key') idemHeader?: string,
+  ) {
+    const userId = req.user.id;
+    const { slides, contentId, includePdf = false, style: styleRaw } = body;
+    const idempotencyKey = body.idempotencyKey || idemHeader;
+
+    if (idempotencyKey) {
+      const existing = await this.idempotencyService.getResult(
+        'media-carousel-async',
+        idempotencyKey,
+        userId,
+      );
+      if (existing?.status === 'completed' && existing.result) {
+        return existing.result;
+      }
+    }
+
+    const quotaInfo = await this.quotaService.getUserQuota(userId);
+    const isFreePlan = quotaInfo.planType === 'free';
+    const quotaCost = slides.length * 1.5;
+
+    const hasQuota = await this.quotaService.checkQuotaAvailable(userId, quotaCost);
+    if (!hasQuota) {
+      throw new HttpException('Insufficient credits', HttpStatus.PAYMENT_REQUIRED);
+    }
+
+    const operationId = idempotencyKey || `carousel-async:${userId}:${Date.now()}`;
+    await this.quotaService.debitOnce({
+      userId,
+      operationId,
+      amount: quotaCost,
+      description: `Carousel generation queued (${quotaCost} credits)`,
+      operationType: 'generation',
+      contentType: 'carousel',
+      contentId,
+    });
+
+    await this.supabaseService
+      .getServiceClient()
+      .from('generated_content')
+      .update({ status: 'media_generating' })
+      .eq('id', contentId)
+      .eq('user_id', userId);
+
+    const carouselStyle = ((): CarouselJobData['style'] => {
+      const s = (styleRaw || '').toLowerCase().trim();
+      if (s === 'bold' || s === 'creative') return 'creative';
+      if (s === 'minimal') return 'minimal';
+      if (s === 'professional') return 'professional';
+      return 'professional';
+    })();
+
+    const jobData: CarouselJobData = {
+      userId,
+      contentId,
+      slides,
+      style: carouselStyle,
+      includePdf,
+      isFreePlan,
+      operationId,
+      quotaCost,
+    };
+
+    const job = await this.carouselQueue.add('generate', jobData, {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 3000 },
+      removeOnComplete: { age: 600 },
+      removeOnFail: { age: 1800 },
+    });
+
+    const result = {
+      success: true,
+      async: true,
+      jobId: job.id,
+      contentId,
+    };
+
+    if (idempotencyKey) {
+      await this.idempotencyService.setResult(
+        'media-carousel-async',
+        idempotencyKey,
+        userId,
+        result,
+      );
+    }
+    return result;
+  }
+
+  @Get('carousel-job/:jobId')
+  async getCarouselJobStatus(
+    @Request() req: AuthenticatedRequest,
+    @Param('jobId') jobId: string,
+  ) {
+    const job = await this.carouselQueue.getJob(jobId);
+    if (!job) {
+      const cachedResult = await this.cacheService.get(`carousel:job:${jobId}:result`);
+      if (cachedResult) {
+        return { status: 'completed', progress: 100, result: cachedResult };
+      }
+      throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
+    }
+
+    const state = await job.getState();
+    const progress = job.progress ?? 0;
+
+    if (state === 'completed') {
+      return { status: 'completed', progress: 100, result: job.returnvalue };
+    }
+    if (state === 'failed') {
+      return {
+        status: 'failed',
+        progress,
+        error: job.failedReason || 'Unknown error',
+      };
+    }
+    return { status: state, progress };
   }
 
   @Get('files')
@@ -393,6 +600,48 @@ export class MediaController {
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  @Post('attach-user-assets')
+  async attachUserAssets(
+    @Request() req: AuthenticatedRequest,
+    @Body()
+    body: {
+      contentId: string;
+      postType: 'single' | 'carousel';
+      mediaUrls: string[];
+    },
+  ) {
+    const userId = req.user.id;
+    const { contentId, postType, mediaUrls } = body;
+    if (!contentId || !mediaUrls?.length) {
+      throw new HttpException('contentId and mediaUrls are required', HttpStatus.BAD_REQUEST);
+    }
+
+    const updates: Record<string, unknown> =
+      postType === 'carousel'
+        ? {
+            visual_type: 'carousel',
+            carousel_urls: mediaUrls,
+            status: 'media_ready',
+          }
+        : {
+            visual_type: 'image',
+            visual_url: mediaUrls[0],
+            media_urls: mediaUrls,
+            status: 'media_ready',
+          };
+
+    const { error } = await this.supabaseService
+      .getServiceClient()
+      .from('generated_content')
+      .update(updates)
+      .eq('id', contentId)
+      .eq('user_id', userId);
+    if (error) {
+      throw new HttpException('Failed to attach assets', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+    return { success: true };
   }
 
   @Delete('files/:id')

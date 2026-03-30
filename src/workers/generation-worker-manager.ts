@@ -100,13 +100,25 @@ export class GenerationWorkerManager implements OnModuleInit {
         this.configService.get<string>('app.baseUrl') ||
         'http://localhost:3000';
       const callbackUrl = `${baseUrl}/webhook/n8n-callback`;
+      const carouselUrl =
+        this.configService.get<string>('n8n.carouselWebhookUrl') || '';
+      const ct = preferences?.contentType as string | undefined;
+      const useCarousel = ct === 'carousel' && carouselUrl.length > 0;
 
-      await this.n8nService.triggerContentGeneration({
-        jobId,
-        userId,
-        callbackUrl,
-        preferences,
-      });
+      this.logger.log(
+        `n8n route: contentType=${String(ct)} jobType=${String(preferences?.jobType)} ` +
+          `→ ${useCarousel ? `carousel webhook (${carouselUrl})` : 'default webhook'} | callback=${callbackUrl}`,
+      );
+
+      await this.n8nService.triggerContentGeneration(
+        {
+          jobId,
+          userId,
+          callbackUrl,
+          preferences,
+        },
+        useCarousel ? { webhookUrlOverride: carouselUrl } : undefined,
+      );
 
       await this.generationJobRepository.updateStatus(
         jobId,
@@ -129,14 +141,13 @@ export class GenerationWorkerManager implements OnModuleInit {
       while (Date.now() - startTime < maxWaitTime) {
         await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
-        // Check Redis for completion signal
+        // Check Redis for completion signal (webhook sets this)
         const completionData = await this.redis.get(completionKey);
 
         if (completionData) {
           const result = JSON.parse(completionData);
-          this.logger.log(`✅ Job ${jobId} completed: ${result.status}`);
+          this.logger.log(`✅ Job ${jobId} completed (Redis): ${result.status}`);
 
-          // Clean up the completion signal
           await this.redis.del(completionKey);
 
           if (result.status === 'success') {
@@ -150,6 +161,26 @@ export class GenerationWorkerManager implements OnModuleInit {
           } else {
             throw new Error(result.error || 'n8n workflow failed');
           }
+        }
+
+        // Fallback: same source of truth as the other worker — Supabase job row.
+        // If Redis was flushed, keys missed, or webhook could not write Redis, n8n can
+        // still complete via /webhook/n8n-callback and mark the job ready in DB.
+        const dbJob = await this.generationJobRepository.findById(jobId);
+        if (dbJob?.status === JobStatus.READY && dbJob.contentId) {
+          this.logger.log(
+            `✅ Job ${jobId} completed (DB fallback, contentId=${dbJob.contentId})`,
+          );
+          await job.updateProgress(100);
+          return {
+            success: true,
+            jobId,
+            contentId: dbJob.contentId,
+            message: 'Content generated successfully by n8n',
+          };
+        }
+        if (dbJob?.status === JobStatus.FAILED) {
+          throw new Error(dbJob.error || 'n8n workflow failed');
         }
 
         this.logger.log(

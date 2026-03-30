@@ -17,6 +17,8 @@ export interface PublishPostRequest {
   contentId: string;
   userId: string;
   platform: 'linkedin';
+  actorType?: 'member' | 'organization';
+  organizationUrn?: string;
 }
 
 export interface PostContent {
@@ -219,18 +221,30 @@ export class PostSchedulingService {
         content.carousel_urls && content.carousel_urls.length > 0;
 
       if (hasCarousel) {
-        publishResult = await this.publishCarouselPost(content);
+        publishResult = await this.publishCarouselPost(
+          content,
+          request.actorType,
+          request.organizationUrn,
+        );
       } else if (
         hasValidImage &&
         (content.visual_type === 'image' || content.visual_type === 'single')
       ) {
-        publishResult = await this.publishImagePost(content);
+        publishResult = await this.publishImagePost(
+          content,
+          request.actorType,
+          request.organizationUrn,
+        );
       } else {
         // Default to text post for any other case
         this.logger.log(
           `Publishing as text post. Visual type: ${content.visual_type}, Has valid image: ${hasValidImage}`,
         );
-        publishResult = await this.publishTextPost(content);
+        publishResult = await this.publishTextPost(
+          content,
+          request.actorType,
+          request.organizationUrn,
+        );
       }
 
       // Update content status
@@ -264,6 +278,8 @@ export class PostSchedulingService {
 
   private async publishTextPost(
     content: PostContent,
+    actorType?: 'member' | 'organization',
+    organizationUrn?: string,
   ): Promise<{ postId: string }> {
     const text = this.formatPostText(content);
 
@@ -271,6 +287,8 @@ export class PostSchedulingService {
       userId: content.user_id,
       text,
       mediaType: 'text',
+      actorType,
+      organizationUrn,
     });
 
     return { postId: result.postId };
@@ -278,6 +296,8 @@ export class PostSchedulingService {
 
   private async publishImagePost(
     content: PostContent,
+    actorType?: 'member' | 'organization',
+    organizationUrn?: string,
   ): Promise<{ postId: string }> {
     // Check if we have a valid image URL
     if (!content.visual_url || !content.visual_url.startsWith('http')) {
@@ -285,7 +305,7 @@ export class PostSchedulingService {
         `Invalid image URL for content ${content.id}: ${content.visual_url}. Converting to text post.`,
       );
       // Fallback to text post if image URL is invalid
-      return await this.publishTextPost(content);
+      return await this.publishTextPost(content, actorType, organizationUrn);
     }
 
     const text = this.formatPostText(content);
@@ -295,6 +315,8 @@ export class PostSchedulingService {
       text,
       mediaType: 'image',
       mediaUrl: content.visual_url,
+      actorType,
+      organizationUrn,
     });
 
     return { postId: result.postId };
@@ -302,6 +324,8 @@ export class PostSchedulingService {
 
   private async publishCarouselPost(
     content: PostContent,
+    actorType?: 'member' | 'organization',
+    organizationUrn?: string,
   ): Promise<{ postId: string }> {
     if (!content.carousel_urls || content.carousel_urls.length === 0) {
       throw new Error('Carousel URLs not found for carousel post');
@@ -314,6 +338,8 @@ export class PostSchedulingService {
       text,
       mediaType: 'document',
       mediaUrl: content.carousel_urls[0], // PDF URL for carousel
+      actorType,
+      organizationUrn,
     });
 
     return { postId: result.postId };

@@ -41,6 +41,7 @@ import { EmailService } from './services/email.service';
 import { AuthService } from './services/auth.service';
 import { OnboardingService } from './services/onboarding.service';
 import { PaddleService } from './services/paddle.service';
+import { IdempotencyService } from './services/idempotency.service';
 
 import { ProfileRepository } from './repositories/profile.repository';
 import { OptionalAuthGuard } from './guards/optional-auth.guard';
@@ -50,6 +51,7 @@ import { SubscriptionRepository } from './repositories/subscription.repository';
 
 import { GenerationWorker } from './workers/generation.worker';
 import { GenerationWorkerManager } from './workers/generation-worker-manager';
+import { MediaCarouselWorker } from './workers/media-carousel.worker';
 import { PostPublishingProcessor } from './processors/post-publishing.processor';
 import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
 import { PaywallGuard } from './guards/paywall.guard';
@@ -81,6 +83,12 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     }),
     BullModule.registerQueue({
       name: 'post-publishing',
+    }),
+    BullModule.registerQueue({
+      name: QUEUE_NAMES.MEDIA_SINGLE,
+    }),
+    BullModule.registerQueue({
+      name: QUEUE_NAMES.MEDIA_CAROUSEL,
     }),
   ],
   controllers: [
@@ -126,6 +134,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     AuthService,
     OnboardingService,
     PaddleService,
+    IdempotencyService,
     ProfileRepository,
     OptionalAuthGuard,
     GenerationJobRepository,
@@ -133,6 +142,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     SubscriptionRepository,
     GenerationWorker,
     GenerationWorkerManager,
+    MediaCarouselWorker,
     PostPublishingProcessor,
     RateLimitMiddleware,
     PaywallGuard,

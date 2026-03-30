@@ -507,6 +507,8 @@ export class LinkedinService {
     text: string;
     mediaType: 'text' | 'image' | 'document';
     mediaUrl?: string;
+    actorType?: 'member' | 'organization';
+    organizationUrn?: string;
   }): Promise<{ postId: string }> {
     const profile = await this.profileRepository.findById(request.userId);
     if (!profile) {
@@ -524,22 +526,29 @@ export class LinkedinService {
       throw new BadRequestException(ERROR_MESSAGES.LINKEDIN_TOKEN_EXPIRED);
     }
 
-    const linkedinUserId = await this.getLinkedinUserId(
-      profile.linkedin_access_token,
-    );
+    const linkedinUserId = await this.getLinkedinUserId(profile.linkedin_access_token);
+    const ownerUrn =
+      request.actorType === 'organization'
+        ? request.organizationUrn
+        : `urn:li:person:${linkedinUserId}`;
+    if (!ownerUrn) {
+      throw new BadRequestException(
+        'organizationUrn is required for organization publishing',
+      );
+    }
 
     let postData: any;
 
     switch (request.mediaType) {
       case 'text':
-        postData = await this.createTextPost(linkedinUserId, request.text);
+        postData = await this.createTextPost(ownerUrn, request.text);
         break;
       case 'image':
         if (!request.mediaUrl) {
           throw new BadRequestException('Media URL required for image post');
         }
         postData = await this.createImagePost(
-          linkedinUserId,
+          ownerUrn,
           request.text,
           request.mediaUrl,
           profile.linkedin_access_token,
@@ -550,7 +559,7 @@ export class LinkedinService {
           throw new BadRequestException('Media URL required for document post');
         }
         postData = await this.createDocumentPost(
-          linkedinUserId,
+          ownerUrn,
           request.text,
           request.mediaUrl,
           profile.linkedin_access_token,
@@ -608,11 +617,11 @@ export class LinkedinService {
   }
 
   private async createTextPost(
-    linkedinUserId: string,
+    ownerUrn: string,
     text: string,
   ): Promise<any> {
     return {
-      author: `urn:li:person:${linkedinUserId}`,
+      author: ownerUrn,
       commentary: text,
       visibility: 'PUBLIC',
       distribution: {
@@ -626,7 +635,7 @@ export class LinkedinService {
   }
 
   private async createImagePost(
-    linkedinUserId: string,
+    ownerUrn: string,
     text: string,
     imageUrl: string,
     accessToken: string,
@@ -635,10 +644,11 @@ export class LinkedinService {
     const uploadedImageUrn = await this.uploadImageToLinkedIn(
       imageUrl,
       accessToken,
+      ownerUrn,
     );
 
     return {
-      author: `urn:li:person:${linkedinUserId}`,
+      author: ownerUrn,
       commentary: text,
       visibility: 'PUBLIC',
       distribution: {
@@ -658,7 +668,7 @@ export class LinkedinService {
   }
 
   private async createDocumentPost(
-    linkedinUserId: string,
+    ownerUrn: string,
     text: string,
     documentUrl: string,
     accessToken: string,
@@ -667,10 +677,11 @@ export class LinkedinService {
     const uploadedDocumentUrn = await this.uploadDocumentToLinkedIn(
       documentUrl,
       accessToken,
+      ownerUrn,
     );
 
     return {
-      author: `urn:li:person:${linkedinUserId}`,
+      author: ownerUrn,
       commentary: text,
       visibility: 'PUBLIC',
       distribution: {
@@ -692,6 +703,7 @@ export class LinkedinService {
   private async uploadImageToLinkedIn(
     imageUrl: string,
     accessToken: string,
+    ownerUrn: string,
   ): Promise<string> {
     try {
       // Initialize upload
@@ -707,7 +719,7 @@ export class LinkedinService {
           },
           body: JSON.stringify({
             initializeUploadRequest: {
-              owner: await this.getLinkedinPersonUrn(accessToken),
+              owner: ownerUrn,
             },
           }),
         },
@@ -763,6 +775,7 @@ export class LinkedinService {
   private async uploadDocumentToLinkedIn(
     documentUrl: string,
     accessToken: string,
+    ownerUrn: string,
   ): Promise<string> {
     try {
       // Initialize document upload
@@ -778,7 +791,7 @@ export class LinkedinService {
           },
           body: JSON.stringify({
             initializeUploadRequest: {
-              owner: await this.getLinkedinPersonUrn(accessToken),
+              owner: ownerUrn,
             },
           }),
         },

@@ -50,6 +50,22 @@ export class GenerationService {
     userId: string,
     preferences?: Record<string, any>,
   ): Promise<{ jobId: string; message: string }> {
+    const normalizedPreferences = {
+      ...(preferences || {}),
+      generationGuardrails: {
+        temperature:
+          typeof preferences?.generationGuardrails?.temperature === 'number'
+            ? Math.max(
+                0,
+                Math.min(1, preferences.generationGuardrails.temperature),
+              )
+            : 0.2,
+        factualityMode:
+          preferences?.generationGuardrails?.factualityMode || 'strict',
+        reduceHallucination: true,
+      },
+    };
+
     // Check quota and consume credits immediately (no more test user exception)
     const hasQuota = await this.quotaService.checkQuotaAvailable(userId, 1.5);
     if (!hasQuota) {
@@ -80,7 +96,7 @@ export class GenerationService {
       {
         jobId: job.id,
         userId,
-        preferences,
+        preferences: normalizedPreferences,
       },
       {
         attempts: 1, // No auto-retry, user must manually retry

@@ -21,6 +21,8 @@ export default () => ({
 
   n8n: {
     webhookUrl: process.env.N8N_WEBHOOK_URL || '',
+    /** Optional: dedicated workflow for carousel (post + visual.carouselSlides). Falls back to webhookUrl. */
+    carouselWebhookUrl: process.env.N8N_CAROUSEL_WEBHOOK_URL || '',
     apiKey: process.env.N8N_API_KEY || '',
   },
 
@@ -48,6 +50,14 @@ export default () => ({
     freePlanEnabled:
       process.env.WATERMARK_FREE_PLAN_ENABLED === 'true' ||
       process.env.WATERMARK_FREE_PLAN_ENABLED === '1',
+  },
+  features: {
+    mediaPipelineV2:
+      process.env.FEATURE_MEDIA_PIPELINE_V2 === 'true' ||
+      process.env.FEATURE_MEDIA_PIPELINE_V2 === '1',
+    linkedinOrgPublishing:
+      process.env.FEATURE_LINKEDIN_ORG_PUBLISHING === 'true' ||
+      process.env.FEATURE_LINKEDIN_ORG_PUBLISHING === '1',
   },
 
   paddle: {

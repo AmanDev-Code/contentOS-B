@@ -21,6 +21,7 @@ export class GeneratedContentRepository {
       aiReasoning?: string;
       performancePrediction?: Record<string, any>;
       suggestedImprovements?: string[];
+      status?: ContentStatus;
     },
   ): Promise<GeneratedContent> {
     const { data: result, error } = await this.supabaseService
@@ -33,7 +34,7 @@ export class GeneratedContentRepository {
         job_id: data.jobId, // Re-enabled after migration
         category_id: data.categoryId,
         ai_score: data.aiScore,
-        status: ContentStatus.READY,
+        status: data.status || ContentStatus.READY,
         visual_type: data.visualType || VisualType.IMAGE,
         visual_url: data.visualUrl,
         carousel_urls: data.carouselUrls,

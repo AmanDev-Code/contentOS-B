@@ -4,8 +4,12 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { GenerationJobRepository } from '../repositories/generation-job.repository';
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
-import type { N8nCallbackPayload } from '../common/types';
-import { JobStatus } from '../common/types';
+import { ContentStatus, JobStatus, VisualType } from '../common/types';
+import {
+  MediaPostType,
+  N8nGeneratedContentDto,
+} from '../common/dto/media-intent.dto';
+import { normalizeN8nCallbackBody } from '../common/utils/n8n-callback-normalize';
 
 @ApiTags('webhook')
 @Controller('webhook')
@@ -63,7 +67,15 @@ export class WebhookController {
 
   @Post('n8n-callback')
   @ApiOperation({ summary: 'Receive callback from n8n workflow' })
-  async handleN8nCallback(@Body() payload: N8nCallbackPayload) {
+  async handleN8nCallback(@Body() body: unknown) {
+    let payload: ReturnType<typeof normalizeN8nCallbackBody>;
+    try {
+      payload = normalizeN8nCallbackBody(body);
+    } catch (e) {
+      this.logger.error(`n8n callback normalize failed: ${(e as Error).message}`);
+      return { success: false, message: (e as Error).message };
+    }
+
     this.logger.log(`Received n8n callback for job ${payload.jobId}`);
 
     try {
@@ -74,27 +86,56 @@ export class WebhookController {
       }
 
       if (payload.status === 'success' && payload.content) {
+        const c = payload.content as N8nGeneratedContentDto;
+        this.assertIntentContract(c);
+
+        const visualType =
+          c.postType === MediaPostType.CAROUSEL
+            ? VisualType.CAROUSEL
+            : c.postType === MediaPostType.SINGLE
+              ? VisualType.IMAGE
+              : (c.visualType as VisualType) || VisualType.NONE;
+
         const content = await this.generatedContentRepository.create(
           job.userId,
-          payload.content.title,
-          payload.content.content,
+          c.title,
+          c.content,
           {
             jobId: payload.jobId,
-            aiScore: payload.content.aiScore,
-            visualType: payload.content.visualType,
-            visualUrl: payload.content.visualUrl,
-            carouselUrls: payload.content.carouselUrls,
-            hashtags: payload.content.hashtags,
-            aiReasoning: payload.content.aiReasoning,
+            aiScore: c.aiScore,
+            visualType,
+            visualUrl: c.visualUrl,
+            carouselUrls: c.carouselUrls,
+            hashtags: c.hashtags,
+            aiReasoning: c.aiReasoning,
+            performancePrediction: payload.content.performancePrediction,
+            status:
+              visualType === VisualType.NONE
+                ? ContentStatus.READY
+                : ContentStatus.MEDIA_GENERATING,
           },
         );
+
+        const jobResponsePayload = {
+          title: c.title,
+          content: c.content,
+          hashtags: c.hashtags,
+          postType: c.postType,
+          imagePrompt: c.imagePrompt,
+          slides: c.slides,
+          visualUrl: c.visualUrl,
+          carouselUrls: c.carouselUrls,
+          aiScore: c.aiScore,
+          aiReasoning: c.aiReasoning,
+          performancePrediction: payload.content.performancePrediction,
+        };
 
         try {
           await this.generationJobRepository.updateWithContent(
             payload.jobId,
             content.id,
             JobStatus.READY,
-            payload.content,
+            jobResponsePayload,
           );
           this.logger.log(
             `✅ Job ${payload.jobId} status updated to READY with content ${content.id}`,
@@ -166,6 +207,17 @@ export class WebhookController {
         success: false,
         message: 'Internal error processing callback',
       };
+    }
+  }
+
+  private assertIntentContract(content: N8nGeneratedContentDto): void {
+    if (content.postType === MediaPostType.SINGLE && !content.imagePrompt) {
+      throw new Error('Invalid n8n intent: single postType requires imagePrompt');
+    }
+    if (content.postType === MediaPostType.CAROUSEL) {
+      if (!content.slides || content.slides.length < 2) {
+        throw new Error('Invalid n8n intent: carousel postType requires slides[]');
+      }
     }
   }
 }

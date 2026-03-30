@@ -11,6 +11,7 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  Headers,
 } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '../guards/auth.guard';
@@ -19,6 +20,9 @@ import { PostSchedulingService } from '../services/post-scheduling.service';
 import { QuotaService } from '../services/quota.service';
 import { NotificationService } from '../services/notification.service';
 import { CacheService } from '../services/cache.service';
+import { IdempotencyService } from '../services/idempotency.service';
+import { ContentStatus } from '../common/types';
+import { ConfigService } from '@nestjs/config';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -36,6 +40,8 @@ export class PostsController {
     private readonly quotaService: QuotaService,
     private readonly notificationService: NotificationService,
     private readonly cacheService: CacheService,
+    private readonly idempotencyService: IdempotencyService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Post('publish')
@@ -45,10 +51,14 @@ export class PostsController {
     body: {
       contentId: string;
       platform?: string;
+      actorType?: 'member' | 'organization';
+      organizationUrn?: string;
       content?: string;
       mediaUrls?: string[];
       hashtags?: string[];
+      idempotencyKey?: string;
     },
+    @Headers('x-idempotency-key') idemHeader?: string,
   ) {
     try {
       const userId = req.user.id;
@@ -56,9 +66,39 @@ export class PostsController {
         contentId,
         platform = 'linkedin',
         content,
+        actorType,
+        organizationUrn,
         mediaUrls,
         hashtags,
       } = body;
+      const idempotencyKey = body.idempotencyKey || idemHeader;
+      if (
+        actorType === 'organization' &&
+        !this.configService.get<boolean>('features.linkedinOrgPublishing', false)
+      ) {
+        throw new HttpException(
+          'Organization publishing is disabled',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (idempotencyKey) {
+        const existing = await this.idempotencyService.getResult(
+          'posts-publish',
+          idempotencyKey,
+          userId,
+        );
+        if (existing?.status === 'completed' && existing.result) {
+          return existing.result;
+        }
+        const locked = await this.idempotencyService.lock(
+          'posts-publish',
+          idempotencyKey,
+          userId,
+        );
+        if (!locked) {
+          throw new HttpException('Duplicate request in progress', HttpStatus.CONFLICT);
+        }
+      }
 
       // Determine credit cost based on content type
       let creditCost = 2.5; // Default for text post
@@ -111,14 +151,16 @@ export class PostsController {
         : hasValidImage
           ? 'image'
           : 'text';
-      await this.quotaService.consumeCredits(
+      const operationId = idempotencyKey || `publish:${contentId}:${Date.now()}`;
+      await this.quotaService.debitOnce({
         userId,
-        creditCost,
-        `Post publishing initiated (${creditCost} credits)`,
-        'post_now',
+        operationId,
+        amount: creditCost,
+        description: `Post publishing initiated (${creditCost} credits)`,
+        operationType: 'post_now',
         contentType,
         contentId,
-      );
+      });
 
       // Update content if custom data provided
       if (content || mediaUrls || hashtags) {
@@ -144,6 +186,7 @@ export class PostsController {
         .from('generated_content')
         .update({
           publish_status: 'publishing',
+          status: ContentStatus.PUBLISHING,
           updated_at: new Date().toISOString(),
         })
         .eq('id', contentId)
@@ -155,6 +198,8 @@ export class PostsController {
           contentId,
           userId,
           platform: platform as 'linkedin',
+          actorType,
+          organizationUrn,
         });
 
         // Update status to 'published' on success
@@ -163,6 +208,7 @@ export class PostsController {
           .from('generated_content')
           .update({
             publish_status: 'published',
+            status: ContentStatus.PUBLISHED,
             linkedin_post_id: postId || null,
             updated_at: new Date().toISOString(),
           })
@@ -201,11 +247,20 @@ export class PostsController {
           postId,
         );
 
-        return {
+        const result = {
           success: true,
           postId,
           message: 'Post published successfully',
         };
+        if (idempotencyKey) {
+          await this.idempotencyService.setResult(
+            'posts-publish',
+            idempotencyKey,
+            userId,
+            result,
+          );
+        }
+        return result;
       } catch (publishError) {
         // Update status to 'failed' on error
         await this.postSchedulingService['supabaseService']
@@ -213,20 +268,22 @@ export class PostsController {
           .from('generated_content')
           .update({
             publish_status: 'failed',
+            status: ContentStatus.FAILED,
             updated_at: new Date().toISOString(),
           })
           .eq('id', contentId)
           .eq('user_id', userId);
 
         // REFUND CREDITS if publishing fails
-        await this.quotaService.consumeCredits(
+        await this.quotaService.refundOnce({
           userId,
-          -creditCost, // Negative amount = refund
-          `Refund for failed post publishing (${creditCost} credits)`,
-          'refund',
+          operationId,
+          amount: creditCost,
+          description: `Refund for failed post publishing (${creditCost} credits)`,
+          operationType: 'refund',
           contentType,
           contentId,
-        );
+        });
 
         // Get content title for notification
         const contentData = await this.postSchedulingService['supabaseService']

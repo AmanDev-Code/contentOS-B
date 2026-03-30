@@ -28,6 +28,8 @@ export const PLAN_LIMITS = {
 export const QUEUE_NAMES = {
   CONTENT_GENERATION: 'content-generation',
   LINKEDIN_PUBLISH: 'linkedin-publish',
+  MEDIA_SINGLE: 'media-single',
+  MEDIA_CAROUSEL: 'media-carousel',
 };
 
 export const JOB_STAGES = {
