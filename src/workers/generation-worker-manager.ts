@@ -183,9 +183,13 @@ export class GenerationWorkerManager implements OnModuleInit {
           throw new Error(dbJob.error || 'n8n workflow failed');
         }
 
-        this.logger.log(
-          `⏳ Waiting for n8n to complete job ${jobId}... (${Math.floor((Date.now() - startTime) / 1000)}s)`,
-        );
+        const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+        // Avoid noisy per-second logs; this wait is server-side (worker↔n8n), not browser network.
+        if (elapsedSec % 10 === 0) {
+          this.logger.log(
+            `⏳ Waiting for n8n callback for job ${jobId}... (${elapsedSec}s)`,
+          );
+        }
       }
 
       // Timeout - n8n didn't respond

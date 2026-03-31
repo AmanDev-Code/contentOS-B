@@ -176,8 +176,8 @@ export class MediaGenerationService {
     baseImage: Buffer,
     style: CarouselGenerationRequest['style'] = 'professional',
   ): Promise<Buffer> {
-    const headline = (slide.headline || '').trim();
-    const body = (slide.body || '').trim();
+    const headline = this.sanitizeOverlayText(slide.headline || '');
+    const body = this.sanitizeOverlayText(slide.body || '');
 
     const overlayOpacity =
       style === 'creative' ? 0.28 : style === 'minimal' ? 0.2 : 0.35;
@@ -211,14 +211,14 @@ export class MediaGenerationService {
     const tspans: string[] = [];
     for (const line of headLines) {
       tspans.push(
-        `<text x="${PAD_X}" y="${Math.round(textY)}" fill="#ffffff" font-size="${HEAD_FONT}" font-weight="800" font-family="Arial, Helvetica, sans-serif">${this.escapeHtml(line)}</text>`,
+        `<text x="${PAD_X}" y="${Math.round(textY)}" fill="#ffffff" font-size="${HEAD_FONT}" font-weight="800" font-family="DejaVu Sans, Noto Sans, Liberation Sans, Arial, Helvetica, sans-serif">${this.escapeHtml(line)}</text>`,
       );
       textY += HEAD_LINE_H;
     }
     textY += GAP;
     for (const line of bodyLines) {
       tspans.push(
-        `<text x="${PAD_X}" y="${Math.round(textY)}" fill="rgba(255,255,255,0.9)" font-size="${BODY_FONT}" font-weight="400" font-family="Arial, Helvetica, sans-serif">${this.escapeHtml(line)}</text>`,
+        `<text x="${PAD_X}" y="${Math.round(textY)}" fill="rgba(255,255,255,0.9)" font-size="${BODY_FONT}" font-weight="400" font-family="DejaVu Sans, Noto Sans, Liberation Sans, Arial, Helvetica, sans-serif">${this.escapeHtml(line)}</text>`,
       );
       textY += BODY_LINE_H;
     }
@@ -455,6 +455,14 @@ export class MediaGenerationService {
       "'": '&#039;',
     };
     return text.replace(/[&<>"']/g, (m) => map[m]);
+  }
+
+  private sanitizeOverlayText(input: string): string {
+    return String(input || '')
+      .normalize('NFKD')
+      .replace(/[^\x20-\x7E\n]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   // Rate limiting helper

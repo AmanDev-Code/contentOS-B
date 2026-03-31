@@ -29,6 +29,7 @@ export interface PostContent {
   visual_type: 'text' | 'image' | 'carousel' | 'single';
   visual_url?: string;
   carousel_urls?: string[];
+  pdf_url?: string;
   user_id: string;
   publish_status?: string;
   linkedin_post_id?: string;
@@ -328,7 +329,12 @@ export class PostSchedulingService {
     organizationUrn?: string,
   ): Promise<{ postId: string }> {
     if (!content.carousel_urls || content.carousel_urls.length === 0) {
-      throw new Error('Carousel URLs not found for carousel post');
+      throw new Error('Carousel images not found for carousel post');
+    }
+    if (!content.pdf_url || !content.pdf_url.startsWith('http')) {
+      throw new Error(
+        'Carousel PDF not found. Please generate carousel with PDF before publishing to LinkedIn.',
+      );
     }
 
     const text = this.formatPostText(content);
@@ -337,7 +343,7 @@ export class PostSchedulingService {
       userId: content.user_id,
       text,
       mediaType: 'document',
-      mediaUrl: content.carousel_urls[0], // PDF URL for carousel
+      mediaUrl: content.pdf_url, // LinkedIn carousel must be a document (PDF)
       actorType,
       organizationUrn,
     });
