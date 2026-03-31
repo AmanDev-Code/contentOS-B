@@ -13,6 +13,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache fontconfig ttf-dejavu && fc-cache -f
+
 COPY package*.json ./
 RUN npm install --omit=dev
 
