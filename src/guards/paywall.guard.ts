@@ -55,13 +55,18 @@ export class PaywallGuard implements CanActivate {
 
     // Decide which controllers are paywalled.
     // These endpoints represent the paid features (credits/subscription-gated).
-    const paywallPrefixes = ['/generation', '/posts', '/media', '/linkedin', '/content'];
+    const paywallPrefixes = [
+      '/generation',
+      '/posts',
+      '/media',
+      '/linkedin',
+      '/content',
+    ];
     const isPaywalled = paywallPrefixes.some((p) => url.startsWith(p));
     if (!isPaywalled) return true;
 
-    const subscription = await this.subscriptionService.getUserSubscription(
-      userId,
-    );
+    const subscription =
+      await this.subscriptionService.getUserSubscription(userId);
 
     if (!subscription || !subscription.isActive) {
       throw new HttpException(
@@ -96,4 +101,3 @@ export class PaywallGuard implements CanActivate {
     return true;
   }
 }
-

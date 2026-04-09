@@ -1,4 +1,12 @@
-import { Body, Controller, Headers, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+} from '@nestjs/common';
 import { PaddleService } from '../services/paddle.service';
 
 @Controller('paddle')
@@ -29,4 +37,3 @@ export class PaddleController {
     return { success: true };
   }
 }
-

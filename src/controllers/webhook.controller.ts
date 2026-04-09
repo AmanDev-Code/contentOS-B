@@ -72,7 +72,9 @@ export class WebhookController {
     try {
       payload = normalizeN8nCallbackBody(body);
     } catch (e) {
-      this.logger.error(`n8n callback normalize failed: ${(e as Error).message}`);
+      this.logger.error(
+        `n8n callback normalize failed: ${(e as Error).message}`,
+      );
       return { success: false, message: (e as Error).message };
     }
 
@@ -212,11 +214,15 @@ export class WebhookController {
 
   private assertIntentContract(content: N8nGeneratedContentDto): void {
     if (content.postType === MediaPostType.SINGLE && !content.imagePrompt) {
-      throw new Error('Invalid n8n intent: single postType requires imagePrompt');
+      throw new Error(
+        'Invalid n8n intent: single postType requires imagePrompt',
+      );
     }
     if (content.postType === MediaPostType.CAROUSEL) {
       if (!content.slides || content.slides.length < 2) {
-        throw new Error('Invalid n8n intent: carousel postType requires slides[]');
+        throw new Error(
+          'Invalid n8n intent: carousel postType requires slides[]',
+        );
       }
     }
   }

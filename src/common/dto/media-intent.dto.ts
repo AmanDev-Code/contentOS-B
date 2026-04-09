@@ -98,4 +98,3 @@ export class N8nCallbackDto {
   @IsString()
   error?: string;
 }
-

@@ -97,7 +97,9 @@ export class SubscriptionService {
   ): Promise<UserSubscription | null> {
     // Security: Only allow users to access their own subscription
     const cacheKey = `subscription:${userId}`;
-    const cached = options?.bypassCache ? null : await this.cacheService.get(cacheKey);
+    const cached = options?.bypassCache
+      ? null
+      : await this.cacheService.get(cacheKey);
 
     if (cached) {
       return JSON.parse(cached);
@@ -314,7 +316,8 @@ export class SubscriptionService {
         amount: this.formatBillingAmount(
           row.amount,
           row.currency,
-          row?.metadata?.transaction_details?.details?.totals?.total_formatted ||
+          row?.metadata?.transaction_details?.details?.totals
+            ?.total_formatted ||
             row?.metadata?.webhook?.details?.totals?.total_formatted,
         ),
         status: row.status,
@@ -498,9 +501,8 @@ export class SubscriptionService {
     if (invoice.minio_url) return invoice.minio_url;
     if (invoice.invoice_url) return invoice.invoice_url;
 
-    const fetchedUrl = await this.paddleService.getTransactionInvoiceUrl(
-      transactionId,
-    );
+    const fetchedUrl =
+      await this.paddleService.getTransactionInvoiceUrl(transactionId);
     if (!fetchedUrl) return null;
 
     await this.supabaseService

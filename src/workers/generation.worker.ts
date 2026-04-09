@@ -49,8 +49,7 @@ export class GenerationWorker extends WorkerHost {
       const carouselUrl =
         this.configService.get<string>('n8n.carouselWebhookUrl') || '';
       const ct = preferences?.contentType as string | undefined;
-      const useCarousel =
-        ct === 'carousel' && carouselUrl.length > 0;
+      const useCarousel = ct === 'carousel' && carouselUrl.length > 0;
 
       this.logger.log(
         `n8n route: contentType=${String(ct)} jobType=${String(preferences?.jobType)} ` +

@@ -146,7 +146,9 @@ export class GenerationWorkerManager implements OnModuleInit {
 
         if (completionData) {
           const result = JSON.parse(completionData);
-          this.logger.log(`✅ Job ${jobId} completed (Redis): ${result.status}`);
+          this.logger.log(
+            `✅ Job ${jobId} completed (Redis): ${result.status}`,
+          );
 
           await this.redis.del(completionKey);
 

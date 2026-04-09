@@ -79,8 +79,14 @@ export class AuthController {
       const msg = (error as Error).message;
       this.logger.error('Registration error:', msg);
 
-      if (msg.includes('already been registered') || msg.includes('duplicate')) {
-        return { success: false, message: 'An account with this email already exists' };
+      if (
+        msg.includes('already been registered') ||
+        msg.includes('duplicate')
+      ) {
+        return {
+          success: false,
+          message: 'An account with this email already exists',
+        };
       }
       return { success: false, message: msg || 'Registration failed' };
     }
@@ -107,8 +113,7 @@ export class AuthController {
             email: record.email,
             email_confirmed_at: record.email_confirmed_at,
             user_metadata: record.user_metadata || record.raw_user_meta_data,
-            app_metadata:
-              record.app_metadata || record.raw_app_meta_data || {},
+            app_metadata: record.app_metadata || record.raw_app_meta_data || {},
           });
           break;
 
@@ -266,9 +271,7 @@ export class AuthController {
    * Reset password with token (from our custom password reset email)
    */
   @Post('reset-password')
-  async resetPassword(
-    @Body() body: { token: string; password: string },
-  ) {
+  async resetPassword(@Body() body: { token: string; password: string }) {
     try {
       if (!body.token || !body.password) {
         return {
@@ -288,10 +291,7 @@ export class AuthController {
         message: 'Invalid or expired token',
       };
     } catch (error) {
-      this.logger.error(
-        'Error resetting password:',
-        (error as Error).message,
-      );
+      this.logger.error('Error resetting password:', (error as Error).message);
       return {
         success: false,
         message: 'Failed to reset password',

@@ -12,4 +12,3 @@ export const REQUIRE_PLAN_FEATURE_KEY = 'require_plan_feature';
 export function RequirePlanFeature(feature: string) {
   return SetMetadata(REQUIRE_PLAN_FEATURE_KEY, feature);
 }
-

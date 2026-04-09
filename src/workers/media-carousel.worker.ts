@@ -44,8 +44,16 @@ export class MediaCarouselWorker extends WorkerHost {
   }
 
   async process(job: Job<CarouselJobData>): Promise<CarouselJobResult> {
-    const { userId, contentId, slides, style, includePdf, isFreePlan, operationId, quotaCost } =
-      job.data;
+    const {
+      userId,
+      contentId,
+      slides,
+      style,
+      includePdf,
+      isFreePlan,
+      operationId,
+      quotaCost,
+    } = job.data;
     this.logger.log(
       `[MediaCarouselWorker] Processing job ${job.id} — ${slides.length} slides for content ${contentId}`,
     );
@@ -145,11 +153,7 @@ export class MediaCarouselWorker extends WorkerHost {
         pdfUrl,
       };
 
-      await this.cacheService.set(
-        `carousel:job:${job.id}:result`,
-        result,
-        600,
-      );
+      await this.cacheService.set(`carousel:job:${job.id}:result`, result, 600);
 
       this.logger.log(
         `[MediaCarouselWorker] Job ${job.id} complete — ${imageUploadResults.length} slides uploaded`,

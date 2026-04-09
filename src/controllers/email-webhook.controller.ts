@@ -1,4 +1,11 @@
-import { Controller, Post, Body, Logger, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Logger,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { EmailService, EmailDeliveryStatus } from '../services/email.service';
 
 interface SMTP2GOWebhookPayload {
@@ -27,7 +34,10 @@ export class EmailWebhookController {
   @Post('email-delivery')
   @HttpCode(HttpStatus.OK)
   async handleEmailDelivery(@Body() payload: SMTP2GOWebhookPayload) {
-    this.logger.log('Received SMTP2GO webhook:', JSON.stringify(payload, null, 2));
+    this.logger.log(
+      'Received SMTP2GO webhook:',
+      JSON.stringify(payload, null, 2),
+    );
 
     try {
       // Map SMTP2GO webhook to our format
@@ -35,7 +45,8 @@ export class EmailWebhookController {
         email_id: payload.email_id || payload.emailId || '',
         recipient: payload.rcpt || payload.recipient || '',
         status: this.mapEventToStatus(payload.event || payload.status || ''),
-        event_time: payload.timestamp || payload.event_time || new Date().toISOString(),
+        event_time:
+          payload.timestamp || payload.event_time || new Date().toISOString(),
         details: payload,
       };
 
@@ -45,11 +56,16 @@ export class EmailWebhookController {
       }
 
       await this.emailService.handleDeliveryWebhook(webhookData);
-      
-      this.logger.log(`Email ${webhookData.email_id} status updated to: ${webhookData.status}`);
+
+      this.logger.log(
+        `Email ${webhookData.email_id} status updated to: ${webhookData.status}`,
+      );
       return { success: true, message: 'Webhook processed successfully' };
     } catch (error) {
-      this.logger.error('Error processing email webhook:', (error as Error).message);
+      this.logger.error(
+        'Error processing email webhook:',
+        (error as Error).message,
+      );
       return { success: false, message: 'Internal server error' };
     }
   }
@@ -59,20 +75,20 @@ export class EmailWebhookController {
    */
   private mapEventToStatus(event: string): EmailDeliveryStatus['status'] {
     const eventMap: Record<string, EmailDeliveryStatus['status']> = {
-      'processed': 'sent',
-      'delivered': 'delivered',
-      'bounce': 'bounced',
-      'bounced': 'bounced',
-      'reject': 'rejected',
-      'rejected': 'rejected',
-      'spam': 'spam',
-      'unsubscribe': 'unsubscribed',
-      'unsubscribed': 'unsubscribed',
-      'resubscribe': 'unsubscribed',
-      'open': 'opened',
-      'opened': 'opened',
-      'click': 'clicked',
-      'clicked': 'clicked',
+      processed: 'sent',
+      delivered: 'delivered',
+      bounce: 'bounced',
+      bounced: 'bounced',
+      reject: 'rejected',
+      rejected: 'rejected',
+      spam: 'spam',
+      unsubscribe: 'unsubscribed',
+      unsubscribed: 'unsubscribed',
+      resubscribe: 'unsubscribed',
+      open: 'opened',
+      opened: 'opened',
+      click: 'clicked',
+      clicked: 'clicked',
     };
 
     return eventMap[event?.toLowerCase()] || 'sent';

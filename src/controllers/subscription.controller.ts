@@ -264,14 +264,20 @@ export class SubscriptionController {
   ): Promise<{ url: string }> {
     const userId = req.user?.id;
     if (!userId) {
-      throw new HttpException('User not authenticated', HttpStatus.UNAUTHORIZED);
+      throw new HttpException(
+        'User not authenticated',
+        HttpStatus.UNAUTHORIZED,
+      );
     }
     const url = await this.subscriptionService.resolveInvoiceDownloadUrl(
       userId,
       transactionId,
     );
     if (!url) {
-      throw new HttpException('Invoice URL not available', HttpStatus.NOT_FOUND);
+      throw new HttpException(
+        'Invoice URL not available',
+        HttpStatus.NOT_FOUND,
+      );
     }
     return { url };
   }

@@ -59,12 +59,16 @@ export class NotificationService {
 
   addSSEClient(userId: string, res: ServerResponse): void {
     this.sseClients.push({ userId, res });
-    this.logger.log(`SSE client connected: ${userId} (total: ${this.sseClients.length})`);
+    this.logger.log(
+      `SSE client connected: ${userId} (total: ${this.sseClients.length})`,
+    );
   }
 
   removeSSEClient(res: ServerResponse): void {
-    this.sseClients = this.sseClients.filter(c => c.res !== res);
-    this.logger.log(`SSE client disconnected (total: ${this.sseClients.length})`);
+    this.sseClients = this.sseClients.filter((c) => c.res !== res);
+    this.logger.log(
+      `SSE client disconnected (total: ${this.sseClients.length})`,
+    );
   }
 
   private pushToUser(userId: string, event: string, data: any): void {

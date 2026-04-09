@@ -18,8 +18,7 @@ export class N8nService {
     options?: { webhookUrlOverride?: string },
   ): Promise<{ success: boolean; message: string }> {
     try {
-      const targetUrl =
-        options?.webhookUrlOverride?.trim() || this.webhookUrl;
+      const targetUrl = options?.webhookUrlOverride?.trim() || this.webhookUrl;
       if (!targetUrl) {
         throw new Error('n8n webhook URL is not configured');
       }

@@ -55,7 +55,10 @@ export class PostSchedulingService {
       );
 
       // Clean up any expired/failed scheduled posts for this content first
-      await this.cleanupExpiredScheduledPosts(request.contentId, request.userId);
+      await this.cleanupExpiredScheduledPosts(
+        request.contentId,
+        request.userId,
+      );
 
       // Check rate limit
       const canSchedule = await this.mediaGenerationService.checkRateLimit(
@@ -77,7 +80,7 @@ export class PostSchedulingService {
       if (content.linkedin_post_id && content.publish_status === 'published') {
         throw new Error('This content has already been published to LinkedIn');
       }
-      
+
       // Cancel any existing active scheduled posts for this content (allow rescheduling)
       const { data: existingScheduled } = await this.supabaseService
         .getServiceClient()
@@ -86,10 +89,12 @@ export class PostSchedulingService {
         .eq('content_id', request.contentId)
         .eq('user_id', request.userId)
         .in('status', ['scheduled', 'processing']);
-        
+
       if (existingScheduled && existingScheduled.length > 0) {
-        this.logger.log(`Found ${existingScheduled.length} existing scheduled entries for content ${request.contentId}, cancelling them for reschedule`);
-        
+        this.logger.log(
+          `Found ${existingScheduled.length} existing scheduled entries for content ${request.contentId}, cancelling them for reschedule`,
+        );
+
         for (const existing of existingScheduled) {
           // Remove old job from queue
           try {
@@ -101,9 +106,11 @@ export class PostSchedulingService {
               }
             }
           } catch (e) {
-            this.logger.warn(`Could not remove old job ${existing.job_id}: ${e.message}`);
+            this.logger.warn(
+              `Could not remove old job ${existing.job_id}: ${e.message}`,
+            );
           }
-          
+
           // Mark old entry as cancelled
           await this.supabaseService
             .getServiceClient()
@@ -111,7 +118,7 @@ export class PostSchedulingService {
             .update({ status: 'cancelled' })
             .eq('id', existing.id);
         }
-        
+
         // Reset content status so the new schedule can proceed
         await this.supabaseService
           .getServiceClient()
@@ -121,8 +128,10 @@ export class PostSchedulingService {
             publish_status: 'ready',
           })
           .eq('id', request.contentId);
-          
-        this.logger.log(`Cancelled ${existingScheduled.length} old scheduled entries, ready for reschedule`);
+
+        this.logger.log(
+          `Cancelled ${existingScheduled.length} old scheduled entries, ready for reschedule`,
+        );
       }
 
       // Create BullMQ job
@@ -389,10 +398,13 @@ export class PostSchedulingService {
     }
   }
 
-  private async cleanupExpiredScheduledPosts(contentId: string, userId: string): Promise<void> {
+  private async cleanupExpiredScheduledPosts(
+    contentId: string,
+    userId: string,
+  ): Promise<void> {
     try {
       const now = new Date();
-      
+
       // Find expired scheduled posts for this content
       const { data: expiredPosts } = await this.supabaseService
         .getServiceClient()
@@ -402,10 +414,12 @@ export class PostSchedulingService {
         .eq('user_id', userId)
         .in('status', ['scheduled', 'processing'])
         .lt('scheduled_for', now.toISOString());
-        
+
       if (expiredPosts && expiredPosts.length > 0) {
-        this.logger.log(`Found ${expiredPosts.length} expired scheduled posts for content ${contentId}, cleaning up...`);
-        
+        this.logger.log(
+          `Found ${expiredPosts.length} expired scheduled posts for content ${contentId}, cleaning up...`,
+        );
+
         for (const post of expiredPosts) {
           // Try to remove job from queue
           try {
@@ -414,9 +428,12 @@ export class PostSchedulingService {
               await job.remove();
             }
           } catch (error) {
-            this.logger.warn(`Could not remove expired job ${post.job_id}:`, error);
+            this.logger.warn(
+              `Could not remove expired job ${post.job_id}:`,
+              error,
+            );
           }
-          
+
           // Mark as failed in database
           await this.supabaseService
             .getServiceClient()
@@ -424,7 +441,7 @@ export class PostSchedulingService {
             .update({ status: 'failed' })
             .eq('id', post.id);
         }
-        
+
         // Reset content status
         await this.supabaseService
           .getServiceClient()
@@ -434,11 +451,16 @@ export class PostSchedulingService {
             publish_status: 'ready',
           })
           .eq('id', contentId);
-          
-        this.logger.log(`Cleaned up ${expiredPosts.length} expired scheduled posts for content ${contentId}`);
+
+        this.logger.log(
+          `Cleaned up ${expiredPosts.length} expired scheduled posts for content ${contentId}`,
+        );
       }
     } catch (error) {
-      this.logger.warn(`Failed to cleanup expired scheduled posts for content ${contentId}:`, error);
+      this.logger.warn(
+        `Failed to cleanup expired scheduled posts for content ${contentId}:`,
+        error,
+      );
     }
   }
 

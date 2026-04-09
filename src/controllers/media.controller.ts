@@ -64,7 +64,8 @@ export class MediaController {
   @Post('generate-image')
   async generateImage(
     @Request() req: AuthenticatedRequest,
-    @Body() body: { prompt: string; contentId?: string; idempotencyKey?: string },
+    @Body()
+    body: { prompt: string; contentId?: string; idempotencyKey?: string },
     @Headers('x-idempotency-key') idemHeader?: string,
   ) {
     try {
@@ -86,7 +87,10 @@ export class MediaController {
           userId,
         );
         if (!locked) {
-          throw new HttpException('Duplicate request in progress', HttpStatus.CONFLICT);
+          throw new HttpException(
+            'Duplicate request in progress',
+            HttpStatus.CONFLICT,
+          );
         }
       }
 
@@ -245,7 +249,10 @@ export class MediaController {
         userId,
       );
       if (!locked) {
-        throw new HttpException('Duplicate request in progress', HttpStatus.CONFLICT);
+        throw new HttpException(
+          'Duplicate request in progress',
+          HttpStatus.CONFLICT,
+        );
       }
     }
 
@@ -282,10 +289,10 @@ export class MediaController {
       // Generate carousel images (and optional PDF) in a single pass.
       const { imageBuffers, pdfBuffer } =
         await this.mediaGenerationService.generateCarouselBundle({
-        slides,
-        style: 'professional',
-        includePdf,
-      });
+          slides,
+          style: 'professional',
+          includePdf,
+        });
 
       let pdfUrl: string | undefined;
       let pdfMediaFile: any | undefined;
@@ -321,7 +328,9 @@ export class MediaController {
       const imageUploadResults = await Promise.all(
         imageBuffers.map(async (buffer, i) => {
           const optimizedBuffer = this.shouldApplyFreePlanWatermark(isFreePlan)
-            ? await this.mediaGenerationService.optimizeImageWithWatermark(buffer)
+            ? await this.mediaGenerationService.optimizeImageWithWatermark(
+                buffer,
+              )
             : await this.mediaGenerationService.optimizeImage(buffer);
           const imageFileName = `carousel-slide-${batchTs}-${i + 1}.jpg`;
           const imageUrl = await this.mediaGenerationService.uploadToMinio(
@@ -454,12 +463,19 @@ export class MediaController {
     const isFreePlan = quotaInfo.planType === 'free';
     const quotaCost = slides.length * 1.5;
 
-    const hasQuota = await this.quotaService.checkQuotaAvailable(userId, quotaCost);
+    const hasQuota = await this.quotaService.checkQuotaAvailable(
+      userId,
+      quotaCost,
+    );
     if (!hasQuota) {
-      throw new HttpException('Insufficient credits', HttpStatus.PAYMENT_REQUIRED);
+      throw new HttpException(
+        'Insufficient credits',
+        HttpStatus.PAYMENT_REQUIRED,
+      );
     }
 
-    const operationId = idempotencyKey || `carousel-async:${userId}:${Date.now()}`;
+    const operationId =
+      idempotencyKey || `carousel-async:${userId}:${Date.now()}`;
     await this.quotaService.debitOnce({
       userId,
       operationId,
@@ -528,7 +544,9 @@ export class MediaController {
   ) {
     const job = await this.carouselQueue.getJob(jobId);
     if (!job) {
-      const cachedResult = await this.cacheService.get(`carousel:job:${jobId}:result`);
+      const cachedResult = await this.cacheService.get(
+        `carousel:job:${jobId}:result`,
+      );
       if (cachedResult) {
         return { status: 'completed', progress: 100, result: cachedResult };
       }
@@ -615,7 +633,10 @@ export class MediaController {
     const userId = req.user.id;
     const { contentId, postType, mediaUrls } = body;
     if (!contentId || !mediaUrls?.length) {
-      throw new HttpException('contentId and mediaUrls are required', HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        'contentId and mediaUrls are required',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const updates: Record<string, unknown> =
@@ -639,7 +660,10 @@ export class MediaController {
       .eq('id', contentId)
       .eq('user_id', userId);
     if (error) {
-      throw new HttpException('Failed to attach assets', HttpStatus.INTERNAL_SERVER_ERROR);
+      throw new HttpException(
+        'Failed to attach assets',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
     return { success: true };
   }

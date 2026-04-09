@@ -3,7 +3,10 @@
  */
 import { wrapEmail } from './_base';
 
-export function getWelcomeTemplate(userName: string, dashboardUrl: string): string {
+export function getWelcomeTemplate(
+  userName: string,
+  dashboardUrl: string,
+): string {
   const displayName = userName || 'there';
   const content = `
     <h1 class="title">Welcome, ${displayName}</h1>

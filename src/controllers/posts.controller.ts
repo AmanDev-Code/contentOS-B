@@ -74,7 +74,10 @@ export class PostsController {
       const idempotencyKey = body.idempotencyKey || idemHeader;
       if (
         actorType === 'organization' &&
-        !this.configService.get<boolean>('features.linkedinOrgPublishing', false)
+        !this.configService.get<boolean>(
+          'features.linkedinOrgPublishing',
+          false,
+        )
       ) {
         throw new HttpException(
           'Organization publishing is disabled',
@@ -96,7 +99,10 @@ export class PostsController {
           userId,
         );
         if (!locked) {
-          throw new HttpException('Duplicate request in progress', HttpStatus.CONFLICT);
+          throw new HttpException(
+            'Duplicate request in progress',
+            HttpStatus.CONFLICT,
+          );
         }
       }
 
@@ -151,7 +157,8 @@ export class PostsController {
         : hasValidImage
           ? 'image'
           : 'text';
-      const operationId = idempotencyKey || `publish:${contentId}:${Date.now()}`;
+      const operationId =
+        idempotencyKey || `publish:${contentId}:${Date.now()}`;
       await this.quotaService.debitOnce({
         userId,
         operationId,
@@ -568,7 +575,6 @@ export class PostsController {
     }
   }
 
-
   @Get('calendar')
   async getCalendarPosts(
     @Request() req: AuthenticatedRequest,
@@ -779,7 +785,8 @@ export class PostsController {
       let query = this.postSchedulingService['supabaseService']
         .getServiceClient()
         .from('scheduled_posts')
-        .select(`
+        .select(
+          `
           *,
           generated_content (
             id,
@@ -789,7 +796,8 @@ export class PostsController {
             visual_url,
             ai_score
           )
-        `)
+        `,
+        )
         .eq('user_id', userId)
         .order('scheduled_for', { ascending: true });
 
@@ -804,15 +812,17 @@ export class PostsController {
         .from('scheduled_posts')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', userId);
-        
+
       if (search) {
-        countQuery.or(`generated_content.title.ilike.%${search}%,generated_content.content.ilike.%${search}%`);
+        countQuery.or(
+          `generated_content.title.ilike.%${search}%,generated_content.content.ilike.%${search}%`,
+        );
       }
-      
+
       if (status) {
         countQuery.eq('status', status);
       }
-      
+
       const { count } = await countQuery;
 
       // Get paginated data
@@ -859,27 +869,36 @@ export class PostsController {
 
     try {
       // Verify ownership
-      const { data: scheduledPost, error: fetchError } = await this.postSchedulingService['supabaseService']
-        .getServiceClient()
-        .from('scheduled_posts')
-        .select('*')
-        .eq('id', postId)
-        .eq('user_id', userId)
-        .single();
+      const { data: scheduledPost, error: fetchError } =
+        await this.postSchedulingService['supabaseService']
+          .getServiceClient()
+          .from('scheduled_posts')
+          .select('*')
+          .eq('id', postId)
+          .eq('user_id', userId)
+          .single();
 
       if (fetchError || !scheduledPost) {
-        throw new HttpException('Scheduled post not found', HttpStatus.NOT_FOUND);
+        throw new HttpException(
+          'Scheduled post not found',
+          HttpStatus.NOT_FOUND,
+        );
       }
 
       if (scheduledPost.status !== 'scheduled') {
-        throw new HttpException('Post cannot be cancelled', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'Post cannot be cancelled',
+          HttpStatus.BAD_REQUEST,
+        );
       }
 
       // Update status to cancelled
-      const { error: updateError } = await this.postSchedulingService['supabaseService']
+      const { error: updateError } = await this.postSchedulingService[
+        'supabaseService'
+      ]
         .getServiceClient()
         .from('scheduled_posts')
-        .update({ 
+        .update({
           status: 'cancelled',
           updated_at: new Date().toISOString(),
         })
@@ -914,24 +933,36 @@ export class PostsController {
 
     try {
       // Verify ownership and status
-      const { data: scheduledPost, error: fetchError } = await this.postSchedulingService['supabaseService']
-        .getServiceClient()
-        .from('scheduled_posts')
-        .select('*')
-        .eq('id', postId)
-        .eq('user_id', userId)
-        .single();
+      const { data: scheduledPost, error: fetchError } =
+        await this.postSchedulingService['supabaseService']
+          .getServiceClient()
+          .from('scheduled_posts')
+          .select('*')
+          .eq('id', postId)
+          .eq('user_id', userId)
+          .single();
 
       if (fetchError || !scheduledPost) {
-        throw new HttpException('Scheduled post not found', HttpStatus.NOT_FOUND);
+        throw new HttpException(
+          'Scheduled post not found',
+          HttpStatus.NOT_FOUND,
+        );
       }
 
-      if (scheduledPost.status === 'scheduled' || scheduledPost.status === 'processing') {
-        throw new HttpException('Cannot delete active scheduled post. Cancel it first.', HttpStatus.BAD_REQUEST);
+      if (
+        scheduledPost.status === 'scheduled' ||
+        scheduledPost.status === 'processing'
+      ) {
+        throw new HttpException(
+          'Cannot delete active scheduled post. Cancel it first.',
+          HttpStatus.BAD_REQUEST,
+        );
       }
 
       // Delete the scheduled post
-      const { error: deleteError } = await this.postSchedulingService['supabaseService']
+      const { error: deleteError } = await this.postSchedulingService[
+        'supabaseService'
+      ]
         .getServiceClient()
         .from('scheduled_posts')
         .delete()

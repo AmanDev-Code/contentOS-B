@@ -526,7 +526,9 @@ export class LinkedinService {
       throw new BadRequestException(ERROR_MESSAGES.LINKEDIN_TOKEN_EXPIRED);
     }
 
-    const linkedinUserId = await this.getLinkedinUserId(profile.linkedin_access_token);
+    const linkedinUserId = await this.getLinkedinUserId(
+      profile.linkedin_access_token,
+    );
     const ownerUrn =
       request.actorType === 'organization'
         ? request.organizationUrn
@@ -616,10 +618,7 @@ export class LinkedinService {
     return { postId };
   }
 
-  private async createTextPost(
-    ownerUrn: string,
-    text: string,
-  ): Promise<any> {
+  private async createTextPost(ownerUrn: string, text: string): Promise<any> {
     return {
       author: ownerUrn,
       commentary: text,

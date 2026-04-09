@@ -140,9 +140,7 @@ export class AuthService {
             user_id: userData.id,
             token: placeholder,
             type: 'email_verification',
-            expires_at: new Date(
-              Date.now() + 10 * 60 * 1000,
-            ).toISOString(),
+            expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
           });
 
         await this.notificationService.createNotification({
@@ -405,7 +403,9 @@ export class AuthService {
     try {
       this.logger.log(`Handling subscription upgrade for user: ${userId}`);
 
-      const { data: { user } } = await this.supabaseService
+      const {
+        data: { user },
+      } = await this.supabaseService
         .getServiceClient()
         .auth.admin.getUserById(userId);
 
@@ -451,7 +451,9 @@ export class AuthService {
         `Handling order completion for user: ${orderDetails.userId}`,
       );
 
-      const { data: { user } } = await this.supabaseService
+      const {
+        data: { user },
+      } = await this.supabaseService
         .getServiceClient()
         .auth.admin.getUserById(orderDetails.userId);
 
@@ -460,10 +462,7 @@ export class AuthService {
         return;
       }
 
-      await this.emailService.sendOrderReceiptEmail(
-        user.email,
-        orderDetails,
-      );
+      await this.emailService.sendOrderReceiptEmail(user.email, orderDetails);
 
       // Create notification
       await this.notificationService.createNotification({
@@ -490,7 +489,9 @@ export class AuthService {
         `Sending user invitation from ${inviterUserId} to ${email}`,
       );
 
-      const { data: { user: inviterUser } } = await this.supabaseService
+      const {
+        data: { user: inviterUser },
+      } = await this.supabaseService
         .getServiceClient()
         .auth.admin.getUserById(inviterUserId);
 
@@ -514,7 +515,9 @@ export class AuthService {
         });
 
       const inviterName =
-        inviterUser.user_metadata?.full_name || inviterUser.email?.split('@')[0] || 'Someone';
+        inviterUser.user_metadata?.full_name ||
+        inviterUser.email?.split('@')[0] ||
+        'Someone';
       await this.emailService.sendInvitationEmail(
         email,
         inviterName,

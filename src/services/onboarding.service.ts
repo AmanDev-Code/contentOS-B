@@ -109,9 +109,7 @@ export class OnboardingService {
         .select('preferences')
         .eq('id', userId)
         .maybeSingle(),
-      this.supabaseService
-        .getServiceClient()
-        .auth.admin.getUserById(userId),
+      this.supabaseService.getServiceClient().auth.admin.getUserById(userId),
     ]);
 
     const preferences =

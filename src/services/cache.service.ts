@@ -23,7 +23,10 @@ export class CacheService implements OnModuleInit {
       await this.redis.connect();
       this.logger.log('Redis cache connected');
     } catch (error) {
-      this.logger.warn('Redis unavailable, using in-memory fallback:', error.message);
+      this.logger.warn(
+        'Redis unavailable, using in-memory fallback:',
+        error.message,
+      );
       this.redis = null;
     }
   }
@@ -50,7 +53,12 @@ export class CacheService implements OnModuleInit {
   async set(key: string, data: any, ttlSeconds = 300): Promise<void> {
     if (this.redis) {
       try {
-        await this.redis.set(CACHE_PREFIX + key, JSON.stringify(data), 'EX', ttlSeconds);
+        await this.redis.set(
+          CACHE_PREFIX + key,
+          JSON.stringify(data),
+          'EX',
+          ttlSeconds,
+        );
         return;
       } catch (e) {
         this.logger.warn(`Redis SET failed for ${key}: ${e.message}`);

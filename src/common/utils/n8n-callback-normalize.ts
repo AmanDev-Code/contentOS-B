@@ -47,9 +47,7 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
     throw new Error('Invalid n8n callback: jobId is required');
   }
 
-  const status = (root.status === 'failed' ? 'failed' : 'success') as
-    | 'success'
-    | 'failed';
+  const status = root.status === 'failed' ? 'failed' : 'success';
 
   if (status === 'failed') {
     return {
@@ -68,11 +66,19 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
     const rawSlides = Array.isArray(visual.carouselSlides)
       ? visual.carouselSlides
       : [];
-    const slides: SlidePayload[] = rawSlides.map((s: Record<string, unknown>) => ({
-      headline: String(s.headline ?? '').trim().slice(0, 200),
-      body: String(s.body ?? '').trim().slice(0, 500),
-      imagePrompt: String(s.imagePrompt ?? '').trim().slice(0, 1500),
-    }));
+    const slides: SlidePayload[] = rawSlides.map(
+      (s: Record<string, unknown>) => ({
+        headline: String(s.headline ?? '')
+          .trim()
+          .slice(0, 200),
+        body: String(s.body ?? '')
+          .trim()
+          .slice(0, 500),
+        imagePrompt: String(s.imagePrompt ?? '')
+          .trim()
+          .slice(0, 1500),
+      }),
+    );
 
     if (slides.length < 2) {
       throw new Error(
@@ -80,8 +86,13 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
       );
     }
 
-    const title = String(post.title ?? '').trim().slice(0, 180) || 'Untitled';
-    const content = String(post.content ?? '').trim().slice(0, 5000);
+    const title =
+      String(post.title ?? '')
+        .trim()
+        .slice(0, 180) || 'Untitled';
+    const content = String(post.content ?? '')
+      .trim()
+      .slice(0, 5000);
     const aiScore =
       typeof post.finalScore === 'number'
         ? post.finalScore
@@ -126,8 +137,12 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
     throw new Error('Invalid n8n callback: content is required on success');
   }
 
-  const title = String(contentRaw.title ?? '').trim().slice(0, 180);
-  const content = String(contentRaw.content ?? '').trim().slice(0, 5000);
+  const title = String(contentRaw.title ?? '')
+    .trim()
+    .slice(0, 180);
+  const content = String(contentRaw.content ?? '')
+    .trim()
+    .slice(0, 5000);
   const flatSlides = contentRaw.slides as
     | Array<Record<string, unknown>>
     | undefined;
@@ -140,15 +155,27 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
 
   if (Array.isArray(flatSlides) && flatSlides.length > 0) {
     slides = flatSlides.map((s) => ({
-      headline: String(s.headline ?? '').trim().slice(0, 200),
-      body: String(s.body ?? '').trim().slice(0, 500),
-      imagePrompt: String(s.imagePrompt ?? '').trim().slice(0, 1500),
+      headline: String(s.headline ?? '')
+        .trim()
+        .slice(0, 200),
+      body: String(s.body ?? '')
+        .trim()
+        .slice(0, 500),
+      imagePrompt: String(s.imagePrompt ?? '')
+        .trim()
+        .slice(0, 1500),
     }));
   } else if (Array.isArray(nestedSlides) && nestedSlides.length > 0) {
     slides = nestedSlides.map((s) => ({
-      headline: String(s.headline ?? '').trim().slice(0, 200),
-      body: String(s.body ?? '').trim().slice(0, 500),
-      imagePrompt: String(s.imagePrompt ?? '').trim().slice(0, 1500),
+      headline: String(s.headline ?? '')
+        .trim()
+        .slice(0, 200),
+      body: String(s.body ?? '')
+        .trim()
+        .slice(0, 500),
+      imagePrompt: String(s.imagePrompt ?? '')
+        .trim()
+        .slice(0, 1500),
     }));
   }
 

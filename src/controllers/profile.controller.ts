@@ -32,17 +32,24 @@ export class ProfileController {
 
     const trimmed = username.trim().toLowerCase();
     if (trimmed.length < 2) {
-      return { available: false, error: 'Username must be at least 2 characters' };
+      return {
+        available: false,
+        error: 'Username must be at least 2 characters',
+      };
     }
     if (!/^[a-z0-9_-]+$/.test(trimmed)) {
       return {
         available: false,
-        error: 'Username can only contain letters, numbers, underscores, and hyphens',
+        error:
+          'Username can only contain letters, numbers, underscores, and hyphens',
       };
     }
 
     const excludeUserId = user?.id;
-    const taken = await this.profileRepository.isUsernameTaken(trimmed, excludeUserId);
+    const taken = await this.profileRepository.isUsernameTaken(
+      trimmed,
+      excludeUserId,
+    );
     return { available: !taken };
   }
 
@@ -52,10 +59,15 @@ export class ProfileController {
   @Patch()
   @UseGuards(AuthGuard, PaywallGuard)
   async updateProfile(
-    @Body() body: { username?: string; full_name?: string; avatar_url?: string },
+    @Body()
+    body: { username?: string; full_name?: string; avatar_url?: string },
     @GetUser() user: { id: string },
   ) {
-    const updates: { username?: string; full_name?: string; avatar_url?: string } = {};
+    const updates: {
+      username?: string;
+      full_name?: string;
+      avatar_url?: string;
+    } = {};
 
     if (body.username !== undefined) {
       const trimmed = body.username.trim().toLowerCase();
@@ -67,7 +79,10 @@ export class ProfileController {
           'Username can only contain letters, numbers, underscores, and hyphens',
         );
       }
-      const taken = await this.profileRepository.isUsernameTaken(trimmed, user.id);
+      const taken = await this.profileRepository.isUsernameTaken(
+        trimmed,
+        user.id,
+      );
       if (taken) {
         throw new BadRequestException('Username is already taken');
       }
@@ -86,7 +101,10 @@ export class ProfileController {
       throw new BadRequestException('No valid updates provided');
     }
 
-    const profile = await this.profileRepository.updateProfile(user.id, updates);
+    const profile = await this.profileRepository.updateProfile(
+      user.id,
+      updates,
+    );
     return { success: true, profile };
   }
 }

@@ -158,14 +158,17 @@ export class EmailService {
     template_id?: string;
   }): Promise<void> {
     try {
-      const { error } = await this.supabaseService.getServiceClient().from('email_logs').insert({
-        email_id: data.email_id,
-        recipient: data.recipient,
-        subject: data.subject,
-        status: data.status,
-        template_id: data.template_id,
-        sent_at: new Date().toISOString(),
-      });
+      const { error } = await this.supabaseService
+        .getServiceClient()
+        .from('email_logs')
+        .insert({
+          email_id: data.email_id,
+          recipient: data.recipient,
+          subject: data.subject,
+          status: data.status,
+          template_id: data.template_id,
+          sent_at: new Date().toISOString(),
+        });
 
       if (error) {
         this.logger.error('Failed to log email send:', error.message);
@@ -192,28 +195,38 @@ export class EmailService {
         .eq('email_id', data.email_id);
 
       if (error) {
-        this.logger.error('Failed to update email delivery status:', error.message);
+        this.logger.error(
+          'Failed to update email delivery status:',
+          error.message,
+        );
       } else {
-        this.logger.log(`Email delivery status updated: ${data.email_id} - ${data.status}`);
+        this.logger.log(
+          `Email delivery status updated: ${data.email_id} - ${data.status}`,
+        );
       }
     } catch (error) {
-      this.logger.error('Failed to update email delivery status:', (error as Error).message);
+      this.logger.error(
+        'Failed to update email delivery status:',
+        (error as Error).message,
+      );
     }
   }
 
   /**
    * Get email logs with filtering and pagination
    */
-  async getEmailLogs(options: {
-    page?: number;
-    limit?: number;
-    status?: string;
-    recipient?: string;
-    template_id?: string;
-    user_id?: string;
-    from_date?: string;
-    to_date?: string;
-  } = {}): Promise<{
+  async getEmailLogs(
+    options: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      recipient?: string;
+      template_id?: string;
+      user_id?: string;
+      from_date?: string;
+      to_date?: string;
+    } = {},
+  ): Promise<{
     data: any[];
     total: number;
     page: number;
@@ -228,10 +241,11 @@ export class EmailService {
         template_id,
         user_id,
         from_date,
-        to_date
+        to_date,
       } = options;
 
-      let query = this.supabaseService.getServiceClient()
+      let query = this.supabaseService
+        .getServiceClient()
         .from('email_logs')
         .select('*', { count: 'exact' });
 
@@ -256,9 +270,7 @@ export class EmailService {
       const from = (page - 1) * limit;
       const to = from + limit - 1;
 
-      query = query
-        .order('sent_at', { ascending: false })
-        .range(from, to);
+      query = query.order('sent_at', { ascending: false }).range(from, to);
 
       const { data, error, count } = await query;
 
@@ -281,10 +293,12 @@ export class EmailService {
   /**
    * Get email statistics
    */
-  async getEmailStats(options: {
-    from_date?: string;
-    to_date?: string;
-  } = {}): Promise<{
+  async getEmailStats(
+    options: {
+      from_date?: string;
+      to_date?: string;
+    } = {},
+  ): Promise<{
     total: number;
     sent: number;
     delivered: number;
@@ -297,7 +311,8 @@ export class EmailService {
     try {
       const { from_date, to_date } = options;
 
-      let query = this.supabaseService.getServiceClient()
+      let query = this.supabaseService
+        .getServiceClient()
         .from('email_logs')
         .select('status, template_id');
 
@@ -328,7 +343,7 @@ export class EmailService {
       data?.forEach((log) => {
         // Count by status
         stats.by_status[log.status] = (stats.by_status[log.status] || 0) + 1;
-        
+
         // Count specific statuses
         switch (log.status) {
           case 'sent':
@@ -350,12 +365,16 @@ export class EmailService {
 
         // Count by template (use 'custom' for null/undefined)
         const templateKey = log.template_id || 'custom';
-        stats.by_template[templateKey] = (stats.by_template[templateKey] || 0) + 1;
+        stats.by_template[templateKey] =
+          (stats.by_template[templateKey] || 0) + 1;
       });
 
       return stats;
     } catch (error) {
-      this.logger.error('Error fetching email stats:', (error as Error).message);
+      this.logger.error(
+        'Error fetching email stats:',
+        (error as Error).message,
+      );
       throw error;
     }
   }
@@ -365,10 +384,7 @@ export class EmailService {
   /**
    * Send user verification email with OTP code
    */
-  async sendVerificationEmail(
-    email: string,
-    otp: string,
-  ): Promise<boolean> {
+  async sendVerificationEmail(email: string, otp: string): Promise<boolean> {
     const result = await this.sendEmail({
       to: email,
       subject: `${otp} is your Trndinn verification code`,
@@ -447,7 +463,8 @@ export class EmailService {
    * Send welcome email for new users
    */
   async sendWelcomeEmail(email: string, userName: string): Promise<boolean> {
-    const frontendUrl = this.configService.get('frontendUrl') || 'http://localhost:5173';
+    const frontendUrl =
+      this.configService.get('frontendUrl') || 'http://localhost:5173';
     const result = await this.sendEmail({
       to: email,
       subject: 'Welcome to Trndinn - Your AI Content Journey Begins!',

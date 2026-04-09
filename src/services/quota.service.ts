@@ -192,7 +192,11 @@ export class QuotaService {
     contentId?: string;
   }): Promise<boolean> {
     const key = `quota:debit:${params.userId}:${params.operationId}`;
-    const locked = await this.cacheService.setIfAbsent(key, { at: Date.now() }, 86400);
+    const locked = await this.cacheService.setIfAbsent(
+      key,
+      { at: Date.now() },
+      86400,
+    );
     if (!locked) return false;
     await this.consumeCredits(
       params.userId,
@@ -215,7 +219,11 @@ export class QuotaService {
     contentId?: string;
   }): Promise<boolean> {
     const key = `quota:refund:${params.userId}:${params.operationId}`;
-    const locked = await this.cacheService.setIfAbsent(key, { at: Date.now() }, 86400);
+    const locked = await this.cacheService.setIfAbsent(
+      key,
+      { at: Date.now() },
+      86400,
+    );
     if (!locked) return false;
     await this.consumeCredits(
       params.userId,

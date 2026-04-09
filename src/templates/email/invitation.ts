@@ -3,7 +3,10 @@
  */
 import { wrapEmail } from './_base';
 
-export function getInvitationTemplate(inviterName: string, inviteUrl: string): string {
+export function getInvitationTemplate(
+  inviterName: string,
+  inviteUrl: string,
+): string {
   const content = `
     <h1 class="title">You are invited to join Trndinn</h1>
     <p class="text"><strong>${inviterName}</strong> has invited you to join Trndinn, an AI-powered content creation platform.</p>

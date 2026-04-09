@@ -29,7 +29,13 @@ interface WebhookPayload {
 
 interface TestEmailDto {
   to: string;
-  type: 'verification' | 'password-reset' | 'welcome' | 'upgrade' | 'order-receipt' | 'invitation';
+  type:
+    | 'verification'
+    | 'password-reset'
+    | 'welcome'
+    | 'upgrade'
+    | 'order-receipt'
+    | 'invitation';
 }
 
 @Controller('email')
@@ -57,7 +63,7 @@ export class EmailController {
       const webhookData: EmailDeliveryStatus = {
         email_id: body.email_id || body.emailId || '',
         recipient: body.rcpt || body.recipient || '',
-        status: this.mapWebhookEventToStatus((body.event || body.status) || ''),
+        status: this.mapWebhookEventToStatus(body.event || body.status || ''),
         event_time:
           body.timestamp || body.event_time || new Date().toISOString(),
         details: body,
@@ -139,7 +145,10 @@ export class EmailController {
         data: stats,
       };
     } catch (error) {
-      this.logger.error('Error fetching email stats:', (error as Error).message);
+      this.logger.error(
+        'Error fetching email stats:',
+        (error as Error).message,
+      );
       return {
         success: false,
         error: (error as Error).message,

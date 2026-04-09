@@ -57,9 +57,10 @@ export class MediaGenerationService {
         return Buffer.from(cached, 'base64');
       }
 
-      const model = request.model
-        || this.configService.get<string>('MEDIA_IMAGE_MODEL')
-        || 'gpt-image-1-mini';
+      const model =
+        request.model ||
+        this.configService.get<string>('MEDIA_IMAGE_MODEL') ||
+        'gpt-image-1-mini';
 
       const optimizedPrompt = this.buildProductionImagePrompt(request.prompt);
       this.logger.log(
@@ -77,7 +78,8 @@ export class MediaGenerationService {
 
       if (isGptImage) {
         const qMap: Record<string, string> = { hd: 'high', standard: 'medium' };
-        body.quality = qMap[request.quality as string] || request.quality || 'medium';
+        body.quality =
+          qMap[request.quality as string] || request.quality || 'medium';
         body.output_format = 'png';
       } else {
         body.quality = request.quality || 'hd';
@@ -165,9 +167,10 @@ export class MediaGenerationService {
     request: CarouselGenerationRequest,
   ): Promise<CarouselGenerationBundle> {
     const imageBuffers = await this.generateCarouselImages(request);
-    const pdfBuffer = request.includePdf === false
-      ? undefined
-      : await this.buildPdfFromImages(imageBuffers);
+    const pdfBuffer =
+      request.includePdf === false
+        ? undefined
+        : await this.buildPdfFromImages(imageBuffers);
     return { imageBuffers, pdfBuffer };
   }
 
@@ -196,9 +199,7 @@ export class MediaGenerationService {
 
     const GAP = 16;
     const contentH =
-      headLines.length * HEAD_LINE_H +
-      GAP +
-      bodyLines.length * BODY_LINE_H;
+      headLines.length * HEAD_LINE_H + GAP + bodyLines.length * BODY_LINE_H;
     const BOX_PAD_Y = 32;
     const boxH = contentH + BOX_PAD_Y * 2;
     const BOX_BOTTOM_MARGIN = 80;
@@ -368,8 +369,14 @@ export class MediaGenerationService {
       const maxCanvasShare = 0.4;
 
       let targetLogoWidth = Math.round(width * pct);
-      targetLogoWidth = Math.min(maxLogoPx, Math.max(minLogoPx, targetLogoWidth));
-      targetLogoWidth = Math.min(targetLogoWidth, Math.floor(width * maxCanvasShare));
+      targetLogoWidth = Math.min(
+        maxLogoPx,
+        Math.max(minLogoPx, targetLogoWidth),
+      );
+      targetLogoWidth = Math.min(
+        targetLogoWidth,
+        Math.floor(width * maxCanvasShare),
+      );
       targetLogoWidth = Math.max(56, targetLogoWidth);
 
       const hiW = Math.min(targetLogoWidth * 3, 900);

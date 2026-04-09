@@ -73,7 +73,10 @@ export class PaddleService {
     return (await res.json()) as T;
   }
 
-  private async paddlePatch<T>(path: string, payload: Record<string, any>): Promise<T | null> {
+  private async paddlePatch<T>(
+    path: string,
+    payload: Record<string, any>,
+  ): Promise<T | null> {
     const apiKey = this.configService.get<string>('paddle.apiKey') || '';
     if (!apiKey) return null;
 
@@ -88,7 +91,9 @@ export class PaddleService {
 
     if (!res.ok) {
       const body = await res.text();
-      this.logger.warn(`Paddle API PATCH ${path} failed: ${res.status} ${body}`);
+      this.logger.warn(
+        `Paddle API PATCH ${path} failed: ${res.status} ${body}`,
+      );
       return null;
     }
 
@@ -141,12 +146,21 @@ export class PaddleService {
     billingCycle: BillingCycle;
   } | null {
     const prices = this.configService.get<any>('paddle.prices') || {};
-    const mapping: Record<string, { planType: PlanType; billingCycle: BillingCycle }> = {
-      [prices.standardMonthly]: { planType: 'standard', billingCycle: 'monthly' },
+    const mapping: Record<
+      string,
+      { planType: PlanType; billingCycle: BillingCycle }
+    > = {
+      [prices.standardMonthly]: {
+        planType: 'standard',
+        billingCycle: 'monthly',
+      },
       [prices.standardYearly]: { planType: 'standard', billingCycle: 'yearly' },
       [prices.proMonthly]: { planType: 'pro', billingCycle: 'monthly' },
       [prices.proYearly]: { planType: 'pro', billingCycle: 'yearly' },
-      [prices.ultimateMonthly]: { planType: 'ultimate', billingCycle: 'monthly' },
+      [prices.ultimateMonthly]: {
+        planType: 'ultimate',
+        billingCycle: 'monthly',
+      },
       [prices.ultimateYearly]: { planType: 'ultimate', billingCycle: 'yearly' },
     };
     return mapping[priceId] || null;
@@ -247,7 +261,9 @@ export class PaddleService {
     await this.cacheService.delete(`quota:${userId}`);
   }
 
-  private async resolveUserId(event: PaddleWebhookEvent): Promise<string | null> {
+  private async resolveUserId(
+    event: PaddleWebhookEvent,
+  ): Promise<string | null> {
     const data = event.data || {};
     const custom = (data.custom_data || {}) as Record<string, any>;
     if (custom.user_id || custom.userId) {
@@ -313,7 +329,11 @@ export class PaddleService {
       '0';
     const amount = this.toMajorAmount(amountRaw);
     const currency =
-      details?.currency_code || details?.currency || data?.currency_code || data?.currency || 'USD';
+      details?.currency_code ||
+      details?.currency ||
+      data?.currency_code ||
+      data?.currency ||
+      'USD';
 
     let minioPath: string | null = null;
     let minioUrl: string | null = null;
@@ -329,33 +349,40 @@ export class PaddleService {
             buf,
             'application/pdf',
           );
-          minioUrl = await this.minioService.getPublicUrl('contentos-media', minioPath);
+          minioUrl = await this.minioService.getPublicUrl(
+            'contentos-media',
+            minioPath,
+          );
         }
       } catch (e) {
         this.logger.warn(`Invoice upload skipped for ${transactionId}`);
       }
     }
 
-    await this.supabaseService.getServiceClient().from('billing_invoices').upsert(
-      {
-        user_id: userId,
-        paddle_transaction_id: transactionId,
-        invoice_number: invoiceNumber,
-        status: data?.status || 'unknown',
-        amount,
-        currency,
-        invoice_url: invoiceUrl,
-        minio_path: minioPath,
-        minio_url: minioUrl,
-        issued_at: data?.billed_at || data?.created_at || new Date().toISOString(),
-        metadata: {
-          webhook: data,
-          transaction_details: details,
+    await this.supabaseService
+      .getServiceClient()
+      .from('billing_invoices')
+      .upsert(
+        {
+          user_id: userId,
+          paddle_transaction_id: transactionId,
+          invoice_number: invoiceNumber,
+          status: data?.status || 'unknown',
+          amount,
+          currency,
+          invoice_url: invoiceUrl,
+          minio_path: minioPath,
+          minio_url: minioUrl,
+          issued_at:
+            data?.billed_at || data?.created_at || new Date().toISOString(),
+          metadata: {
+            webhook: data,
+            transaction_details: details,
+          },
+          updated_at: new Date().toISOString(),
         },
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'paddle_transaction_id' },
-    );
+        { onConflict: 'paddle_transaction_id' },
+      );
 
     const card = data?.payment_method?.card;
     if (card || data?.payment_method?.type) {
@@ -478,7 +505,10 @@ export class PaddleService {
       return;
     }
 
-    if (deactivateEvents.has(event.event_type) || transactionUpdatedIsInactive) {
+    if (
+      deactivateEvents.has(event.event_type) ||
+      transactionUpdatedIsInactive
+    ) {
       await this.upsertUserSubscription(
         effective.userId,
         effective.planType,
@@ -509,19 +539,19 @@ export class PaddleService {
   > {
     if (!customerId) return [];
 
-    const result =
-      await this.paddleGet<PaddleApiListResponse<Record<string, any>>>(
-        `/transactions?customer_id=${encodeURIComponent(customerId)}&per_page=20`,
-      );
+    const result = await this.paddleGet<
+      PaddleApiListResponse<Record<string, any>>
+    >(
+      `/transactions?customer_id=${encodeURIComponent(customerId)}&per_page=20`,
+    );
     const rows = result?.data || [];
 
     return rows.map((row) => ({
       id: row.id || '',
       status: row.status || 'unknown',
-      amount:
-        this.toMajorAmount(
-          row.details?.totals?.total || row.total || row.grand_total || '0',
-        ).toFixed(2),
+      amount: this.toMajorAmount(
+        row.details?.totals?.total || row.total || row.grand_total || '0',
+      ).toFixed(2),
       currency: row.currency_code || row.currency || 'USD',
       createdAt: row.created_at || row.billed_at || new Date().toISOString(),
       invoiceNumber:
@@ -561,16 +591,15 @@ export class PaddleService {
     // Fallback: try latest customer transactions for payment method details.
     if (customerId) {
       // Preferred fallback: customer payment methods endpoint.
-      const pmResult =
-        await this.paddleGet<PaddleApiListResponse<Record<string, any>>>(
-          `/customers/${encodeURIComponent(customerId)}/payment-methods?per_page=10`,
-        );
+      const pmResult = await this.paddleGet<
+        PaddleApiListResponse<Record<string, any>>
+      >(
+        `/customers/${encodeURIComponent(customerId)}/payment-methods?per_page=10`,
+      );
       const methods = pmResult?.data || [];
       for (const method of methods) {
         const card =
-          method?.card ||
-          method?.details?.card ||
-          method?.method_details?.card;
+          method?.card || method?.details?.card || method?.method_details?.card;
         if (card?.last4) {
           return `Card ending in ${card.last4}`;
         }
@@ -580,10 +609,11 @@ export class PaddleService {
         }
       }
 
-      const txResult =
-        await this.paddleGet<PaddleApiListResponse<Record<string, any>>>(
-          `/transactions?customer_id=${encodeURIComponent(customerId)}&per_page=10`,
-        );
+      const txResult = await this.paddleGet<
+        PaddleApiListResponse<Record<string, any>>
+      >(
+        `/transactions?customer_id=${encodeURIComponent(customerId)}&per_page=10`,
+      );
       const rows = txResult?.data || [];
       for (const row of rows) {
         // Some payloads include payments[].method_details.card.last4
@@ -601,7 +631,8 @@ export class PaddleService {
         if (txCard?.last4) {
           return `Card ending in ${txCard.last4}`;
         }
-        const txType = row?.payment_method?.type || row?.payment_method_details?.type;
+        const txType =
+          row?.payment_method?.type || row?.payment_method_details?.type;
         if (txType) {
           return `${String(txType)} on file`;
         }
@@ -611,7 +642,9 @@ export class PaddleService {
     return null;
   }
 
-  async getTransactionInvoiceUrl(transactionId: string): Promise<string | null> {
+  async getTransactionInvoiceUrl(
+    transactionId: string,
+  ): Promise<string | null> {
     const apiKey = this.configService.get<string>('paddle.apiKey') || '';
     if (!apiKey) return null;
 
@@ -683,4 +716,3 @@ export class PaddleService {
     return !!result?.data;
   }
 }
-

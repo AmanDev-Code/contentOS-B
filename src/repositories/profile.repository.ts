@@ -83,7 +83,10 @@ export class ProfileRepository {
     if (error) throw error;
   }
 
-  async isUsernameTaken(username: string, excludeUserId?: string): Promise<boolean> {
+  async isUsernameTaken(
+    username: string,
+    excludeUserId?: string,
+  ): Promise<boolean> {
     let query = this.supabaseService
       .getServiceClient()
       .from('profiles')
@@ -104,9 +107,12 @@ export class ProfileRepository {
     updates: { username?: string; full_name?: string; avatar_url?: string },
   ): Promise<Profile> {
     const payload: Record<string, unknown> = { updated_at: new Date() };
-    if (updates.username !== undefined) payload.username = updates.username?.trim() || null;
-    if (updates.full_name !== undefined) payload.full_name = updates.full_name?.trim() || null;
-    if (updates.avatar_url !== undefined) payload.avatar_url = updates.avatar_url?.trim() || null;
+    if (updates.username !== undefined)
+      payload.username = updates.username?.trim() || null;
+    if (updates.full_name !== undefined)
+      payload.full_name = updates.full_name?.trim() || null;
+    if (updates.avatar_url !== undefined)
+      payload.avatar_url = updates.avatar_url?.trim() || null;
 
     const { data, error } = await this.supabaseService
       .getServiceClient()
