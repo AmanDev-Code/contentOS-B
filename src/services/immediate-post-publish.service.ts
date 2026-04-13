@@ -1,0 +1,279 @@
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PostSchedulingService } from './post-scheduling.service';
+import { QuotaService } from './quota.service';
+import { NotificationService } from './notification.service';
+import { CacheService } from './cache.service';
+import { IdempotencyService } from './idempotency.service';
+import { ContentStatus } from '../common/types';
+
+export interface ImmediatePublishParams {
+  userId: string;
+  contentId: string;
+  platform?: string;
+  actorType?: 'member' | 'organization';
+  organizationUrn?: string;
+  content?: string;
+  mediaUrls?: string[];
+  hashtags?: string[];
+  idempotencyKey?: string;
+}
+
+@Injectable()
+export class ImmediatePostPublishService {
+  private readonly logger = new Logger(ImmediatePostPublishService.name);
+
+  constructor(
+    private readonly postSchedulingService: PostSchedulingService,
+    private readonly quotaService: QuotaService,
+    private readonly notificationService: NotificationService,
+    private readonly cacheService: CacheService,
+    private readonly idempotencyService: IdempotencyService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  async publishImmediate(
+    params: ImmediatePublishParams,
+  ): Promise<{ success: boolean; postId: string; message: string }> {
+    const {
+      userId,
+      contentId,
+      platform = 'linkedin',
+      content,
+      actorType,
+      organizationUrn,
+      mediaUrls,
+      hashtags,
+      idempotencyKey,
+    } = params;
+
+    if (
+      actorType === 'organization' &&
+      !this.configService.get<boolean>(
+        'features.linkedinOrgPublishing',
+        false,
+      )
+    ) {
+      throw new HttpException(
+        'Organization publishing is disabled',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (idempotencyKey) {
+      const existing = await this.idempotencyService.getResult(
+        'posts-publish',
+        idempotencyKey,
+        userId,
+      );
+      if (existing?.status === 'completed' && existing.result) {
+        return existing.result as {
+          success: boolean;
+          postId: string;
+          message: string;
+        };
+      }
+      const locked = await this.idempotencyService.lock(
+        'posts-publish',
+        idempotencyKey,
+        userId,
+      );
+      if (!locked) {
+        throw new HttpException(
+          'Duplicate request in progress',
+          HttpStatus.CONFLICT,
+        );
+      }
+    }
+
+    let creditCost = 2.5;
+
+    const contentData = await this.postSchedulingService['supabaseService']
+      .getServiceClient()
+      .from('generated_content')
+      .select('visual_type, visual_url, carousel_urls, media_urls')
+      .eq('id', contentId)
+      .eq('user_id', userId)
+      .single();
+
+    const hasValidImage = Boolean(
+      contentData.data?.visual_url?.startsWith('http') ||
+        (contentData.data?.media_urls &&
+          contentData.data.media_urls.length > 0) ||
+        (mediaUrls && mediaUrls.length > 0),
+    );
+    const hasCarousel = Boolean(
+      contentData.data?.carousel_urls &&
+        contentData.data.carousel_urls.length > 0,
+    );
+
+    if (contentData.data) {
+      if (hasCarousel) {
+        creditCost = 12;
+      } else if (hasValidImage) {
+        creditCost = 6;
+      }
+    }
+
+    const hasQuota = await this.quotaService.checkQuotaAvailable(
+      userId,
+      creditCost,
+    );
+    if (!hasQuota) {
+      throw new HttpException(
+        `Insufficient credits. This action requires ${creditCost} credits. Please upgrade your plan.`,
+        HttpStatus.PAYMENT_REQUIRED,
+      );
+    }
+
+    const contentType = hasCarousel
+      ? 'carousel'
+      : hasValidImage
+        ? 'image'
+        : 'text';
+    const operationId =
+      idempotencyKey || `publish:${contentId}:${Date.now()}`;
+    await this.quotaService.debitOnce({
+      userId,
+      operationId,
+      amount: creditCost,
+      description: `Post publishing initiated (${creditCost} credits)`,
+      operationType: 'post_now',
+      contentType,
+      contentId,
+    });
+
+    if (content || mediaUrls || hashtags) {
+      const updateData: Record<string, unknown> = {};
+      if (content) updateData.content = content;
+      if (hashtags) updateData.hashtags = hashtags;
+      if (mediaUrls && mediaUrls.length > 0) {
+        updateData.visual_url = mediaUrls[0];
+        updateData.media_urls = mediaUrls;
+      }
+
+      await this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('generated_content')
+        .update(updateData)
+        .eq('id', contentId)
+        .eq('user_id', userId);
+    }
+
+    await this.postSchedulingService['supabaseService']
+      .getServiceClient()
+      .from('generated_content')
+      .update({
+        publish_status: 'publishing',
+        status: ContentStatus.PUBLISHING,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', contentId)
+      .eq('user_id', userId);
+
+    try {
+      const postId = await this.postSchedulingService.publishPostNow({
+        contentId,
+        userId,
+        platform: platform as 'linkedin',
+        actorType,
+        organizationUrn,
+      });
+
+      await this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('generated_content')
+        .update({
+          publish_status: 'published',
+          status: ContentStatus.PUBLISHED,
+          linkedin_post_id: postId || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', contentId)
+        .eq('user_id', userId);
+
+      await this.quotaService.logTransaction(
+        userId,
+        contentId,
+        'debit',
+        0,
+        `Post published successfully (${creditCost} credits total)`,
+        'post_now',
+        contentType,
+      );
+
+      const titleRow = await this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('generated_content')
+        .select('title')
+        .eq('id', contentId)
+        .single();
+
+      const contentTitle = titleRow.data?.title || 'Your post';
+
+      await this.cacheService.invalidateUser(userId);
+
+      await this.notificationService.notifyPostPublished(
+        userId,
+        contentId,
+        contentTitle,
+        postId,
+      );
+
+      const result = {
+        success: true,
+        postId,
+        message: 'Post published successfully',
+      };
+      if (idempotencyKey) {
+        await this.idempotencyService.setResult(
+          'posts-publish',
+          idempotencyKey,
+          userId,
+          result,
+        );
+      }
+      return result;
+    } catch (publishError) {
+      await this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('generated_content')
+        .update({
+          publish_status: 'failed',
+          status: ContentStatus.FAILED,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', contentId)
+        .eq('user_id', userId);
+
+      await this.quotaService.refundOnce({
+        userId,
+        operationId,
+        amount: creditCost,
+        description: `Refund for failed post publishing (${creditCost} credits)`,
+        operationType: 'refund',
+        contentType,
+        contentId,
+      });
+
+      const titleRow = await this.postSchedulingService['supabaseService']
+        .getServiceClient()
+        .from('generated_content')
+        .select('title')
+        .eq('id', contentId)
+        .single();
+
+      const contentTitle = titleRow.data?.title || 'Your post';
+
+      await this.notificationService.notifyPostPublishFailed(
+        userId,
+        contentId,
+        contentTitle,
+        (publishError as Error).message || 'Unknown error',
+        creditCost,
+      );
+
+      throw publishError;
+    }
+  }
+}

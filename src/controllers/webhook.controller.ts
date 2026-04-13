@@ -1,6 +1,15 @@
-import { Controller, Post, Body, Logger } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Logger,
+  Req,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import { timingSafeEqual } from 'crypto';
+import type { Request } from 'express';
 import Redis from 'ioredis';
 import { GenerationJobRepository } from '../repositories/generation-job.repository';
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
@@ -26,27 +35,65 @@ export class WebhookController {
     this.redis = new Redis({
       host: this.configService.get<string>('redis.host') || 'localhost',
       port: parseInt(
-        this.configService.get<string>('redis.port') || '6380',
+        this.configService.get<string>('redis.port') || '6379',
         10,
       ),
       password: this.configService.get<string>('redis.password') || undefined,
     });
   }
 
+  /**
+   * When N8N_WEBHOOK_SECRET is set, require header X-N8N-Webhook-Secret (constant-time compare).
+   * If unset, behavior matches previous open webhooks (backward compatible).
+   */
+  private assertN8nWebhookSecret(req: Request): void {
+    const expected = this.configService.get<string>('n8n.webhookSecret');
+    if (!expected) {
+      return;
+    }
+    const raw = req.headers['x-n8n-webhook-secret'];
+    const provided = Array.isArray(raw) ? raw[0] : raw;
+    if (!provided || typeof provided !== 'string') {
+      throw new UnauthorizedException('Missing webhook secret');
+    }
+    const a = Buffer.from(expected, 'utf8');
+    const b = Buffer.from(provided, 'utf8');
+    if (a.length !== b.length) {
+      throw new UnauthorizedException('Invalid webhook secret');
+    }
+    if (!timingSafeEqual(a, b)) {
+      throw new UnauthorizedException('Invalid webhook secret');
+    }
+  }
+
   @Post('n8n-progress')
   @ApiOperation({ summary: 'Receive progress updates from n8n workflow' })
   async handleN8nProgress(
+    @Req() req: Request,
     @Body() payload: { jobId: string; progress: number; stage?: string },
   ) {
+    this.assertN8nWebhookSecret(req);
     this.logger.log(
       `Received progress update for job ${payload.jobId}: ${payload.progress}%`,
     );
 
     try {
+      const current = await this.generationJobRepository.findById(payload.jobId);
+      if (!current) {
+        this.logger.warn(`Progress update ignored: job ${payload.jobId} not found`);
+        return { success: false, message: 'Job not found' };
+      }
+      if (current.status === JobStatus.READY || current.status === JobStatus.FAILED) {
+        return {
+          success: true,
+          message: 'Ignored progress update for terminal job',
+        };
+      }
+      const nextProgress = Math.max(current.progress || 0, payload.progress || 0);
       await this.generationJobRepository.updateStatus(
         payload.jobId,
         JobStatus.GENERATING,
-        payload.progress,
+        nextProgress,
         payload.stage,
       );
 
@@ -67,7 +114,8 @@ export class WebhookController {
 
   @Post('n8n-callback')
   @ApiOperation({ summary: 'Receive callback from n8n workflow' })
-  async handleN8nCallback(@Body() body: unknown) {
+  async handleN8nCallback(@Req() req: Request, @Body() body: unknown) {
+    this.assertN8nWebhookSecret(req);
     let payload: ReturnType<typeof normalizeN8nCallbackBody>;
     try {
       payload = normalizeN8nCallbackBody(body);
@@ -132,21 +180,21 @@ export class WebhookController {
           performancePrediction: payload.content.performancePrediction,
         };
 
+        await this.generationJobRepository.updateWithContent(
+          payload.jobId,
+          content.id,
+          JobStatus.READY,
+          jobResponsePayload,
+        );
+        this.logger.log(
+          `✅ Job ${payload.jobId} status updated to READY with content ${content.id}`,
+        );
+
+        // Wait a bit to ensure Supabase write is committed and visible to all connections
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        // Signal completion to waiting worker via Redis (best effort only).
         try {
-          await this.generationJobRepository.updateWithContent(
-            payload.jobId,
-            content.id,
-            JobStatus.READY,
-            jobResponsePayload,
-          );
-          this.logger.log(
-            `✅ Job ${payload.jobId} status updated to READY with content ${content.id}`,
-          );
-
-          // Wait a bit to ensure Supabase write is committed and visible to all connections
-          await new Promise((resolve) => setTimeout(resolve, 500));
-
-          // Signal completion to waiting worker via Redis
           const completionKey = `job:${payload.jobId}:completed`;
           await this.redis.setex(
             completionKey,
@@ -160,11 +208,10 @@ export class WebhookController {
           this.logger.log(
             `🔔 Redis completion signal set for job ${payload.jobId}`,
           );
-        } catch (updateError) {
-          this.logger.error(
-            `❌ Failed to update job status to READY: ${(updateError as Error).message}`,
+        } catch (redisErr) {
+          this.logger.warn(
+            `Redis completion signal failed for job ${payload.jobId}: ${(redisErr as Error).message}`,
           );
-          throw updateError;
         }
 
         return {

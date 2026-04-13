@@ -53,7 +53,17 @@ async function bootstrap() {
       'Accept',
       'Cache-Control',
       'Connection',
+      'X-User-Timezone',
+      'x-user-timezone',
+      'X-Idempotency-Key',
+      'x-idempotency-key',
       'ngrok-skip-browser-warning',
+    ],
+    exposedHeaders: [
+      'X-RateLimit-Limit',
+      'X-RateLimit-Remaining',
+      'X-RateLimit-Reset',
+      'X-RateLimit-Window',
     ],
   });
 

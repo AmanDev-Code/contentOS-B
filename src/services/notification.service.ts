@@ -400,9 +400,11 @@ export class NotificationService {
     contentId: string,
     title: string,
     scheduledFor: string,
+    timezone?: string,
   ): Promise<void> {
-    const scheduledDate = new Date(scheduledFor).toLocaleString('en-IN', {
-      timeZone: 'Asia/Kolkata',
+    const selectedTimezone = timezone || 'UTC';
+    const scheduledDate = new Date(scheduledFor).toLocaleString(undefined, {
+      timeZone: selectedTimezone,
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -414,10 +416,10 @@ export class NotificationService {
     await this.createNotification({
       userId,
       title: '⏰ Post Scheduled Successfully!',
-      message: `Your post "${title}" has been scheduled for ${scheduledDate} IST.`,
+      message: `Your post "${title}" has been scheduled for ${scheduledDate} (${selectedTimezone}).`,
       type: 'success',
       category: 'scheduling',
-      data: { contentId, scheduledFor },
+      data: { contentId, scheduledFor, timezone: selectedTimezone },
     });
   }
 

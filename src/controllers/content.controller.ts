@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
+import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
 import { SupabaseService } from '../services/supabase.service';
 
 interface AuthenticatedRequest extends Request {
@@ -20,7 +21,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 @Controller('content')
-@UseGuards(AuthGuard, PaywallGuard)
+@UseGuards(AuthGuard, UserRateLimitGuard, PaywallGuard)
 export class ContentController {
   private readonly logger = new Logger(ContentController.name);
 

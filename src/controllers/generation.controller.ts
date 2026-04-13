@@ -15,10 +15,11 @@ import { GeneratedContentRepository } from '../repositories/generated-content.re
 import { CacheService } from '../services/cache.service';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
+import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
 
 @ApiTags('generation')
 @Controller('generation')
-@UseGuards(AuthGuard, PaywallGuard)
+@UseGuards(AuthGuard, UserRateLimitGuard, PaywallGuard)
 @ApiBearerAuth()
 export class GenerationController {
   constructor(

@@ -25,7 +25,7 @@ export class GenerationWorkerManager implements OnModuleInit {
     this.redis = new Redis({
       host: this.configService.get<string>('redis.host') || 'localhost',
       port: parseInt(
-        this.configService.get<string>('redis.port') || '6380',
+        this.configService.get<string>('redis.port') || '6379',
         10,
       ),
       password: this.configService.get<string>('redis.password') || undefined,
@@ -51,7 +51,7 @@ export class GenerationWorkerManager implements OnModuleInit {
           connection: {
             host: this.configService.get<string>('redis.host') || 'localhost',
             port: parseInt(
-              this.configService.get<string>('redis.port') || '6380',
+              this.configService.get<string>('redis.port') || '6379',
               10,
             ),
             password:
@@ -133,7 +133,9 @@ export class GenerationWorkerManager implements OnModuleInit {
 
       // Wait for n8n to complete by checking Redis completion signal
       // The webhook will set a Redis key when n8n completes
-      const maxWaitTime = 120000; // 2 minutes max
+      const maxWaitTime = Number(
+        this.configService.get<string>('n8n.workflowTimeoutMs') || '300000',
+      );
       const pollInterval = 1000; // Check every 1 second
       const startTime = Date.now();
       const completionKey = `job:${jobId}:completed`;
@@ -196,11 +198,11 @@ export class GenerationWorkerManager implements OnModuleInit {
 
       // Timeout - n8n didn't respond
       this.logger.error(
-        `⏰ Job ${jobId} timed out waiting for n8n (2 minutes)`,
+        `⏰ Job ${jobId} timed out waiting for n8n (${Math.round(maxWaitTime / 1000)} seconds)`,
       );
       await this.generationJobRepository.updateError(
         jobId,
-        'n8n workflow timeout - no response after 2 minutes',
+        `n8n workflow timeout - no response after ${Math.round(maxWaitTime / 1000)} seconds`,
         0,
       );
 

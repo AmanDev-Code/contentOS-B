@@ -24,6 +24,10 @@ export default () => ({
     /** Optional: dedicated workflow for carousel (post + visual.carouselSlides). Falls back to webhookUrl. */
     carouselWebhookUrl: process.env.N8N_CAROUSEL_WEBHOOK_URL || '',
     apiKey: process.env.N8N_API_KEY || '',
+    /** When set, n8n webhooks must send header X-N8N-Webhook-Secret with this value. */
+    webhookSecret: process.env.N8N_WEBHOOK_SECRET || '',
+    /** Max time workers wait for n8n callback before failing (ms). */
+    workflowTimeoutMs: parseInt(process.env.N8N_WORKFLOW_TIMEOUT_MS || '300000', 10),
   },
 
   linkedin: {
@@ -37,7 +41,9 @@ export default () => ({
     port: parseInt(process.env.MINIO_PORT || '9000', 10),
     accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
     secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
-    bucket: process.env.MINIO_BUCKET || 'contentos-assets',
+    bucket: process.env.MINIO_BUCKET || 'contentos-media',
+    useSSL: process.env.MINIO_USE_SSL === 'true',
+    publicUrl: process.env.MINIO_PUBLIC_URL || '',
   },
 
   jwt: {

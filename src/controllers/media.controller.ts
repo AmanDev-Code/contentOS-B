@@ -18,6 +18,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
+import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
 import {
   MediaGenerationService,
   CarouselGenerationRequest,
@@ -38,7 +39,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 @Controller('media')
-@UseGuards(AuthGuard, PaywallGuard)
+@UseGuards(AuthGuard, UserRateLimitGuard, PaywallGuard)
 export class MediaController {
   private readonly logger = new Logger(MediaController.name);
 

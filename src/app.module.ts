@@ -36,6 +36,8 @@ import { SubscriptionService } from './services/subscription.service';
 import { MediaGenerationService } from './services/media-generation.service';
 import { MinioService } from './services/minio.service';
 import { PostSchedulingService } from './services/post-scheduling.service';
+import { ImmediatePostPublishService } from './services/immediate-post-publish.service';
+import { LinkedinOAuthStateService } from './services/linkedin-oauth-state.service';
 import { NotificationService } from './services/notification.service';
 import { EmailService } from './services/email.service';
 import { AuthService } from './services/auth.service';
@@ -54,6 +56,7 @@ import { GenerationWorkerManager } from './workers/generation-worker-manager';
 import { MediaCarouselWorker } from './workers/media-carousel.worker';
 import { PostPublishingProcessor } from './processors/post-publishing.processor';
 import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
+import { UserRateLimitGuard } from './guards/user-rate-limit.guard';
 import { PaywallGuard } from './guards/paywall.guard';
 import { Reflector } from '@nestjs/core';
 
@@ -126,6 +129,8 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     MediaGenerationService,
     MinioService,
     PostSchedulingService,
+    ImmediatePostPublishService,
+    LinkedinOAuthStateService,
     {
       provide: NotificationService,
       useClass: NotificationService,
@@ -145,6 +150,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     MediaCarouselWorker,
     PostPublishingProcessor,
     RateLimitMiddleware,
+    UserRateLimitGuard,
     PaywallGuard,
     Reflector,
   ],

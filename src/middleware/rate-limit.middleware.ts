@@ -7,14 +7,11 @@ import {
 } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { CacheService } from '../services/cache.service';
-
-interface RateLimitConfig {
-  windowMs: number; // Time window in milliseconds
-  max: number; // Maximum number of requests per window
-  message?: string;
-  skipSuccessfulRequests?: boolean;
-  skipFailedRequests?: boolean;
-}
+import {
+  RATE_LIMIT_BY_PATH,
+  RateLimitRule,
+  resolveRateLimitEndpoint,
+} from '../config/rate-limit.config';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -23,87 +20,44 @@ interface AuthenticatedRequest extends Request {
   };
 }
 
+/**
+ * Legacy/global middleware: `req.user` is only set after AuthGuard, which runs
+ * after middleware, so this almost never applies limits for Bearer-auth API calls.
+ * Per-user limits are enforced by {@link UserRateLimitGuard} on protected controllers.
+ */
 @Injectable()
 export class RateLimitMiddleware implements NestMiddleware {
   private readonly logger = new Logger(RateLimitMiddleware.name);
 
-  // Rate limit configurations for different endpoints
-  private readonly rateLimits: Record<string, RateLimitConfig> = {
-    '/generation/topics': {
-      windowMs: 60 * 60 * 1000, // 1 hour
-      max: 50, // 50 requests per hour
-      message: 'Too many topic generation requests. Please try again later.',
-    },
-    '/generation/content': {
-      windowMs: 60 * 60 * 1000, // 1 hour
-      max: 30, // 30 requests per hour
-      message: 'Too many content generation requests. Please try again later.',
-    },
-    '/media/generate-image': {
-      windowMs: 60 * 60 * 1000, // 1 hour
-      max: 100, // 100 requests per hour
-      message: 'Too many image generation requests. Please try again later.',
-    },
-    '/media/generate-carousel': {
-      windowMs: 60 * 60 * 1000, // 1 hour
-      max: 20, // 20 requests per hour
-      message: 'Too many carousel generation requests. Please try again later.',
-    },
-    '/posts/publish': {
-      windowMs: 60 * 60 * 1000, // 1 hour
-      max: 50, // 50 posts per hour
-      message: 'Too many publishing requests. Please try again later.',
-    },
-    '/posts/schedule': {
-      windowMs: 60 * 60 * 1000, // 1 hour
-      max: 100, // 100 scheduled posts per hour
-      message: 'Too many scheduling requests. Please try again later.',
-    },
-    '/linkedin/publish': {
-      windowMs: 60 * 60 * 1000, // 1 hour
-      max: 25, // 25 LinkedIn posts per hour
-      message: 'Too many LinkedIn publishing requests. Please try again later.',
-    },
-    '/generation/start': {
-      windowMs: 60 * 60 * 1000, // 1 hour
-      max: 50, // 50 content generations per hour
-      message: 'Too many content generation requests. Please try again later.',
-    },
-    '/posts/draft': {
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 200, // 200 draft saves per 15 minutes
-      message: 'Too many draft saves. Please try again later.',
-    },
-    '/media/upload': {
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // 100 uploads per 15 minutes
-      message: 'Too many file uploads. Please try again later.',
-    },
-    '/content': {
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 500, // 500 content requests per 15 minutes
-      message: 'Too many content requests. Please try again later.',
-    },
-  };
-
   constructor(private readonly cacheService: CacheService) {}
+
+  private applyHeaders(res: Response, headers: Record<string, string>) {
+    for (const [name, value] of Object.entries(headers)) {
+      if (typeof (res as any).setHeader === 'function') {
+        (res as any).setHeader(name, value);
+      }
+    }
+  }
 
   async use(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      // Skip rate limiting for non-authenticated requests or non-rate-limited endpoints
       if (!req.user?.id) {
         return next();
       }
 
-      const userId = req.user.id;
-      const endpoint = this.getEndpointKey(req.path, req.method);
-      const rateLimitConfig = this.rateLimits[endpoint];
+      const path =
+        req.path || (req.url ? String(req.url).split('?')[0] : '') || '';
+      const normalizedPath = path.replace(/\/+$/, '');
+      const endpoint =
+        resolveRateLimitEndpoint(normalizedPath, RATE_LIMIT_BY_PATH) ||
+        normalizedPath;
+      const rateLimitConfig = RATE_LIMIT_BY_PATH[endpoint];
 
       if (!rateLimitConfig) {
         return next();
       }
 
-      // Check rate limit
+      const userId = req.user.id;
       const isAllowed = await this.checkRateLimit(
         userId,
         endpoint,
@@ -115,10 +69,13 @@ export class RateLimitMiddleware implements NestMiddleware {
           `Rate limit exceeded for user ${userId} on endpoint ${endpoint}`,
         );
 
-        // Get current usage for headers
-        const usage = await this.getCurrentUsage(userId, endpoint);
+        const usage = await this.getCurrentUsage(
+          userId,
+          endpoint,
+          rateLimitConfig,
+        );
 
-        res.set({
+        this.applyHeaders(res, {
           'X-RateLimit-Limit': rateLimitConfig.max.toString(),
           'X-RateLimit-Remaining': Math.max(
             0,
@@ -138,9 +95,12 @@ export class RateLimitMiddleware implements NestMiddleware {
         );
       }
 
-      // Add rate limit headers to successful requests
-      const usage = await this.getCurrentUsage(userId, endpoint);
-      res.set({
+      const usage = await this.getCurrentUsage(
+        userId,
+        endpoint,
+        rateLimitConfig,
+      );
+      this.applyHeaders(res, {
         'X-RateLimit-Limit': rateLimitConfig.max.toString(),
         'X-RateLimit-Remaining': Math.max(
           0,
@@ -156,45 +116,24 @@ export class RateLimitMiddleware implements NestMiddleware {
         throw error;
       }
 
-      this.logger.error('Rate limiting error:', error.message);
-      next(); // Continue on rate limiting errors to avoid blocking legitimate requests
+      this.logger.error('Rate limiting error:', (error as Error).message);
+      next();
     }
-  }
-
-  private getEndpointKey(path: string, method: string): string {
-    // Normalize path to match rate limit configurations
-    const normalizedPath = path.replace(/\/+$/, ''); // Remove trailing slashes
-
-    // Check for exact matches first
-    if (this.rateLimits[normalizedPath]) {
-      return normalizedPath;
-    }
-
-    // Check for pattern matches
-    for (const endpoint of Object.keys(this.rateLimits)) {
-      if (normalizedPath.startsWith(endpoint)) {
-        return endpoint;
-      }
-    }
-
-    return normalizedPath;
   }
 
   private async checkRateLimit(
     userId: string,
     endpoint: string,
-    config: RateLimitConfig,
+    config: RateLimitRule,
   ): Promise<boolean> {
-    const key = `rate_limit:${userId}:${endpoint}`;
+    const key = `rate_limit:v2:${userId}:${endpoint}`;
     const now = Date.now();
     const windowStart = now - config.windowMs;
 
     try {
-      // Get current window data
       const windowData = await this.cacheService.get(key);
 
       if (!windowData) {
-        // First request in this window
         await this.cacheService.set(
           key,
           JSON.stringify({
@@ -202,26 +141,22 @@ export class RateLimitMiddleware implements NestMiddleware {
             windowStart: now,
             requests: [now],
           }),
-          Math.ceil(config.windowMs / 1000), // TTL in seconds
+          Math.ceil(config.windowMs / 1000),
         );
         return true;
       }
 
-      const data = JSON.parse(windowData);
-
-      // Clean old requests outside the current window
-      const validRequests = data.requests.filter(
-        (timestamp: number) => timestamp > windowStart,
+      const data = JSON.parse(windowData as string);
+      const validRequests = (data.requests as number[]).filter(
+        (timestamp) => timestamp > windowStart,
       );
 
       if (validRequests.length >= config.max) {
         return false;
       }
 
-      // Add current request
       validRequests.push(now);
 
-      // Update cache
       await this.cacheService.set(
         key,
         JSON.stringify({
@@ -234,20 +169,20 @@ export class RateLimitMiddleware implements NestMiddleware {
 
       return true;
     } catch (error) {
-      this.logger.error(`Rate limit check failed: ${error.message}`);
-      return true; // Allow request on cache errors
+      this.logger.error(`Rate limit check failed: ${(error as Error).message}`);
+      return true;
     }
   }
 
   private async getCurrentUsage(
     userId: string,
     endpoint: string,
+    config: RateLimitRule,
   ): Promise<{
     count: number;
     resetTime: number;
   }> {
-    const key = `rate_limit:${userId}:${endpoint}`;
-    const config = this.rateLimits[endpoint];
+    const key = `rate_limit:v2:${userId}:${endpoint}`;
 
     try {
       const windowData = await this.cacheService.get(key);
@@ -259,21 +194,23 @@ export class RateLimitMiddleware implements NestMiddleware {
         };
       }
 
-      const data = JSON.parse(windowData);
+      const data = JSON.parse(windowData as string);
       const now = Date.now();
       const windowStart = now - config.windowMs;
 
-      // Count valid requests in current window
-      const validRequests = data.requests.filter(
+      const validRequests = (data.requests as number[]).filter(
         (timestamp: number) => timestamp > windowStart,
       );
 
       return {
         count: validRequests.length,
-        resetTime: Math.min(...validRequests) + config.windowMs,
+        resetTime:
+          validRequests.length === 0
+            ? now + config.windowMs
+            : Math.min(...validRequests) + config.windowMs,
       };
     } catch (error) {
-      this.logger.error(`Failed to get current usage: ${error.message}`);
+      this.logger.error(`Failed to get current usage: ${(error as Error).message}`);
       return {
         count: 0,
         resetTime: Date.now() + config.windowMs,
@@ -281,7 +218,6 @@ export class RateLimitMiddleware implements NestMiddleware {
     }
   }
 
-  // Method to get rate limit status for a user (useful for frontend)
   async getRateLimitStatus(
     userId: string,
     endpoint: string,
@@ -291,7 +227,7 @@ export class RateLimitMiddleware implements NestMiddleware {
     resetTime: number;
     windowMs: number;
   }> {
-    const config = this.rateLimits[endpoint];
+    const config = RATE_LIMIT_BY_PATH[endpoint];
 
     if (!config) {
       return {
@@ -302,7 +238,7 @@ export class RateLimitMiddleware implements NestMiddleware {
       };
     }
 
-    const usage = await this.getCurrentUsage(userId, endpoint);
+    const usage = await this.getCurrentUsage(userId, endpoint, config);
 
     return {
       limit: config.max,

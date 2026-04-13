@@ -6,25 +6,48 @@ import { Client as MinioClient } from 'minio';
 export class MinioService implements OnModuleInit {
   private readonly logger = new Logger(MinioService.name);
   private minioClient: MinioClient;
-  private readonly bucketName = 'contentos-media';
+  /** Resolved from ConfigModule (`minio.*`); falls back to flat env for older deployments. */
+  private bucketName = 'contentos-media';
 
   constructor(private readonly configService: ConfigService) {}
 
   async onModuleInit() {
     try {
-      this.minioClient = new MinioClient({
-        endPoint: this.configService.get<string>('MINIO_ENDPOINT', 'localhost'),
-        port: parseInt(
-          this.configService.get<string>('MINIO_PORT', '9000'),
-          10,
+      const endpoint =
+        this.configService.get<string>('minio.endpoint') ||
+        process.env.MINIO_ENDPOINT ||
+        'localhost';
+      const port = parseInt(
+        String(
+          this.configService.get<number>('minio.port') ??
+            process.env.MINIO_PORT ??
+            '9000',
         ),
-        useSSL:
-          this.configService.get<string>('MINIO_USE_SSL', 'false') === 'true',
-        accessKey: this.configService.get<string>('MINIO_ACCESS_KEY'),
-        secretKey: this.configService.get<string>('MINIO_SECRET_KEY'),
+        10,
+      );
+      const useSSL =
+        this.configService.get<boolean>('minio.useSSL') ??
+        process.env.MINIO_USE_SSL === 'true';
+      const accessKey =
+        this.configService.get<string>('minio.accessKey') ||
+        process.env.MINIO_ACCESS_KEY ||
+        '';
+      const secretKey =
+        this.configService.get<string>('minio.secretKey') ||
+        process.env.MINIO_SECRET_KEY ||
+        '';
+
+      this.bucketName =
+        this.configService.get<string>('minio.bucket') || this.bucketName;
+
+      this.minioClient = new MinioClient({
+        endPoint: endpoint,
+        port,
+        useSSL,
+        accessKey,
+        secretKey,
       });
 
-      // Ensure bucket exists
       await this.ensureBucketExists(this.bucketName);
       this.logger.log('MinIO service initialized successfully');
     } catch (error) {
@@ -94,22 +117,26 @@ export class MinioService implements OnModuleInit {
 
   async getPublicUrl(bucketName: string, objectName: string): Promise<string> {
     try {
-      // Check if a public URL is configured (for ngrok/proxy scenarios)
-      const publicUrl = this.configService.get<string>('MINIO_PUBLIC_URL');
+      const publicUrl =
+        this.configService.get<string>('minio.publicUrl') ||
+        process.env.MINIO_PUBLIC_URL;
 
       if (publicUrl) {
-        // Use the configured public URL
-        return `${publicUrl}/${bucketName}/${objectName}`;
+        return `${publicUrl.replace(/\/$/, '')}/${bucketName}/${objectName}`;
       }
 
-      // Fallback to direct MinIO URL
-      const endpoint = this.configService.get<string>(
-        'MINIO_ENDPOINT',
-        'localhost',
+      const endpoint =
+        this.configService.get<string>('minio.endpoint') ||
+        process.env.MINIO_ENDPOINT ||
+        'localhost';
+      const port = String(
+        this.configService.get<number>('minio.port') ??
+          process.env.MINIO_PORT ??
+          '9000',
       );
-      const port = this.configService.get<string>('MINIO_PORT', '9000');
       const useSSL =
-        this.configService.get<string>('MINIO_USE_SSL', 'false') === 'true';
+        this.configService.get<boolean>('minio.useSSL') ??
+        process.env.MINIO_USE_SSL === 'true';
 
       const protocol = useSSL ? 'https' : 'http';
       const portSuffix =

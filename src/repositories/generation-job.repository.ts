@@ -43,8 +43,6 @@ export class GenerationJobRepository {
   }
 
   async findById(jobId: string): Promise<GenerationJob | null> {
-    console.log(`🔍 Fetching job ${jobId} from Supabase...`);
-
     const { data, error } = await this.supabaseService
       .getServiceClient()
       .from('generation_jobs')
@@ -53,16 +51,8 @@ export class GenerationJobRepository {
       .maybeSingle(); // Use maybeSingle to avoid errors if not found
 
     if (error) {
-      console.error(`❌ Error fetching job ${jobId}:`, error);
+      console.error(`Error fetching job ${jobId}:`, error);
       return null;
-    }
-
-    if (data) {
-      console.log(
-        `✅ Found job ${jobId}: status=${data.status}, progress=${data.progress}`,
-      );
-    } else {
-      console.log(`⚠️ Job ${jobId} not found in database`);
     }
 
     return data ? this.mapDatabaseToInterface(data) : null;

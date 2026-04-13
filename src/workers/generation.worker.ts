@@ -81,7 +81,9 @@ export class GenerationWorker extends WorkerHost {
 
       // Wait for n8n to complete by polling the database
       // n8n will call our webhook which updates the job status
-      const maxWaitTime = 120000; // 2 minutes max
+      const maxWaitTime = Number(
+        this.configService.get<string>('n8n.workflowTimeoutMs') || '300000',
+      );
       const pollInterval = 2000; // Check every 2 seconds
       const startTime = Date.now();
 
@@ -169,10 +171,22 @@ export class GenerationWorker extends WorkerHost {
       }
 
       // Timeout - n8n didn't respond
+      // Final status check before failing on timeout to avoid race with delayed callback.
+      const finalJob = await this.generationJobRepository.findById(jobId);
+      if (finalJob?.status === JobStatus.READY) {
+        await job.updateProgress(100);
+        return {
+          success: true,
+          jobId,
+          contentId: finalJob.contentId,
+          message: 'Content generated successfully',
+        };
+      }
+
       this.logger.error(`⏰ Job ${jobId} timed out waiting for n8n`);
       await this.generationJobRepository.updateError(
         jobId,
-        'n8n workflow timeout - no response after 2 minutes',
+        `n8n workflow timeout - no response after ${Math.round(maxWaitTime / 1000)} seconds`,
         0,
       );
 
