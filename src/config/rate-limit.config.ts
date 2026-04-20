@@ -75,7 +75,10 @@ export function resolveRateLimitEndpoint(
   const normalizedPath = path.replace(/\/+$/, '');
   if (rules[normalizedPath]) return normalizedPath;
   for (const endpoint of Object.keys(rules)) {
-    if (normalizedPath === endpoint || normalizedPath.startsWith(endpoint + '/')) {
+    if (
+      normalizedPath === endpoint ||
+      normalizedPath.startsWith(endpoint + '/')
+    ) {
       return endpoint;
     }
   }

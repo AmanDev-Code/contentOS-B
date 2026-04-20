@@ -107,6 +107,9 @@ export interface N8nWebhookPayload {
   jobId: string;
   userId: string;
   callbackUrl: string;
+  callback_url?: string;
+  callbackURL?: string;
+  webhookCallbackUrl?: string;
   topics?: string[];
   preferences?: Record<string, any>;
 }

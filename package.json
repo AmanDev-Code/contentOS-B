@@ -38,6 +38,7 @@
     "ioredis": "^5.10.0",
     "minio": "^8.0.7",
     "pdfkit": "^0.18.0",
+    "playwright": "^1.59.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sharp": "^0.33.2"

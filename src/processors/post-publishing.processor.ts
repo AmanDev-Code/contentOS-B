@@ -10,6 +10,8 @@ interface PublishJobData {
   contentId: string;
   userId: string;
   platform: string;
+  actorType?: 'member' | 'organization';
+  organizationUrn?: string;
 }
 
 @Processor('post-publishing')
@@ -34,7 +36,7 @@ export class PostPublishingProcessor extends WorkerHost {
   async handleScheduledPost(job: Job<PublishJobData>) {
     this.logger.log(`Processing scheduled post job: ${job.id || 'unknown'}`);
 
-    const { contentId, userId, platform } = job.data;
+    const { contentId, userId, platform, actorType, organizationUrn } = job.data;
 
     try {
       // Update job status to processing
@@ -48,6 +50,8 @@ export class PostPublishingProcessor extends WorkerHost {
         contentId,
         userId,
         platform: platform as 'linkedin',
+        actorType,
+        organizationUrn,
       });
 
       // Update job status to published

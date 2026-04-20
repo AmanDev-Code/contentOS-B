@@ -58,7 +58,9 @@ export class UserRateLimitGuard implements CanActivate {
     if (!endpoint) {
       return true;
     }
-    const method = String((req as { method?: string }).method || 'GET').toUpperCase();
+    const method = String(
+      (req as { method?: string }).method || 'GET',
+    ).toUpperCase();
     // Safeguard read-heavy listing endpoints from accidental throttle loops (StrictMode, polling).
     if (
       method === 'GET' &&
@@ -96,10 +98,7 @@ export class UserRateLimitGuard implements CanActivate {
     const usage = await this.getCurrentUsage(userId, endpoint, config);
     this.applyHeaders(res, {
       'X-RateLimit-Limit': config.max.toString(),
-      'X-RateLimit-Remaining': Math.max(
-        0,
-        config.max - usage.count,
-      ).toString(),
+      'X-RateLimit-Remaining': Math.max(0, config.max - usage.count).toString(),
       'X-RateLimit-Reset': usage.resetTime.toString(),
       'X-RateLimit-Window': config.windowMs.toString(),
     });
@@ -154,7 +153,9 @@ export class UserRateLimitGuard implements CanActivate {
 
       return true;
     } catch (e) {
-      this.logger.error(`User rate limit check failed: ${(e as Error).message}`);
+      this.logger.error(
+        `User rate limit check failed: ${(e as Error).message}`,
+      );
       return true;
     }
   }

@@ -19,6 +19,9 @@ import {
   N8nGeneratedContentDto,
 } from '../common/dto/media-intent.dto';
 import { normalizeN8nCallbackBody } from '../common/utils/n8n-callback-normalize';
+import { mergePerformancePredictionWithRefinementApplied } from '../common/utils/merge-performance-prediction';
+import { isViralTopicsN8nPayload } from '../common/utils/viral-topics-detect';
+import { PostRefinementService } from '../services/post-refinement.service';
 
 @ApiTags('webhook')
 @Controller('webhook')
@@ -30,6 +33,7 @@ export class WebhookController {
     private configService: ConfigService,
     private generationJobRepository: GenerationJobRepository,
     private generatedContentRepository: GeneratedContentRepository,
+    private postRefinementService: PostRefinementService,
   ) {
     // Create Redis client for signaling job completion to workers
     this.redis = new Redis({
@@ -52,7 +56,15 @@ export class WebhookController {
       return;
     }
     const raw = req.headers['x-n8n-webhook-secret'];
-    const provided = Array.isArray(raw) ? raw[0] : raw;
+    const providedHeader = Array.isArray(raw) ? raw[0] : raw;
+    const querySecretRaw = (req.query as any)?.secret;
+    const providedQuery = Array.isArray(querySecretRaw)
+      ? querySecretRaw[0]
+      : querySecretRaw;
+    const provided =
+      (typeof providedHeader === 'string' && providedHeader) ||
+      (typeof providedQuery === 'string' && providedQuery) ||
+      '';
     if (!provided || typeof provided !== 'string') {
       throw new UnauthorizedException('Missing webhook secret');
     }
@@ -78,18 +90,28 @@ export class WebhookController {
     );
 
     try {
-      const current = await this.generationJobRepository.findById(payload.jobId);
+      const current = await this.generationJobRepository.findById(
+        payload.jobId,
+      );
       if (!current) {
-        this.logger.warn(`Progress update ignored: job ${payload.jobId} not found`);
+        this.logger.warn(
+          `Progress update ignored: job ${payload.jobId} not found`,
+        );
         return { success: false, message: 'Job not found' };
       }
-      if (current.status === JobStatus.READY || current.status === JobStatus.FAILED) {
+      if (
+        current.status === JobStatus.READY ||
+        current.status === JobStatus.FAILED
+      ) {
         return {
           success: true,
           message: 'Ignored progress update for terminal job',
         };
       }
-      const nextProgress = Math.max(current.progress || 0, payload.progress || 0);
+      const nextProgress = Math.max(
+        current.progress || 0,
+        payload.progress || 0,
+      );
       await this.generationJobRepository.updateStatus(
         payload.jobId,
         JobStatus.GENERATING,
@@ -120,10 +142,53 @@ export class WebhookController {
     try {
       payload = normalizeN8nCallbackBody(body);
     } catch (e) {
-      this.logger.error(
-        `n8n callback normalize failed: ${(e as Error).message}`,
-      );
-      return { success: false, message: (e as Error).message };
+      const normalizeError = (e as Error).message;
+      this.logger.error(`n8n callback normalize failed: ${normalizeError}`);
+
+      // Best-effort recovery: if jobId is present in raw body, mark the job failed
+      // and signal workers, so UI doesn't remain "processing" until timeout.
+      const raw = Array.isArray(body) && body.length > 0 ? (body[0] as any) : (body as any);
+      const rawJobId =
+        raw && typeof raw === 'object' && typeof raw.jobId === 'string'
+          ? String(raw.jobId).trim()
+          : '';
+      const queryJobIdRaw = (req.query as any)?.jobId;
+      const queryJobId =
+        typeof queryJobIdRaw === 'string' ? queryJobIdRaw.trim() : '';
+      const recoverJobId = rawJobId || queryJobId;
+
+      if (recoverJobId) {
+        try {
+          const job = await this.generationJobRepository.findById(recoverJobId);
+          if (job) {
+            await this.generationJobRepository.updateError(
+              recoverJobId,
+              `Invalid n8n callback payload: ${normalizeError}`,
+              (job.retryCount || 0) + 1,
+            );
+
+            const completionKey = `job:${recoverJobId}:completed`;
+            await this.redis.setex(
+              completionKey,
+              300,
+              JSON.stringify({
+                status: 'failed',
+                error: `Invalid n8n callback payload: ${normalizeError}`,
+                timestamp: new Date().toISOString(),
+              }),
+            );
+            this.logger.warn(
+              `Marked job ${recoverJobId} failed due to invalid callback shape and signaled worker`,
+            );
+          }
+        } catch (recoverErr) {
+          this.logger.error(
+            `Failed to mark job ${recoverJobId} failed after normalize error: ${(recoverErr as Error).message}`,
+          );
+        }
+      }
+
+      return { success: false, message: normalizeError };
     }
 
     this.logger.log(`Received n8n callback for job ${payload.jobId}`);
@@ -134,10 +199,66 @@ export class WebhookController {
         this.logger.error(`Job ${payload.jobId} not found`);
         return { success: false, message: 'Job not found' };
       }
+      if (job.status === JobStatus.READY && job.contentId) {
+        this.logger.log(
+          `Job ${payload.jobId} already READY with content ${job.contentId}; ignoring duplicate callback`,
+        );
+        return {
+          success: true,
+          message: 'Job already completed',
+          contentId: job.contentId,
+        };
+      }
 
       if (payload.status === 'success' && payload.content) {
         const c = payload.content as N8nGeneratedContentDto;
-        this.assertIntentContract(c);
+        const topicList = isViralTopicsN8nPayload(c.title, c.content);
+        if (!topicList) {
+          this.assertIntentContract(c);
+        }
+
+        const sourceUrl =
+          (payload.content?.performancePrediction?.postMeta as any)?.link ||
+          (payload.content?.performancePrediction as any)?.sourceLink ||
+          undefined;
+
+        const refined = topicList
+          ? {
+              title: String(c.title || 'Viral Topic Ideas').slice(0, 180),
+              content: String(c.content || '').slice(0, 5000),
+              hashtags: Array.isArray(c.hashtags) ? c.hashtags : [],
+              quality: {
+                score: 100,
+                passed: true,
+                reasons: ['topics_list_persisted_without_linkedin_refinement'],
+              },
+            }
+          : await this.postRefinementService.refine({
+              platform: 'linkedin',
+              content: c,
+              sourceUrl,
+            });
+
+        if (!topicList && !refined.quality.passed) {
+          this.logger.warn(
+            `n8n callback: refined content quality marginal (${refined.quality.score}) for job ${payload.jobId}; persisting anyway`,
+          );
+        }
+
+        const perfBase = {
+          ...(payload.content.performancePrediction || {}),
+          ...(topicList
+            ? { source: 'n8n-topics-callback' }
+            : {
+                refinement: {
+                  platform: 'linkedin',
+                  qualityScore: refined.quality.score,
+                  qualityReasons: refined.quality.reasons,
+                },
+              }),
+        };
+        const performancePredictionForDb =
+          mergePerformancePredictionWithRefinementApplied(perfBase);
 
         const visualType =
           c.postType === MediaPostType.CAROUSEL
@@ -148,17 +269,21 @@ export class WebhookController {
 
         const content = await this.generatedContentRepository.create(
           job.userId,
-          c.title,
-          c.content,
+          refined.title,
+          refined.content,
           {
             jobId: payload.jobId,
             aiScore: c.aiScore,
             visualType,
             visualUrl: c.visualUrl,
             carouselUrls: c.carouselUrls,
-            hashtags: c.hashtags,
-            aiReasoning: c.aiReasoning,
-            performancePrediction: payload.content.performancePrediction,
+            hashtags: refined.hashtags,
+            aiReasoning:
+              c.aiReasoning ||
+              (topicList
+                ? 'Viral topics from n8n'
+                : `Refined for LinkedIn (${refined.quality.score}/100): ${refined.quality.reasons.join(', ') || 'passed'}`),
+            performancePrediction: performancePredictionForDb,
             status:
               visualType === VisualType.NONE
                 ? ContentStatus.READY
@@ -167,9 +292,9 @@ export class WebhookController {
         );
 
         const jobResponsePayload = {
-          title: c.title,
-          content: c.content,
-          hashtags: c.hashtags,
+          title: refined.title,
+          content: refined.content,
+          hashtags: refined.hashtags,
           postType: c.postType,
           imagePrompt: c.imagePrompt,
           slides: c.slides,
@@ -177,7 +302,7 @@ export class WebhookController {
           carouselUrls: c.carouselUrls,
           aiScore: c.aiScore,
           aiReasoning: c.aiReasoning,
-          performancePrediction: payload.content.performancePrediction,
+          performancePrediction: performancePredictionForDb,
         };
 
         await this.generationJobRepository.updateWithContent(
@@ -252,6 +377,38 @@ export class WebhookController {
         `Error processing n8n callback: ${(error as Error).message}`,
         (error as Error).stack,
       );
+      // Ensure jobs don't stay stuck in generating when callback handling crashes.
+      try {
+        const raw = Array.isArray(body) && body.length > 0 ? (body[0] as any) : (body as any);
+        const rawJobId =
+          raw && typeof raw === 'object' && typeof raw.jobId === 'string'
+            ? String(raw.jobId).trim()
+            : '';
+        if (rawJobId) {
+          const job = await this.generationJobRepository.findById(rawJobId);
+          if (job && job.status !== JobStatus.FAILED && job.status !== JobStatus.READY) {
+            await this.generationJobRepository.updateError(
+              rawJobId,
+              `n8n callback processing error: ${(error as Error).message}`,
+              (job.retryCount || 0) + 1,
+            );
+            const completionKey = `job:${rawJobId}:completed`;
+            await this.redis.setex(
+              completionKey,
+              300,
+              JSON.stringify({
+                status: 'failed',
+                error: `n8n callback processing error: ${(error as Error).message}`,
+                timestamp: new Date().toISOString(),
+              }),
+            );
+          }
+        }
+      } catch (secondaryError) {
+        this.logger.error(
+          `Failed to mark callback-crashed job failed: ${(secondaryError as Error).message}`,
+        );
+      }
       return {
         success: false,
         message: 'Internal error processing callback',

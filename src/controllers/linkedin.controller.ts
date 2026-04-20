@@ -46,16 +46,16 @@ export class LinkedinController {
   @Post('oauth/start')
   @UseGuards(AuthGuard, UserRateLimitGuard)
   @ApiOperation({
-    summary: 'Start LinkedIn OAuth (returns LinkedIn authorize URL with secure state)',
+    summary:
+      'Start LinkedIn OAuth (returns LinkedIn authorize URL with secure state)',
   })
   async startOAuth(@Request() req: { user?: { id: string } }) {
     const userId = req.user?.id;
     if (!userId) {
       throw new BadRequestException('User ID not found in request');
     }
-    const state = await this.linkedinOAuthStateService.createStateForUser(
-      userId,
-    );
+    const state =
+      await this.linkedinOAuthStateService.createStateForUser(userId);
     const url = this.linkedinService.getAuthUrl(state);
     return { url };
   }
@@ -159,7 +159,18 @@ export class LinkedinController {
   async getAnalytics(@Request() req, @Query('limit') limit?: string) {
     const userId = req.user?.id;
     const postLimit = limit ? parseInt(limit, 10) : 10;
-    return this.linkedinService.getPostAnalytics(userId, postLimit);
+    const actorType =
+      req.query?.actorType === 'organization' ? 'organization' : 'member';
+    const organizationUrn =
+      typeof req.query?.organizationUrn === 'string'
+        ? req.query.organizationUrn
+        : undefined;
+    return this.linkedinService.getPostAnalytics(
+      userId,
+      postLimit,
+      actorType,
+      organizationUrn,
+    );
   }
 
   @Get('dashboard')
@@ -170,12 +181,67 @@ export class LinkedinController {
     return this.linkedinService.getDashboardMetrics(userId);
   }
 
+  @Get('insights')
+  @UseGuards(AuthGuard, UserRateLimitGuard, PaywallGuard)
+  @ApiOperation({
+    summary: 'Get computed LinkedIn insights from live connected data',
+  })
+  async getInsights(@Request() req, @Query('periodDays') periodDays?: string) {
+    const userId = req.user?.id;
+    const parsed = Number(periodDays);
+    const actorType =
+      req.query?.actorType === 'organization' ? 'organization' : 'member';
+    const organizationUrn =
+      typeof req.query?.organizationUrn === 'string'
+        ? req.query.organizationUrn
+        : undefined;
+    return this.linkedinService.getInsights(
+      userId,
+      Number.isFinite(parsed) ? parsed : 30,
+      actorType,
+      organizationUrn,
+    );
+  }
+
+  @Get('account-type')
+  @UseGuards(AuthGuard, UserRateLimitGuard, PaywallGuard)
+  @ApiOperation({
+    summary: 'Get connected LinkedIn account type and analytics capability',
+  })
+  async getAccountType(@Request() req) {
+    const userId = req.user?.id;
+    const actorType =
+      req.query?.actorType === 'organization' ? 'organization' : 'member';
+    const organizationUrn =
+      typeof req.query?.organizationUrn === 'string'
+        ? req.query.organizationUrn
+        : undefined;
+    return this.linkedinService.getAccountTypeContext(
+      userId,
+      actorType,
+      organizationUrn,
+    );
+  }
+
+  @Get('posting-identities')
+  @UseGuards(AuthGuard, UserRateLimitGuard, PaywallGuard)
+  @ApiOperation({
+    summary: 'Get available LinkedIn posting identities (personal + admin pages)',
+  })
+  async getPostingIdentities(@Request() req) {
+    const userId = req.user?.id;
+    return this.linkedinService.getPostingIdentities(userId);
+  }
+
   @Get('organization')
   @UseGuards(AuthGuard, UserRateLimitGuard, PaywallGuard)
   @ApiOperation({ summary: 'Get LinkedIn organization analytics' })
-  async getOrganizationAnalytics(@Request() req) {
+  async getOrganizationAnalytics(
+    @Request() req,
+    @Query('organizationUrn') organizationUrn?: string,
+  ) {
     const userId = req.user?.id;
-    return this.linkedinService.getOrganizationAnalytics(userId);
+    return this.linkedinService.getOrganizationAnalytics(userId, organizationUrn);
   }
 
   @Post('disconnect')

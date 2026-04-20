@@ -3,11 +3,16 @@ import {
   Post,
   Get,
   Put,
+  Patch,
+  Delete,
+  Param,
   Body,
   UseGuards,
   Request,
   HttpException,
   HttpStatus,
+  Headers,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationService } from '../services/notification.service';
@@ -15,6 +20,18 @@ import { OnboardingService } from '../services/onboarding.service';
 import { AuthGuard } from '../guards/auth.guard';
 import { AdminGuard } from '../guards/admin.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
+import { TrendingTagsService } from '../services/trending-tags.service';
+import { TrendingHashtagOrchestratorService } from '../services/trending-hashtag-orchestrator.service';
+import { ScraperSessionHealthService } from '../services/scrapers/session-health.service';
+import { ScraperEventLogService } from '../services/scrapers/scraper-event-log.service';
+import { InstagramScraperService } from '../services/scrapers/instagram.scraper';
+import { TwitterScraperService } from '../services/scrapers/twitter.scraper';
+import { LinkedinScraperService } from '../services/scrapers/linkedin.scraper';
+import { ScraperCredentialsService } from '../services/scrapers/scraper-credentials.service';
+import { BrowserPoolService } from '../services/scrapers/browser-pool.service';
+import { SupabaseService } from '../services/supabase.service';
+import { CacheService } from '../services/cache.service';
+import { TrendingHashtagEngineService } from '../services/trending-hashtag-engine.service';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -40,6 +57,16 @@ interface UpdateOnboardingConfigDto {
   tourSteps?: Record<string, boolean>;
 }
 
+interface CreateTagDto {
+  tag: string;
+  priority?: number;
+}
+
+interface UpdateTagDto {
+  isActive?: boolean;
+  priority?: number;
+}
+
 @ApiTags('admin')
 @Controller('admin')
 @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
@@ -48,7 +75,315 @@ export class AdminController {
   constructor(
     private readonly notificationService: NotificationService,
     private readonly onboardingService: OnboardingService,
+    private readonly trendingTagsService: TrendingTagsService,
+    private readonly trendingOrchestratorService: TrendingHashtagOrchestratorService,
+    private readonly scraperSessionHealthService: ScraperSessionHealthService,
+    private readonly scraperEventLog: ScraperEventLogService,
+    private readonly instagramScraper: InstagramScraperService,
+    private readonly twitterScraper: TwitterScraperService,
+    private readonly linkedinScraper: LinkedinScraperService,
+    private readonly scraperCredentials: ScraperCredentialsService,
+    private readonly browserPool: BrowserPoolService,
+    private readonly supabaseService: SupabaseService,
+    private readonly cacheService: CacheService,
+    private readonly trendingHashtagEngine: TrendingHashtagEngineService,
   ) {}
+
+  @Post('scraper/purge-inhouse')
+  @ApiOperation({
+    summary:
+      'Delete trending_hashtags rows that have no external signal (IG/X/LinkedIn all zero) and flush trending cache',
+  })
+  async purgeInhouseTrending() {
+    const client = this.supabaseService.getServiceClient();
+    // Fetch candidates; filter in JS since PostgREST lacks a computed-sum filter.
+    const { data, error } = await client
+      .from('trending_hashtags')
+      .select('id, source_breakdown')
+      .limit(5000);
+    if (error) {
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+    const stale = (data || []).filter((r: any) => {
+      const sb = r?.source_breakdown || {};
+      const total =
+        Number(sb.instagram || 0) + Number(sb.twitter || 0) + Number(sb.linkedin || 0);
+      return total === 0;
+    });
+    let deleted = 0;
+    if (stale.length > 0) {
+      const ids = stale.map((r: any) => r.id);
+      const { error: delErr } = await client
+        .from('trending_hashtags')
+        .delete()
+        .in('id', ids);
+      if (delErr) {
+        throw new HttpException(delErr.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+      deleted = ids.length;
+    }
+    // Nuke all trending cache keys — use pattern delete if supported.
+    try {
+      await this.cacheService.delete('trending:global');
+      await this.cacheService.delete('trending:global:list');
+    } catch {
+      /* ignore */
+    }
+    return { success: true, data: { deletedRows: deleted, cacheCleared: true } };
+  }
+
+  @Post('trending/prune-oldest')
+  @ApiOperation({
+    summary:
+      'Delete the oldest trending_hashtags rows by last_updated (stale index cleanup), then rebuild global cache',
+  })
+  async pruneOldestTrending(@Body() body?: { count?: number }) {
+    const count = Math.max(1, Math.min(Number(body?.count ?? 200), 5000));
+    const client = this.supabaseService.getServiceClient();
+    const { data: rows, error } = await client
+      .from('trending_hashtags')
+      .select('id')
+      .order('last_updated', { ascending: true })
+      .limit(count);
+    if (error) {
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+    const ids = (rows || []).map((r: { id: string }) => r.id).filter(Boolean);
+    if (ids.length > 0) {
+      const { error: delErr } = await client.from('trending_hashtags').delete().in('id', ids);
+      if (delErr) {
+        throw new HttpException(delErr.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+    }
+    await this.cacheService.delete('trending:global').catch(() => {});
+    await this.cacheService.delete('trending:global:list').catch(() => {});
+    await this.trendingHashtagEngine.refreshGlobalCache();
+    return { success: true, data: { deletedRows: ids.length } };
+  }
+
+  @Get('scraper/credentials')
+  @ApiOperation({
+    summary: 'Masked scraper credentials (Redis override + env fallback)',
+  })
+  async getScraperCredentials() {
+    const data = await this.scraperCredentials.getAdminView();
+    return { success: true, data };
+  }
+
+  @Put('scraper/credentials')
+  @ApiOperation({
+    summary:
+      'Save scraper secrets to Redis (admin). Empty fields are ignored. clearFields removes overrides.',
+  })
+  async putScraperCredentials(
+    @Body()
+    body: {
+      instagramSession?: string;
+      instagramCsrfToken?: string;
+      instagramDsUserId?: string;
+      instagramIgDid?: string;
+      instagramMid?: string;
+      xAuthToken?: string;
+      linkedinCookie?: string;
+      linkedinApiVersion?: string;
+      clearFields?: string[];
+      verify?: boolean;
+    },
+  ) {
+    const { verify: _verify, ...toSave } = body || {};
+    await this.scraperCredentials.save(toSave);
+    await this.browserPool.recycle();
+    const credentials = await this.scraperCredentials.getAdminView();
+    const verify = body?.verify !== false;
+    const health = verify ? await this.scraperSessionHealthService.check() : null;
+    return { success: true, data: { credentials, health } };
+  }
+
+  @Post('scraper/credentials/verify')
+  @ApiOperation({ summary: 'Re-run session health probes with current effective credentials' })
+  async verifyScraperCredentials() {
+    const health = await this.scraperSessionHealthService.check();
+    const credentials = await this.scraperCredentials.getAdminView();
+    return { success: true, data: { credentials, health } };
+  }
+
+  @Get('scraper/session-health')
+  @ApiOperation({ summary: 'Check scraper session cookie validity per platform' })
+  async scraperSessionHealth() {
+    try {
+      const data = await this.scraperSessionHealthService.check();
+      return { success: true, data };
+    } catch (error) {
+      throw new HttpException(
+        (error as Error).message || 'Failed to check scraper sessions',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('scraper/events')
+  @ApiOperation({ summary: 'Recent scraper events (ring buffer)' })
+  async scraperEvents(@Query('limit') limit?: string) {
+    const n = Math.max(1, Math.min(parseInt(limit || '50', 10) || 50, 200));
+    return {
+      success: true,
+      data: {
+        summary: this.scraperEventLog.summary(),
+        events: this.scraperEventLog.list(n),
+      },
+    };
+  }
+
+  @Post('scraper/events/clear')
+  @ApiOperation({ summary: 'Clear scraper event log' })
+  async clearScraperEvents() {
+    this.scraperEventLog.clear();
+    return { success: true };
+  }
+
+  @Post('scraper/test-fetch')
+  @ApiOperation({ summary: 'Test-fetch a single tag on a single platform' })
+  async scraperTestFetch(
+    @Body() body: { platform: 'instagram' | 'twitter' | 'linkedin'; tag: string; limit?: number },
+  ) {
+    const { platform, tag } = body || ({} as any);
+    if (!platform || !tag) {
+      throw new HttpException('platform and tag are required', HttpStatus.BAD_REQUEST);
+    }
+    const limit = Math.max(1, Math.min(Number(body.limit ?? 10), 30));
+    const started = Date.now();
+    const HARD_BUDGET_MS = 25_000;
+    const withBudget = <T>(p: Promise<T>): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`hard_timeout after ${HARD_BUDGET_MS}ms`)),
+            HARD_BUDGET_MS,
+          ),
+        ),
+      ]);
+    try {
+      let posts: unknown[] = [];
+      if (platform === 'instagram')
+        posts = await withBudget(this.instagramScraper.fetch(tag, limit));
+      else if (platform === 'twitter')
+        posts = await withBudget(this.twitterScraper.fetch(tag, limit));
+      else if (platform === 'linkedin')
+        posts = await withBudget(this.linkedinScraper.fetch(tag, limit));
+      else
+        throw new HttpException(
+          'platform must be instagram|twitter|linkedin',
+          HttpStatus.BAD_REQUEST,
+        );
+      return {
+        success: true,
+        data: {
+          platform,
+          tag,
+          count: posts.length,
+          elapsedMs: Date.now() - started,
+          sample: posts.slice(0, 5),
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: {
+          platform,
+          tag,
+          elapsedMs: Date.now() - started,
+          error: (error as Error).message,
+        },
+      };
+    }
+  }
+
+  @Post('tags')
+  @ApiOperation({ summary: 'Add admin managed tag' })
+  async addTag(@Body() body: CreateTagDto) {
+    const data = await this.trendingTagsService.addTag(
+      body.tag,
+      body.priority || 0,
+    );
+    return { success: true, data };
+  }
+
+  @Get('tags')
+  @ApiOperation({ summary: 'List admin managed tags' })
+  async listTags() {
+    const data = await this.trendingTagsService.listTags();
+    return { success: true, data };
+  }
+
+  @Patch('tags/:id')
+  @ApiOperation({ summary: 'Update tag active state/priority' })
+  async updateTag(@Param('id') id: string, @Body() body: UpdateTagDto) {
+    const data = await this.trendingTagsService.updateTag(id, {
+      isActive: body.isActive,
+      priority: body.priority,
+    });
+    return { success: true, data };
+  }
+
+  @Delete('tags/:id')
+  @ApiOperation({ summary: 'Delete tag' })
+  async deleteTag(@Param('id') id: string) {
+    await this.trendingTagsService.deleteTag(id);
+    return { success: true };
+  }
+
+  @Post('tags/:id/refresh')
+  @ApiOperation({ summary: 'Force refresh a single tag now' })
+  async refreshTag(@Param('id') id: string) {
+    try {
+      await this.trendingOrchestratorService.enqueueSingleTag(id, true);
+      return { success: true, message: 'Tag refresh queued' };
+    } catch (error) {
+      throw new HttpException(
+        (error as Error).message || 'Failed to queue tag refresh',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('tags/refresh-all')
+  @ApiOperation({ summary: 'Force refresh all active tags now' })
+  async refreshAllTags() {
+    try {
+      await this.trendingOrchestratorService.enqueueSyncNow();
+      return { success: true, message: 'Global tag sync queued' };
+    } catch (error) {
+      throw new HttpException(
+        (error as Error).message || 'Failed to queue global tag sync',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Local/dev-only escape hatch to trigger refresh without a Supabase JWT.
+   * Guarded by X-Admin-Action-Secret header matching ADMIN_ACTION_SECRET env var.
+   */
+  @Post('tags/refresh-all/secret')
+  @ApiOperation({ summary: 'Force refresh all tags (secret header)' })
+  async refreshAllTagsWithSecret(
+    @Headers('x-admin-action-secret') secret?: string,
+  ) {
+    const expected = process.env.ADMIN_ACTION_SECRET || '';
+    if (!expected || !secret || secret !== expected) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    try {
+      await this.trendingOrchestratorService.enqueueSyncNow();
+      return { success: true, message: 'Global tag sync queued' };
+    } catch (error) {
+      throw new HttpException(
+        (error as Error).message || 'Failed to queue global tag sync',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 
   @Get('onboarding/config')
   @ApiOperation({ summary: 'Get onboarding feature flag config' })

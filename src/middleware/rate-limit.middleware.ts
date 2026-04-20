@@ -210,7 +210,9 @@ export class RateLimitMiddleware implements NestMiddleware {
             : Math.min(...validRequests) + config.windowMs,
       };
     } catch (error) {
-      this.logger.error(`Failed to get current usage: ${(error as Error).message}`);
+      this.logger.error(
+        `Failed to get current usage: ${(error as Error).message}`,
+      );
       return {
         count: 0,
         resetTime: Date.now() + config.windowMs,

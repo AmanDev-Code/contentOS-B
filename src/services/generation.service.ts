@@ -50,6 +50,35 @@ export class GenerationService {
     userId: string,
     preferences?: Record<string, any>,
   ): Promise<{ jobId: string; message: string }> {
+    // Keep one active generation per user to avoid UI tracking one job
+    // while BullMQ is still processing an older queued job for that user.
+    const existingJobs = await this.generationJobRepository.findByUserId(userId);
+    const activeJob = existingJobs.find(
+      (j) =>
+        j.status === JobStatus.GENERATING ||
+        j.status === JobStatus.MEDIA_GENERATING ||
+        j.status === JobStatus.PUBLISHING,
+    );
+    if (activeJob) {
+      // Default above N8N_TOPICS_TIMEOUT_MS (300s) so topic workflows are not auto-failed mid-flight.
+      const staleAfterMs = Number(process.env.GENERATION_ACTIVE_STALE_MS || '420000');
+      const createdAtMs = new Date(activeJob.createdAt as any).getTime();
+      const ageMs = Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : 0;
+      if (ageMs > staleAfterMs) {
+        await this.generationJobRepository.updateError(
+          activeJob.id,
+          `Auto-failed stale active job after ${Math.round(ageMs / 1000)}s without completion`,
+          activeJob.retryCount || 0,
+        );
+      } else {
+      return {
+        jobId: activeJob.id,
+        message:
+          'Existing generation job is still running. Reusing active job ID.',
+      };
+      }
+    }
+
     const normalizedPreferences = {
       ...(preferences || {}),
       generationGuardrails: {
@@ -99,6 +128,7 @@ export class GenerationService {
         preferences: normalizedPreferences,
       },
       {
+        jobId: job.id, // Keep BullMQ job id aligned with DB generation_jobs.id
         attempts: 1, // No auto-retry, user must manually retry
         removeOnComplete: true, // Auto-remove completed jobs to prevent queue jamming
         removeOnFail: false, // Keep failed jobs so user can see them
@@ -178,6 +208,7 @@ export class GenerationService {
         preferences: {},
       },
       {
+        jobId: job.id,
         attempts: 1,
         removeOnComplete: true,
         removeOnFail: false,

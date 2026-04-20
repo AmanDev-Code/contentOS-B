@@ -12,7 +12,11 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { GenerationService } from '../services/generation.service';
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
+import { mergePerformancePredictionWithRefinementApplied } from '../common/utils/merge-performance-prediction';
+import { isViralTopicsN8nPayload } from '../common/utils/viral-topics-detect';
 import { CacheService } from '../services/cache.service';
+import { PostRefinementService } from '../services/post-refinement.service';
+import { MediaPostType } from '../common/dto/media-intent.dto';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
 import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
@@ -26,6 +30,7 @@ export class GenerationController {
     private generationService: GenerationService,
     private generatedContentRepository: GeneratedContentRepository,
     private cacheService: CacheService,
+    private postRefinementService: PostRefinementService,
   ) {}
 
   @Post('start')
@@ -77,11 +82,14 @@ export class GenerationController {
       this.generatedContentRepository.findByUserId(userId, limitNum, offset),
       this.generatedContentRepository.countByUserId(userId),
     ]);
+    const refinedContent = await Promise.all(
+      content.map((item) => this.ensureRefinedBeforeReturn(item)),
+    );
 
     const totalPages = Math.ceil(totalCount / limitNum);
 
     return {
-      data: content,
+      data: refinedContent,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -96,13 +104,16 @@ export class GenerationController {
   @Get('content/:contentId')
   @ApiOperation({ summary: 'Get specific content by ID' })
   async getContent(@Param('contentId') contentId: string) {
-    return this.generatedContentRepository.findById(contentId);
+    const content = await this.generatedContentRepository.findById(contentId);
+    if (!content) return null;
+    return this.ensureRefinedBeforeReturn(content as any);
   }
 
   @Get('job/:jobId/content')
   @ApiOperation({ summary: 'Get content by job ID' })
   async getContentByJobId(@Param('jobId') jobId: string) {
-    return this.generatedContentRepository.findByJobId(jobId);
+    const rows = await this.generatedContentRepository.findByJobId(jobId);
+    return Promise.all(rows.map((row) => this.ensureRefinedBeforeReturn(row as any)));
   }
 
   @Post('job/:jobId/retry')
@@ -146,11 +157,14 @@ export class GenerationController {
       ),
       this.generatedContentRepository.countScheduledByUserId(userId),
     ]);
+    const refinedContent = await Promise.all(
+      content.map((item) => this.ensureRefinedBeforeReturn(item as any)),
+    );
 
     const totalPages = Math.ceil(totalCount / limitNum);
 
     return {
-      data: content,
+      data: refinedContent,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -160,5 +174,77 @@ export class GenerationController {
         hasPrev: pageNum > 1,
       },
     };
+  }
+
+  private async ensureRefinedBeforeReturn(item: any): Promise<any> {
+    if (!item || !item.id) return item;
+    const title = String(item.title || '');
+    const body = String(item.content || '');
+    if (!title || !body) return item;
+    if (isViralTopicsN8nPayload(title, body)) return item;
+
+    const pp = item?.performance_prediction as Record<string, unknown> | undefined;
+    const refinementAlreadyApplied =
+      (pp?.postRefinement as { applied?: boolean } | undefined)?.applied === true;
+    if (refinementAlreadyApplied) return item;
+
+    // n8n often ships **bold** and [text](url). Plain n8n prose (no markdown) still needs refinement
+    // when it came from the n8n-post workflow (see n8n-callback-normalize performancePrediction.source).
+    const hasN8nStyleMarkdownLink = /\[([^\]]*)\]\((https?:[^)]+)\)/.test(body);
+    const hasLegacyWatermark =
+      /_My take:_/i.test(body) || /==Read more==:/i.test(body);
+    const looksLikeNewsAttribution =
+      /read more about\b/i.test(body) &&
+      /https?:\/\/[^\s]+/i.test(body) &&
+      /\*\*[^*]+\*\*/.test(body);
+    const fromN8nPost = pp?.source === 'n8n-post';
+    const hasWorkflowPredictionShape =
+      pp != null &&
+      typeof pp === 'object' &&
+      ('postMeta' in pp ||
+        'visualType' in pp ||
+        'slides' in pp ||
+        pp.source === 'n8n-post');
+    const tiedToGenerationJob = Boolean(item.job_id);
+    const hasOurDeterministicLead = /^[✨🚀⚡]\s/.test(body.trim());
+    // Run once for pipeline output: markdown/news cues, n8n metadata, or any row tied to a generation job.
+    const eligibleForPipelineRefinement =
+      !hasOurDeterministicLead &&
+      (fromN8nPost || hasWorkflowPredictionShape || tiedToGenerationJob);
+    const needsRefinement =
+      hasN8nStyleMarkdownLink ||
+      hasLegacyWatermark ||
+      looksLikeNewsAttribution ||
+      eligibleForPipelineRefinement;
+    if (!needsRefinement) return item;
+
+    const postMeta = pp?.postMeta as Record<string, unknown> | undefined;
+
+    const refined = await this.postRefinementService.refine({
+      platform: 'linkedin',
+      content: {
+        title,
+        content: body,
+        hashtags: Array.isArray(item.hashtags)
+          ? item.hashtags.map((h: unknown) => String(h))
+          : [],
+        postType:
+          String(item.visual_type || '').toLowerCase() === 'carousel'
+            ? MediaPostType.CAROUSEL
+            : MediaPostType.SINGLE,
+      },
+      sourceUrl:
+        (typeof postMeta?.link === 'string' ? postMeta.link : undefined) ||
+        (typeof pp?.sourceLink === 'string' ? pp.sourceLink : undefined) ||
+        undefined,
+    });
+
+    const updated = await this.generatedContentRepository.updateContent(item.id, {
+      title: refined.title,
+      content: refined.content,
+      hashtags: refined.hashtags,
+      performance_prediction: mergePerformancePredictionWithRefinementApplied(pp),
+    });
+    return updated;
   }
 }

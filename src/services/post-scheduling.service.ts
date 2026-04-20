@@ -5,12 +5,15 @@ import { SupabaseService } from './supabase.service';
 import { MediaGenerationService } from './media-generation.service';
 import { LinkedinService } from './linkedin.service';
 import { CacheService } from './cache.service';
+import { buildLinkedInCommentary } from '../common/utils/linkedin-publish-text';
 
 export interface SchedulePostRequest {
   contentId: string;
   userId: string;
   scheduledFor: Date;
   platform: 'linkedin';
+  actorType?: 'member' | 'organization';
+  organizationUrn?: string;
 }
 
 export interface PublishPostRequest {
@@ -141,6 +144,8 @@ export class PostSchedulingService {
           contentId: request.contentId,
           userId: request.userId,
           platform: request.platform,
+          actorType: request.actorType,
+          organizationUrn: request.organizationUrn,
           scheduledFor: request.scheduledFor.toISOString(),
           contentPreview: content.content?.substring(0, 100) || '',
         },
@@ -361,16 +366,10 @@ export class PostSchedulingService {
   }
 
   private formatPostText(content: PostContent): string {
-    let text = content.content;
-
-    if (content.hashtags && content.hashtags.length > 0) {
-      const hashtags = Array.isArray(content.hashtags)
-        ? content.hashtags.join(' ')
-        : content.hashtags;
-      text += `\n\n${hashtags}`;
-    }
-
-    const formattedText = text.trim();
+    const formattedText = buildLinkedInCommentary(
+      content.content,
+      content.hashtags,
+    );
     this.logger.log(
       `Formatted post text (${formattedText.length} chars): ${formattedText.substring(0, 200)}...`,
     );

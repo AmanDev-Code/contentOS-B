@@ -105,6 +105,8 @@ export class PostsController {
       scheduledForLocal?: string;
       timezone?: string;
       platform?: string;
+      actorType?: 'member' | 'organization';
+      organizationUrn?: string;
       content?: string;
       mediaUrls?: string[];
       hashtags?: string[];
@@ -119,6 +121,8 @@ export class PostsController {
         scheduledForLocal,
         timezone,
         platform = 'linkedin',
+        actorType,
+        organizationUrn,
         content,
         mediaUrls,
         hashtags,
@@ -244,6 +248,8 @@ export class PostsController {
           userId,
           scheduledFor: scheduledDate,
           platform: platform as 'linkedin',
+          actorType,
+          organizationUrn,
         });
 
         // Update transaction description to reflect successful scheduling
@@ -372,18 +378,24 @@ export class PostsController {
   async getCalendarPosts(
     @Request() req: AuthenticatedRequest,
     @Query('start') start?: string,
+    @Query('startDate') startDateQuery?: string,
     @Query('end') end?: string,
+    @Query('endDate') endDateQuery?: string,
   ) {
     try {
       const userId = req.user.id;
 
       // Default to current month if no dates provided
-      const startDate = start
-        ? new Date(start)
+      const requestedStart = start || startDateQuery;
+      const requestedEnd = end || endDateQuery;
+      const startDate = requestedStart
+        ? new Date(requestedStart)
         : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-      const endDate = end
-        ? new Date(end)
+      const endDate = requestedEnd
+        ? new Date(requestedEnd)
         : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0);
+      // Ensure the full end day is included.
+      endDate.setHours(23, 59, 59, 999);
 
       // Get scheduled posts in date range
       const { data: scheduledPosts, error: scheduledError } =
@@ -455,6 +467,9 @@ export class PostsController {
       return {
         success: true,
         events: calendarEvents,
+        data: {
+          posts: calendarEvents,
+        },
         dateRange: {
           start: startDate.toISOString(),
           end: endDate.toISOString(),

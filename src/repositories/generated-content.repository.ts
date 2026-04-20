@@ -98,13 +98,14 @@ export class GeneratedContentRepository {
     limit = 50,
     offset = 0,
   ): Promise<GeneratedContent[]> {
-    // For now, return published content as "scheduled" since we don't have scheduled_for field yet
+    // Legacy behavior: return already published rows for historical schedule view.
     const { data, error } = await this.supabaseService
       .getServiceClient()
       .from('generated_content')
       .select('*')
       .eq('user_id', userId)
-      .eq('status', 'published')
+      .eq('publish_status', 'published')
+      .not('published_at', 'is', null)
       .is('deleted_at', null)
       .order('published_at', { ascending: false })
       .range(offset, offset + limit - 1);
@@ -119,7 +120,8 @@ export class GeneratedContentRepository {
       .from('generated_content')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
-      .eq('status', 'published')
+      .eq('publish_status', 'published')
+      .not('published_at', 'is', null)
       .is('deleted_at', null);
 
     if (error) throw error;
@@ -139,21 +141,67 @@ export class GeneratedContentRepository {
     return data || [];
   }
 
+  async findLatestUnlinkedByUserSince(
+    userId: string,
+    sinceIso: string,
+  ): Promise<GeneratedContent | null> {
+    const { data, error } = await this.supabaseService
+      .getServiceClient()
+      .from('generated_content')
+      .select('*')
+      .eq('user_id', userId)
+      .is('deleted_at', null)
+      .is('job_id', null)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data || null;
+  }
+
+  async attachJobIdIfMissing(
+    contentId: string,
+    jobId: string,
+  ): Promise<GeneratedContent | null> {
+    const { data, error } = await this.supabaseService
+      .getServiceClient()
+      .from('generated_content')
+      .update({
+        job_id: jobId,
+        updated_at: new Date(),
+      })
+      .eq('id', contentId)
+      .is('job_id', null)
+      .select('*')
+      .maybeSingle();
+
+    if (error) throw error;
+    return data || null;
+  }
+
   async updateContent(
     contentId: string,
     updates: {
       title?: string;
       content?: string;
       hashtags?: string[];
+      performance_prediction?: Record<string, unknown>;
     },
   ): Promise<GeneratedContent> {
+    const { performance_prediction, ...rest } = updates;
+    const payload: Record<string, unknown> = {
+      ...rest,
+      updated_at: new Date(),
+    };
+    if (performance_prediction !== undefined) {
+      payload.performance_prediction = performance_prediction;
+    }
     const { data, error } = await this.supabaseService
       .getServiceClient()
       .from('generated_content')
-      .update({
-        ...updates,
-        updated_at: new Date(),
-      })
+      .update(payload)
       .eq('id', contentId)
       .select()
       .single();
@@ -194,5 +242,42 @@ export class GeneratedContentRepository {
       .eq('id', contentId);
 
     if (error) throw error;
+  }
+
+  async findPublishedWithinRange(
+    userId: string,
+    from: Date,
+    to: Date,
+  ): Promise<
+    Array<{
+      id: string;
+      title: string;
+      content: string;
+      visual_type: string | null;
+      published_at: string;
+      linkedin_post_url: string | null;
+    }>
+  > {
+    const { data, error } = await this.supabaseService
+      .getServiceClient()
+      .from('generated_content')
+      .select('id,title,content,visual_type,published_at,linkedin_post_url')
+      .eq('user_id', userId)
+      .eq('publish_status', 'published')
+      .not('published_at', 'is', null)
+      .is('deleted_at', null)
+      .gte('published_at', from.toISOString())
+      .lt('published_at', to.toISOString())
+      .order('published_at', { ascending: false });
+
+    if (error) throw error;
+    return (data || []) as Array<{
+      id: string;
+      title: string;
+      content: string;
+      visual_type: string | null;
+      published_at: string;
+      linkedin_post_url: string | null;
+    }>;
   }
 }

@@ -27,7 +27,25 @@ export default () => ({
     /** When set, n8n webhooks must send header X-N8N-Webhook-Secret with this value. */
     webhookSecret: process.env.N8N_WEBHOOK_SECRET || '',
     /** Max time workers wait for n8n callback before failing (ms). */
-    workflowTimeoutMs: parseInt(process.env.N8N_WORKFLOW_TIMEOUT_MS || '300000', 10),
+    workflowTimeoutMs: parseInt(
+      process.env.N8N_WORKFLOW_TIMEOUT_MS || '300000',
+      10,
+    ),
+  },
+
+  aiRefinement: {
+    enabled: process.env.AI_REFINEMENT_ENABLED !== 'false',
+    baseUrl: process.env.AI_REFINEMENT_BASE_URL || 'https://openrouter.ai/api/v1',
+    model:
+      process.env.AI_REFINEMENT_MODEL || 'z-ai/glm-4.5-air:free',
+    apiKey:
+      process.env.AI_REFINEMENT_API_KEY ||
+      process.env.OPENROUTER_API_KEY ||
+      process.env.OPENAI_API_KEY ||
+      '',
+    timeoutMs: parseInt(process.env.AI_REFINEMENT_TIMEOUT_MS || '12000', 10),
+    referer: process.env.AI_REFINEMENT_REFERER || '',
+    appTitle: process.env.AI_REFINEMENT_APP_TITLE || 'Trndinn',
   },
 
   linkedin: {
@@ -61,9 +79,13 @@ export default () => ({
     mediaPipelineV2:
       process.env.FEATURE_MEDIA_PIPELINE_V2 === 'true' ||
       process.env.FEATURE_MEDIA_PIPELINE_V2 === '1',
+    // Default ON so company-page posting works out of the box.
+    // Set FEATURE_LINKEDIN_ORG_PUBLISHING=false to explicitly disable it.
     linkedinOrgPublishing:
-      process.env.FEATURE_LINKEDIN_ORG_PUBLISHING === 'true' ||
-      process.env.FEATURE_LINKEDIN_ORG_PUBLISHING === '1',
+      process.env.FEATURE_LINKEDIN_ORG_PUBLISHING === undefined
+        ? true
+        : process.env.FEATURE_LINKEDIN_ORG_PUBLISHING === 'true' ||
+          process.env.FEATURE_LINKEDIN_ORG_PUBLISHING === '1',
   },
 
   paddle: {

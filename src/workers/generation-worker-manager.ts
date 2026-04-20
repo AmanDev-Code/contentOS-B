@@ -3,10 +3,18 @@ import { ConfigService } from '@nestjs/config';
 import { Worker, Job } from 'bullmq';
 import Redis from 'ioredis';
 import { N8nService } from '../services/n8n.service';
+import { PostRefinementService } from '../services/post-refinement.service';
 import { GenerationJobRepository } from '../repositories/generation-job.repository';
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
 import { QUEUE_NAMES, JOB_STAGES } from '../common/constants';
-import { JobStatus } from '../common/types';
+import { JobStatus, ContentStatus, VisualType } from '../common/types';
+import { MediaPostType, N8nGeneratedContentDto } from '../common/dto/media-intent.dto';
+import { mergePerformancePredictionWithRefinementApplied } from '../common/utils/merge-performance-prediction';
+import { isViralTopicsN8nPayload } from '../common/utils/viral-topics-detect';
+
+type DirectGeneratedPost = N8nGeneratedContentDto & {
+  performancePrediction?: Record<string, unknown>;
+};
 
 @Injectable()
 export class GenerationWorkerManager implements OnModuleInit {
@@ -18,6 +26,7 @@ export class GenerationWorkerManager implements OnModuleInit {
   constructor(
     private configService: ConfigService,
     private n8nService: N8nService,
+    private postRefinementService: PostRefinementService,
     private generationJobRepository: GenerationJobRepository,
     private generatedContentRepository: GeneratedContentRepository,
   ) {
@@ -58,6 +67,8 @@ export class GenerationWorkerManager implements OnModuleInit {
               this.configService.get<string>('redis.password') || undefined,
           },
           concurrency: 1, // One job at a time per user
+          lockDuration: 180000,
+          maxStalledCount: 2,
         },
       );
 
@@ -85,7 +96,43 @@ export class GenerationWorkerManager implements OnModuleInit {
   private async processJob(job: Job): Promise<any> {
     const { jobId, userId, preferences } = job.data;
 
-    this.logger.log(`Processing generation job ${jobId} for user ${userId}`);
+    const existingJob = await this.generationJobRepository.findById(jobId);
+    if (existingJob?.status === JobStatus.READY && existingJob.contentId) {
+      this.logger.log(
+        JSON.stringify({
+          event: 'generation.skip_already_ready',
+          jobId,
+          contentId: existingJob.contentId,
+        }),
+      );
+      return {
+        success: true,
+        jobId,
+        contentId: existingJob.contentId,
+        message: 'Job already ready; skipping re-processing.',
+      };
+    }
+    if (existingJob?.status === JobStatus.FAILED) {
+      this.logger.log(
+        JSON.stringify({
+          event: 'generation.skip_already_failed',
+          jobId,
+          error: existingJob.error || null,
+        }),
+      );
+      return {
+        success: false,
+        jobId,
+        error: existingJob.error || 'Job already failed',
+        message: 'Job already failed; skipping re-processing.',
+      };
+    }
+
+    this.logger.log(
+      `Processing generation job ${jobId} for user ${userId} ` +
+        `(jobType=${String(job.data?.preferences?.jobType)}, contentType=${String(job.data?.preferences?.contentType)}). ` +
+        `This pipeline is independent of post publishing.`,
+    );
 
     try {
       await this.generationJobRepository.updateStatus(
@@ -99,7 +146,12 @@ export class GenerationWorkerManager implements OnModuleInit {
       const baseUrl =
         this.configService.get<string>('app.baseUrl') ||
         'http://localhost:3000';
-      const callbackUrl = `${baseUrl}/webhook/n8n-callback`;
+      const webhookSecret = this.configService.get<string>('n8n.webhookSecret') || '';
+      const callbackQuery = new URLSearchParams({ jobId });
+      if (webhookSecret) {
+        callbackQuery.set('secret', webhookSecret);
+      }
+      const callbackUrl = `${baseUrl}/webhook/n8n-callback?${callbackQuery.toString()}`;
       const carouselUrl =
         this.configService.get<string>('n8n.carouselWebhookUrl') || '';
       const ct = preferences?.contentType as string | undefined;
@@ -110,15 +162,197 @@ export class GenerationWorkerManager implements OnModuleInit {
           `→ ${useCarousel ? `carousel webhook (${carouselUrl})` : 'default webhook'} | callback=${callbackUrl}`,
       );
 
-      await this.n8nService.triggerContentGeneration(
+      const trigger = await this.n8nService.triggerContentGeneration(
         {
           jobId,
           userId,
           callbackUrl,
+          callback_url: callbackUrl,
+          callbackURL: callbackUrl,
+          webhookCallbackUrl: callbackUrl,
           preferences,
         },
         useCarousel ? { webhookUrlOverride: carouselUrl } : undefined,
       );
+      this.logger.log(
+        JSON.stringify({
+          event: 'generation.n8n.trigger_result',
+          jobId,
+          hasData: trigger?.data !== undefined && trigger?.data !== null,
+          dataType:
+            trigger?.data === null ? 'null' : typeof trigger?.data,
+          dataKeys:
+            trigger?.data && typeof trigger.data === 'object'
+              ? Object.keys(trigger.data as Record<string, unknown>).slice(0, 15)
+              : [],
+        }),
+      );
+
+      // Fallback path: some topic workflows return data directly and never call callback.
+      const isTopicJob =
+        String(preferences?.jobType || '') === 'generate_topics' ||
+        String(preferences?.contentType || '') === 'topics';
+      if (isTopicJob && trigger?.data) {
+        const normalized = this.extractTopicsFromN8nResponse(trigger.data);
+        if (normalized.length > 0) {
+          const contentText = [
+            'Here are current viral topic ideas:',
+            '',
+            ...normalized.map((t, i) => `${i + 1}. ${t}`),
+          ].join('\n');
+
+          const created = await this.generatedContentRepository.create(
+            userId,
+            'Viral Topic Ideas',
+            contentText.slice(0, 5000),
+            {
+              jobId,
+              status: ContentStatus.READY,
+              visualType: VisualType.NONE,
+              hashtags: [],
+              aiReasoning:
+                'Generated from direct n8n topics response (callback fallback path)',
+              performancePrediction:
+                mergePerformancePredictionWithRefinementApplied({
+                  source: 'n8n-direct-topics-response',
+                  topics: normalized,
+                  pipeline: 'topics',
+                }),
+            },
+          );
+
+          await this.generationJobRepository.updateWithContent(
+            jobId,
+            created.id,
+            JobStatus.READY,
+            {
+              title: 'Viral Topic Ideas',
+              content: contentText.slice(0, 5000),
+              hashtags: [],
+              source: 'n8n-direct-topics-response',
+            },
+          );
+
+          const completionKey = `job:${jobId}:completed`;
+          await this.redis.setex(
+            completionKey,
+            300,
+            JSON.stringify({
+              status: 'success',
+              contentId: created.id,
+              timestamp: new Date().toISOString(),
+            }),
+          );
+          await job.updateProgress(100);
+          this.logger.log(
+            `✅ Job ${jobId} completed from direct n8n topics response (no callback needed)`,
+          );
+          return {
+            success: true,
+            jobId,
+            contentId: created.id,
+            message: 'Content generated successfully (direct n8n response)',
+          };
+        }
+        const responseKeys =
+          trigger.data && typeof trigger.data === 'object'
+            ? Object.keys(trigger.data as Record<string, unknown>).slice(0, 15)
+            : [];
+        this.logger.warn(
+          `Topic job ${jobId} received direct n8n response without parsable topics. ` +
+            `dataType=${typeof trigger.data} keys=${JSON.stringify(responseKeys)}`,
+        );
+      }
+
+      // Fallback path: some n8n workflows return final post payload directly.
+      const directPostContent = this.extractDirectGeneratedPost(trigger?.data);
+      if (directPostContent) {
+        this.logger.log(
+          JSON.stringify({
+            event: 'generation.direct_post.detected',
+            jobId,
+            titleLength: (directPostContent.title || '').length,
+            contentLength: (directPostContent.content || '').length,
+            postType: directPostContent.postType || 'unknown',
+          }),
+        );
+        const sourceUrl =
+          (directPostContent.performancePrediction?.postMeta as any)?.link ||
+          (directPostContent.performancePrediction as any)?.sourceLink ||
+          undefined;
+        const refined = await this.postRefinementService.refine({
+          platform: 'linkedin',
+          content: directPostContent,
+          sourceUrl,
+        });
+        this.logger.log(
+          JSON.stringify({
+            event: 'generation.direct_post.refined',
+            jobId,
+            refinedLength: refined.content.length,
+            hashtagCount: refined.hashtags.length,
+            qualityScore: refined.quality.score,
+          }),
+        );
+        const visualType =
+          directPostContent.postType === MediaPostType.CAROUSEL
+            ? VisualType.CAROUSEL
+            : directPostContent.postType === MediaPostType.SINGLE
+              ? VisualType.IMAGE
+              : VisualType.NONE;
+        const created = await this.generatedContentRepository.create(
+          userId,
+          refined.title,
+          refined.content,
+          {
+            jobId,
+            status:
+              visualType === VisualType.NONE
+                ? ContentStatus.READY
+                : ContentStatus.MEDIA_GENERATING,
+            visualType,
+            hashtags: refined.hashtags,
+            aiScore: directPostContent.aiScore,
+            aiReasoning: directPostContent.aiReasoning,
+            performancePrediction:
+              mergePerformancePredictionWithRefinementApplied({
+                ...(directPostContent.performancePrediction || {}),
+                source: 'n8n-direct-post-response',
+              }),
+          },
+        );
+        await this.generationJobRepository.updateWithContent(
+          jobId,
+          created.id,
+          JobStatus.READY,
+          {
+            title: refined.title,
+            content: refined.content,
+            hashtags: refined.hashtags,
+            source: 'n8n-direct-post-response',
+          },
+        );
+        const completionKey = `job:${jobId}:completed`;
+        await this.redis.setex(
+          completionKey,
+          300,
+          JSON.stringify({
+            status: 'success',
+            contentId: created.id,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        await job.updateProgress(100);
+        this.logger.log(
+          `✅ Job ${jobId} completed from direct n8n post response (no callback needed)`,
+        );
+        return {
+          success: true,
+          jobId,
+          contentId: created.id,
+          message: 'Content generated successfully (direct n8n post response)',
+        };
+      }
 
       await this.generationJobRepository.updateStatus(
         jobId,
@@ -133,8 +367,27 @@ export class GenerationWorkerManager implements OnModuleInit {
 
       // Wait for n8n to complete by checking Redis completion signal
       // The webhook will set a Redis key when n8n completes
-      const maxWaitTime = Number(
+      const configuredMaxWaitTime = Number(
         this.configService.get<string>('n8n.workflowTimeoutMs') || '300000',
+      );
+      const configuredTopicsMaxWaitTime = Number(
+        process.env.N8N_TOPICS_TIMEOUT_MS || configuredMaxWaitTime,
+      );
+      const isTopicJobForTimeout =
+        String(preferences?.jobType || '') === 'generate_topics' ||
+        String(preferences?.contentType || '') === 'topics';
+      const maxWaitTime = isTopicJobForTimeout
+        ? configuredTopicsMaxWaitTime
+        : configuredMaxWaitTime;
+      this.logger.log(
+        JSON.stringify({
+          event: 'generation.wait_config',
+          jobId,
+          isTopicJob: isTopicJobForTimeout,
+          maxWaitTimeMs: maxWaitTime,
+          workflowTimeoutMs: configuredMaxWaitTime,
+          topicsTimeoutMs: configuredTopicsMaxWaitTime,
+        }),
       );
       const pollInterval = 1000; // Check every 1 second
       const startTime = Date.now();
@@ -172,6 +425,9 @@ export class GenerationWorkerManager implements OnModuleInit {
         // still complete via /webhook/n8n-callback and mark the job ready in DB.
         const dbJob = await this.generationJobRepository.findById(jobId);
         if (dbJob?.status === JobStatus.READY && dbJob.contentId) {
+          if (!isTopicJobForTimeout) {
+            await this.ensureRefinedBeforeFinalize(jobId, dbJob.contentId);
+          }
           this.logger.log(
             `✅ Job ${jobId} completed (DB fallback, contentId=${dbJob.contentId})`,
           );
@@ -187,18 +443,231 @@ export class GenerationWorkerManager implements OnModuleInit {
           throw new Error(dbJob.error || 'n8n workflow failed');
         }
 
+        // Callback-free path:
+        // If n8n (or another backend path) has already created generated_content for this job,
+        // finalize here without waiting for webhook callback.
+        const generatedForJob =
+          !dbJob?.contentId && dbJob?.status !== JobStatus.READY
+            ? await this.generatedContentRepository.findByJobId(jobId)
+            : [];
+        if (generatedForJob.length > 0) {
+          const latest = generatedForJob[0] as any;
+          this.logger.log(
+            JSON.stringify({
+              event: 'generation.db_content_detected',
+              jobId,
+              contentId: latest.id,
+              status: latest.status,
+              contentLength: String(latest.content || '').length,
+            }),
+          );
+
+          const isTopicLike = this.isTopicContentRecord(latest);
+
+          if (isTopicLike) {
+            await this.generationJobRepository.updateWithContent(
+              jobId,
+              latest.id,
+              JobStatus.READY,
+              {
+                title: String(latest.title || 'Viral Topic Ideas'),
+                content: String(latest.content || '').slice(0, 5000),
+                hashtags: Array.isArray(latest.hashtags) ? latest.hashtags : [],
+                source: 'db-detected-topics',
+              },
+            );
+            await job.updateProgress(100);
+            this.logger.log(
+              JSON.stringify({
+                event: 'generation.db_content_finalized',
+                jobId,
+                mode: 'topics',
+                refined: false,
+              }),
+            );
+            return {
+              success: true,
+              jobId,
+              contentId: latest.id,
+              message: 'Content finalized from DB without callback',
+            };
+          }
+
+          const refined = await this.postRefinementService.refine({
+            platform: 'linkedin',
+            content: {
+              title: String(latest.title || ''),
+              content: String(latest.content || ''),
+              hashtags: Array.isArray(latest.hashtags)
+                ? latest.hashtags.map((t: unknown) => String(t))
+                : [],
+              postType:
+                String(latest.visual_type || '').toLowerCase() === 'carousel'
+                  ? MediaPostType.CAROUSEL
+                  : MediaPostType.SINGLE,
+            },
+            sourceUrl:
+              (latest.performance_prediction as any)?.postMeta?.link ||
+              (latest.performance_prediction as any)?.sourceLink ||
+              undefined,
+          });
+
+          await this.generatedContentRepository.updateContent(latest.id, {
+            title: refined.title,
+            content: refined.content,
+            hashtags: refined.hashtags,
+            performance_prediction: mergePerformancePredictionWithRefinementApplied(
+              latest.performance_prediction,
+            ),
+          });
+
+          await this.generationJobRepository.updateWithContent(
+            jobId,
+            latest.id,
+            JobStatus.READY,
+            {
+              title: refined.title,
+              content: refined.content,
+              hashtags: refined.hashtags,
+              source: 'db-detected-refined',
+              refinement: {
+                qualityScore: refined.quality.score,
+                qualityReasons: refined.quality.reasons,
+              },
+            },
+          );
+          await job.updateProgress(100);
+          this.logger.log(
+            JSON.stringify({
+              event: 'generation.db_content_finalized',
+              jobId,
+              mode: 'post',
+              refined: true,
+              qualityScore: refined.quality.score,
+            }),
+          );
+          return {
+            success: true,
+            jobId,
+            contentId: latest.id,
+            message: 'Content finalized from DB with refinement',
+          };
+        }
+
+        // Fallback when n8n writes generated_content directly but forgets job_id:
+        // with one active job per user, newest unlinked content since job creation
+        // is considered this job's result.
+        if (!dbJob?.contentId && dbJob?.status !== JobStatus.READY) {
+          const unlinked =
+            await this.generatedContentRepository.findLatestUnlinkedByUserSince(
+              userId,
+              new Date(dbJob?.createdAt || startTime).toISOString(),
+            );
+          if (unlinked) {
+            const attached =
+              await this.generatedContentRepository.attachJobIdIfMissing(
+                (unlinked as any).id,
+                jobId,
+              );
+            const adopted = (attached || unlinked) as any;
+            this.logger.log(
+              JSON.stringify({
+                event: 'generation.unlinked_content_adopted',
+                jobId,
+                contentId: adopted.id,
+                attachedJobId: Boolean(attached),
+              }),
+            );
+
+            const isTopicLike = this.isTopicContentRecord(adopted);
+            if (isTopicLike) {
+              await this.generationJobRepository.updateWithContent(
+                jobId,
+                adopted.id,
+                JobStatus.READY,
+                {
+                  title: String(adopted.title || 'Viral Topic Ideas'),
+                  content: String(adopted.content || '').slice(0, 5000),
+                  hashtags: Array.isArray(adopted.hashtags) ? adopted.hashtags : [],
+                  source: 'db-unlinked-adopted-topics',
+                },
+              );
+              await job.updateProgress(100);
+              return {
+                success: true,
+                jobId,
+                contentId: adopted.id,
+                message: 'Unlinked DB content adopted and finalized',
+              };
+            }
+
+            const refined = await this.postRefinementService.refine({
+              platform: 'linkedin',
+              content: {
+                title: String(adopted.title || ''),
+                content: String(adopted.content || ''),
+                hashtags: Array.isArray(adopted.hashtags)
+                  ? adopted.hashtags.map((h: unknown) => String(h))
+                  : [],
+                postType:
+                  String(adopted.visual_type || '').toLowerCase() === 'carousel'
+                    ? MediaPostType.CAROUSEL
+                    : MediaPostType.SINGLE,
+              },
+              sourceUrl:
+                (adopted.performance_prediction as any)?.postMeta?.link ||
+                (adopted.performance_prediction as any)?.sourceLink ||
+                undefined,
+            });
+
+            await this.generatedContentRepository.updateContent(adopted.id, {
+              title: refined.title,
+              content: refined.content,
+              hashtags: refined.hashtags,
+              performance_prediction: mergePerformancePredictionWithRefinementApplied(
+                adopted.performance_prediction,
+              ),
+            });
+            await this.generationJobRepository.updateWithContent(
+              jobId,
+              adopted.id,
+              JobStatus.READY,
+              {
+                title: refined.title,
+                content: refined.content,
+                hashtags: refined.hashtags,
+                source: 'db-unlinked-adopted-refined',
+                refinement: {
+                  qualityScore: refined.quality.score,
+                  qualityReasons: refined.quality.reasons,
+                },
+              },
+            );
+            await job.updateProgress(100);
+            return {
+              success: true,
+              jobId,
+              contentId: adopted.id,
+              message: 'Unlinked DB content adopted, refined, and finalized',
+            };
+          }
+        }
+
         const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
         // Avoid noisy per-second logs; this wait is server-side (worker↔n8n), not browser network.
         if (elapsedSec % 10 === 0) {
           this.logger.log(
-            `⏳ Waiting for n8n callback for job ${jobId}... (${elapsedSec}s)`,
+            `⏳ [GENERATION] Waiting for n8n callback for job ${jobId} ` +
+              `(jobType=${String(preferences?.jobType)}, contentType=${String(preferences?.contentType)})... ` +
+              `(${elapsedSec}s, independent of /posts/publish)`,
           );
         }
       }
 
       // Timeout - n8n didn't respond
       this.logger.error(
-        `⏰ Job ${jobId} timed out waiting for n8n (${Math.round(maxWaitTime / 1000)} seconds)`,
+        `⏰ [GENERATION] Job ${jobId} timed out waiting for n8n (${Math.round(maxWaitTime / 1000)} seconds). ` +
+          `Post publishing is unaffected.`,
       );
       await this.generationJobRepository.updateError(
         jobId,
@@ -258,5 +727,272 @@ export class GenerationWorkerManager implements OnModuleInit {
       this.activeUsers.delete(userId);
       this.logger.log(`Cleaned up worker for user ${userId}`);
     }
+  }
+
+  private extractTopicsFromN8nResponse(data: unknown): string[] {
+    const root =
+      Array.isArray(data) && data.length > 0
+        ? (data[0] as Record<string, unknown>)
+        : (data as Record<string, unknown>);
+    if (!root || typeof root !== 'object') return [];
+
+    const directTopics =
+      (Array.isArray((root as any).topics) ? (root as any).topics : undefined) ||
+      (Array.isArray((root as any)?.data?.topics)
+        ? (root as any).data.topics
+        : undefined) ||
+      (Array.isArray((root as any)?.output?.topics)
+        ? (root as any).output.topics
+        : undefined);
+
+    const normalizeTopicArray = (topicsRaw: unknown[]): string[] =>
+      topicsRaw
+        .map((topic: any) => {
+          if (typeof topic === 'string') return topic.trim();
+          const title = String(topic?.title || topic?.topic || topic?.name || '').trim();
+          const reason = String(topic?.reason || topic?.why || '').trim();
+          if (title && reason) return `${title} — ${reason}`;
+          return title;
+        })
+        .filter((v: string) => v.length > 0)
+        .slice(0, 12);
+
+    if (Array.isArray(directTopics)) {
+      return normalizeTopicArray(directTopics);
+    }
+
+    const seen = new Set<unknown>();
+    const queue: unknown[] = [root];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || typeof current !== 'object' || seen.has(current)) {
+        continue;
+      }
+      seen.add(current);
+      const obj = current as Record<string, unknown>;
+
+      const nestedTopics = obj.topics;
+      if (Array.isArray(nestedTopics)) {
+        const normalized = normalizeTopicArray(nestedTopics);
+        if (normalized.length > 0) {
+          return normalized;
+        }
+      }
+
+      for (const value of Object.values(obj)) {
+        if (value && typeof value === 'object') {
+          queue.push(value);
+        }
+      }
+    }
+
+    const textCandidates: string[] = [];
+    const enqueueText = (value: unknown) => {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        textCandidates.push(value.trim());
+      }
+    };
+    enqueueText((root as any).content);
+    enqueueText((root as any).text);
+    enqueueText((root as any).message);
+    enqueueText((root as any)?.data?.content);
+    enqueueText((root as any)?.output?.content);
+
+    for (const text of textCandidates) {
+      const parsed = text
+        .split('\n')
+        .map((line) =>
+          line
+            .replace(/^\s*[-*]\s+/, '')
+            .replace(/^\s*\d+[.)]\s+/, '')
+            .trim(),
+        )
+        .filter((line) => line.length > 12)
+        .slice(0, 12);
+      if (parsed.length >= 3) {
+        return parsed;
+      }
+    }
+
+    return [];
+  }
+
+  private extractDirectGeneratedPost(data: unknown): DirectGeneratedPost | null {
+    const root =
+      Array.isArray(data) && data.length > 0
+        ? (data[0] as Record<string, unknown>)
+        : (data as Record<string, unknown>);
+    if (!root || typeof root !== 'object') {
+      return null;
+    }
+
+    const post = root.post as Record<string, unknown> | undefined;
+    if (!post || typeof post !== 'object') {
+      return null;
+    }
+    const title = String(post.title ?? '').trim().slice(0, 180);
+    const content = String(post.content ?? '').trim().slice(0, 5000);
+    if (!title || !content) {
+      return null;
+    }
+
+    const hashtags = Array.isArray(root.hashtags)
+      ? (root.hashtags as unknown[])
+          .map((h) => String(h || '').trim())
+          .filter(Boolean)
+          .slice(0, 12)
+      : undefined;
+
+    const visual = root.visual as Record<string, unknown> | undefined;
+    const visualType = String(visual?.type || '').trim().toLowerCase();
+    const isCarousel = visualType === 'carousel';
+    const slides =
+      isCarousel && Array.isArray(visual?.carouselSlides)
+        ? (visual.carouselSlides as Array<Record<string, unknown>>).map((s) => ({
+            headline: String(s.headline ?? '').trim().slice(0, 200),
+            body: String(s.body ?? '').trim().slice(0, 500),
+            imagePrompt: String(s.imagePrompt ?? '')
+              .trim()
+              .slice(0, 1500),
+          }))
+        : undefined;
+
+    const dto: DirectGeneratedPost = {
+      title,
+      content,
+      hashtags,
+      postType: isCarousel ? MediaPostType.CAROUSEL : MediaPostType.SINGLE,
+      imagePrompt:
+        !isCarousel && typeof visual?.imagePrompt === 'string'
+          ? String(visual.imagePrompt).trim().slice(0, 1500)
+          : undefined,
+      slides,
+      aiScore:
+        typeof post.finalScore === 'number'
+          ? post.finalScore
+          : typeof post.aiScore === 'number'
+            ? post.aiScore
+            : undefined,
+      aiReasoning:
+        typeof post.reason === 'string' ? String(post.reason).trim() : undefined,
+      performancePrediction: {
+        source: 'n8n-direct-post-response',
+        postMeta: {
+          link: typeof post.link === 'string' ? post.link : undefined,
+          source: typeof post.source === 'string' ? post.source : undefined,
+          category: typeof post.category === 'string' ? post.category : undefined,
+          originalScore: post.originalScore,
+          finalScore: post.finalScore,
+        },
+      },
+    };
+    return dto;
+  }
+
+  private async ensureRefinedBeforeFinalize(
+    jobId: string,
+    contentId: string,
+  ): Promise<void> {
+    const existing = (await this.generatedContentRepository.findById(
+      contentId,
+    )) as any;
+    if (!existing) return;
+
+    if (isViralTopicsN8nPayload(existing.title, existing.content)) {
+      await this.generatedContentRepository.updateContent(contentId, {
+        performance_prediction: mergePerformancePredictionWithRefinementApplied(
+          existing.performance_prediction,
+        ),
+      });
+      this.logger.log(
+        JSON.stringify({
+          event: 'generation.refine.skip_topics_list',
+          jobId,
+          contentId,
+        }),
+      );
+      return;
+    }
+
+    const currentText = String(existing.content || '');
+    const refinementDone =
+      (existing.performance_prediction as any)?.postRefinement?.applied === true;
+    if (refinementDone) {
+      this.logger.log(
+        JSON.stringify({
+          event: 'generation.refine.skip_already_applied',
+          jobId,
+          contentId,
+        }),
+      );
+      return;
+    }
+
+    const refined = await this.postRefinementService.refine({
+      platform: 'linkedin',
+      content: {
+        title: String(existing.title || ''),
+        content: currentText,
+        hashtags: Array.isArray(existing.hashtags)
+          ? existing.hashtags.map((h: unknown) => String(h))
+          : [],
+        postType:
+          String(existing.visual_type || '').toLowerCase() === 'carousel'
+            ? MediaPostType.CAROUSEL
+            : MediaPostType.SINGLE,
+      },
+      sourceUrl:
+        (existing.performance_prediction as any)?.postMeta?.link ||
+        (existing.performance_prediction as any)?.sourceLink ||
+        undefined,
+    });
+
+    await this.generatedContentRepository.updateContent(contentId, {
+      title: refined.title,
+      content: refined.content,
+      hashtags: refined.hashtags,
+      performance_prediction: mergePerformancePredictionWithRefinementApplied(
+        existing.performance_prediction,
+      ),
+    });
+    await this.generationJobRepository.updateWithContent(
+      jobId,
+      contentId,
+      JobStatus.READY,
+      {
+        title: refined.title,
+        content: refined.content,
+        hashtags: refined.hashtags,
+        source: 'worker-db-fallback-refine',
+        refinement: {
+          qualityScore: refined.quality.score,
+          qualityReasons: refined.quality.reasons,
+        },
+      },
+    );
+    this.logger.log(
+      JSON.stringify({
+        event: 'generation.refine.applied',
+        jobId,
+        contentId,
+        qualityScore: refined.quality.score,
+        outputLength: refined.content.length,
+      }),
+    );
+  }
+
+  private isTopicContentRecord(record: any): boolean {
+    const title = String(record?.title || '').toLowerCase();
+    const body = String(record?.content || '').toLowerCase();
+    const visualType = String(record?.visual_type || '').toLowerCase();
+    const hashtagCount = Array.isArray(record?.hashtags) ? record.hashtags.length : 0;
+    const looksLikeTopicTitle = title.includes('viral topic');
+    const looksLikeTopicBody =
+      body.startsWith('here are current viral topic ideas') ||
+      body.includes('topic ideas');
+    const hasLikelyPostVisual = visualType === 'image' || visualType === 'carousel';
+    if (hasLikelyPostVisual) return false;
+    if (looksLikeTopicTitle || looksLikeTopicBody) return true;
+    return hashtagCount === 0 && /\n\d+\.\s/.test(body);
   }
 }

@@ -49,10 +49,7 @@ export class ImmediatePostPublishService {
 
     if (
       actorType === 'organization' &&
-      !this.configService.get<boolean>(
-        'features.linkedinOrgPublishing',
-        false,
-      )
+      !this.configService.get<boolean>('features.linkedinOrgPublishing', true)
     ) {
       throw new HttpException(
         'Organization publishing is disabled',
@@ -98,13 +95,13 @@ export class ImmediatePostPublishService {
 
     const hasValidImage = Boolean(
       contentData.data?.visual_url?.startsWith('http') ||
-        (contentData.data?.media_urls &&
-          contentData.data.media_urls.length > 0) ||
-        (mediaUrls && mediaUrls.length > 0),
+      (contentData.data?.media_urls &&
+        contentData.data.media_urls.length > 0) ||
+      (mediaUrls && mediaUrls.length > 0),
     );
     const hasCarousel = Boolean(
       contentData.data?.carousel_urls &&
-        contentData.data.carousel_urls.length > 0,
+      contentData.data.carousel_urls.length > 0,
     );
 
     if (contentData.data) {
@@ -131,8 +128,7 @@ export class ImmediatePostPublishService {
       : hasValidImage
         ? 'image'
         : 'text';
-    const operationId =
-      idempotencyKey || `publish:${contentId}:${Date.now()}`;
+    const operationId = idempotencyKey || `publish:${contentId}:${Date.now()}`;
     await this.quotaService.debitOnce({
       userId,
       operationId,

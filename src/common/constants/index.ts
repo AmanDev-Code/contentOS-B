@@ -30,6 +30,14 @@ export const QUEUE_NAMES = {
   LINKEDIN_PUBLISH: 'linkedin-publish',
   MEDIA_SINGLE: 'media-single',
   MEDIA_CAROUSEL: 'media-carousel',
+  TRENDING_HASHTAGS: 'trending-hashtags',
+};
+
+export const HASHTAG_JOB_NAMES = {
+  SYNC_ACTIVE_TAGS: 'sync-active-tags',
+  PROCESS_TAG: 'process-tag',
+  DECAY_SCORES: 'decay-scores',
+  CLEANUP_STALE: 'cleanup-stale',
 };
 
 export const JOB_STAGES = {

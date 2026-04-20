@@ -44,7 +44,12 @@ export class GenerationWorker extends WorkerHost {
       const baseUrl =
         this.configService.get<string>('app.baseUrl') ||
         'http://localhost:3000';
-      const callbackUrl = `${baseUrl}/webhook/n8n-callback`;
+      const webhookSecret = this.configService.get<string>('n8n.webhookSecret') || '';
+      const callbackQuery = new URLSearchParams({ jobId });
+      if (webhookSecret) {
+        callbackQuery.set('secret', webhookSecret);
+      }
+      const callbackUrl = `${baseUrl}/webhook/n8n-callback?${callbackQuery.toString()}`;
 
       const carouselUrl =
         this.configService.get<string>('n8n.carouselWebhookUrl') || '';
@@ -61,6 +66,9 @@ export class GenerationWorker extends WorkerHost {
           jobId,
           userId,
           callbackUrl,
+          callback_url: callbackUrl,
+          callbackURL: callbackUrl,
+          webhookCallbackUrl: callbackUrl,
           preferences,
         },
         useCarousel ? { webhookUrlOverride: carouselUrl } : undefined,

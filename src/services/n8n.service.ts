@@ -16,7 +16,7 @@ export class N8nService {
   async triggerContentGeneration(
     payload: N8nWebhookPayload,
     options?: { webhookUrlOverride?: string },
-  ): Promise<{ success: boolean; message: string }> {
+  ): Promise<{ success: boolean; message: string; data?: unknown }> {
     try {
       const targetUrl = options?.webhookUrlOverride?.trim() || this.webhookUrl;
       if (!targetUrl) {
@@ -45,19 +45,24 @@ export class N8nService {
         throw new Error(`n8n webhook failed: ${response.status}`);
       }
 
-      // Try to parse JSON response, but don't fail if it's empty
-      try {
-        const text = await response.text();
-        if (text) {
-          const result = JSON.parse(text);
-          this.logger.log(`n8n webhook response: ${JSON.stringify(result)}`);
-        }
-      } catch (parseError) {
-        // Ignore JSON parse errors - n8n might return empty response
-        this.logger.log(
-          `n8n webhook triggered (empty response) for job ${payload.jobId}`,
-        );
-      }
+      const responseText = await response.text();
+      const parsed = this.parseJsonLike(responseText);
+      const parsedKeys =
+        parsed && typeof parsed === 'object'
+          ? Object.keys(parsed as Record<string, unknown>).slice(0, 12)
+          : [];
+      this.logger.log(
+        JSON.stringify({
+          event: 'n8n.trigger.response',
+          jobId: payload.jobId,
+          status: response.status,
+          contentType: response.headers.get('content-type') || '',
+          textLength: responseText.length,
+          parsed: parsed !== undefined,
+          parsedType: parsed === null ? 'null' : typeof parsed,
+          parsedKeys,
+        }),
+      );
 
       this.logger.log(
         `n8n webhook triggered successfully for job ${payload.jobId}`,
@@ -66,6 +71,7 @@ export class N8nService {
       return {
         success: true,
         message: 'Webhook triggered successfully',
+        data: parsed,
       };
     } catch (error) {
       this.logger.error(`Failed to trigger n8n webhook: ${error.message}`);
@@ -85,6 +91,28 @@ export class N8nService {
     } catch (error) {
       this.logger.error(`n8n health check failed: ${error.message}`);
       return false;
+    }
+  }
+
+  private parseJsonLike(text: string): unknown {
+    const trimmed = text.trim();
+    if (!trimmed) return undefined;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      // Try to recover JSON embedded in wrappers, markdown fences, or logs.
+      const jsonCandidate =
+        trimmed.match(/\{[\s\S]*\}$/)?.[0] ||
+        trimmed.match(/\[[\s\S]*\]$/)?.[0] ||
+        '';
+      if (jsonCandidate) {
+        try {
+          return JSON.parse(jsonCandidate);
+        } catch {
+          return undefined;
+        }
+      }
+      return undefined;
     }
   }
 }
