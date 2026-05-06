@@ -51,6 +51,11 @@ export const RATE_LIMIT_BY_PATH: Record<string, RateLimitRule> = {
     max: 50,
     message: 'Too many content generation requests. Please try again later.',
   },
+  '/generation/custom-topic': {
+    windowMs: 60 * 60 * 1000,
+    max: 30,
+    message: 'Too many custom topic requests. Please try again later.',
+  },
   '/posts/draft': {
     windowMs: 15 * 60 * 1000,
     max: 200,

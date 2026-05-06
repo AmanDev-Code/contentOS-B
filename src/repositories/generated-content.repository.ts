@@ -17,11 +17,15 @@ export class GeneratedContentRepository {
       visualType?: VisualType;
       visualUrl?: string;
       carouselUrls?: string[];
+      imageUrls?: string[];
+      /** Optional pre-rendered carousel PDF URL (e.g. document-deck presets). */
+      pdfUrl?: string;
       hashtags?: string[];
       aiReasoning?: string;
       performancePrediction?: Record<string, any>;
       suggestedImprovements?: string[];
       status?: ContentStatus;
+      source?: 'viral' | 'custom';
     },
   ): Promise<GeneratedContent> {
     const { data: result, error } = await this.supabaseService
@@ -31,17 +35,20 @@ export class GeneratedContentRepository {
         user_id: userId,
         title,
         content,
-        job_id: data.jobId, // Re-enabled after migration
+        job_id: data.jobId,
         category_id: data.categoryId,
         ai_score: data.aiScore,
         status: data.status || ContentStatus.READY,
         visual_type: data.visualType || VisualType.IMAGE,
         visual_url: data.visualUrl,
         carousel_urls: data.carouselUrls,
+        image_urls: data.imageUrls,
+        pdf_url: data.pdfUrl,
         hashtags: data.hashtags,
         ai_reasoning: data.aiReasoning,
         performance_prediction: data.performancePrediction,
         suggested_improvements: data.suggestedImprovements,
+        source: data.source || 'viral',
       })
       .select()
       .single();
@@ -67,13 +74,20 @@ export class GeneratedContentRepository {
     userId: string,
     limit = 50,
     offset = 0,
+    sourceFilter?: 'viral' | 'custom',
   ): Promise<GeneratedContent[]> {
-    const { data, error } = await this.supabaseService
+    let query = this.supabaseService
       .getServiceClient()
       .from('generated_content')
       .select('*')
       .eq('user_id', userId)
-      .is('deleted_at', null)
+      .is('deleted_at', null);
+
+    if (sourceFilter) {
+      query = query.eq('source', sourceFilter);
+    }
+
+    const { data, error } = await query
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -81,13 +95,19 @@ export class GeneratedContentRepository {
     return data || [];
   }
 
-  async countByUserId(userId: string): Promise<number> {
-    const { count, error } = await this.supabaseService
+  async countByUserId(userId: string, sourceFilter?: 'viral' | 'custom'): Promise<number> {
+    let query = this.supabaseService
       .getServiceClient()
       .from('generated_content')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
       .is('deleted_at', null);
+
+    if (sourceFilter) {
+      query = query.eq('source', sourceFilter);
+    }
+
+    const { count, error } = await query;
 
     if (error) throw error;
     return count || 0;
@@ -188,6 +208,10 @@ export class GeneratedContentRepository {
       content?: string;
       hashtags?: string[];
       performance_prediction?: Record<string, unknown>;
+      carousel_urls?: string[];
+      image_urls?: string[];
+      visual_url?: string;
+      pdf_url?: string;
     },
   ): Promise<GeneratedContent> {
     const { performance_prediction, ...rest } = updates;
@@ -206,6 +230,60 @@ export class GeneratedContentRepository {
       .select()
       .single();
 
+    if (error) throw error;
+    return data;
+  }
+
+  /**
+   * Atomically replace a single URL in the `image_urls` text[] array (and
+   * mirror the swap into `visual_url` when the index points at the row's
+   * primary visual). Used by the per-image regeneration worker so that we
+   * never clobber sibling images when two regenerations finish out of order.
+   */
+  async replaceImageUrlAtIndex(
+    contentId: string,
+    imageIndex: number,
+    newUrl: string,
+  ): Promise<GeneratedContent | null> {
+    if (!Number.isInteger(imageIndex) || imageIndex < 0) {
+      throw new Error(`replaceImageUrlAtIndex: invalid imageIndex=${imageIndex}`);
+    }
+    const client = this.supabaseService.getServiceClient();
+    const { data: existing, error: fetchError } = await client
+      .from('generated_content')
+      .select('id,image_urls,visual_url')
+      .eq('id', contentId)
+      .is('deleted_at', null)
+      .single();
+    if (fetchError) throw fetchError;
+    if (!existing) return null;
+
+    const currentUrls: string[] = Array.isArray(existing.image_urls)
+      ? [...existing.image_urls]
+      : [];
+    const previousUrl = currentUrls[imageIndex];
+    while (currentUrls.length <= imageIndex) currentUrls.push('');
+    currentUrls[imageIndex] = newUrl;
+
+    const updates: Record<string, unknown> = {
+      image_urls: currentUrls,
+      updated_at: new Date(),
+    };
+    // Mirror to `visual_url` when the regenerated slot is currently the row's
+    // primary visual (or when index 0 is regenerated and visual_url was unset).
+    if (
+      existing.visual_url === previousUrl ||
+      (imageIndex === 0 && !existing.visual_url)
+    ) {
+      updates.visual_url = newUrl;
+    }
+
+    const { data, error } = await client
+      .from('generated_content')
+      .update(updates)
+      .eq('id', contentId)
+      .select()
+      .single();
     if (error) throw error;
     return data;
   }

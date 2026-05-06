@@ -48,7 +48,22 @@ export interface Notification {
 
 import type { ServerResponse } from 'http';
 
-type SSEClient = { userId: string; res: ServerResponse };
+type SSEClient = {
+  userId: string;
+  res: ServerResponse;
+  connectedAt: number;
+  maxAgeTimer?: ReturnType<typeof setTimeout>;
+};
+
+// Cap SSE fan-out per user. React StrictMode (dev), tab reloads, and ngrok
+// HTTP/2 reconnect storms can briefly stack multiple connections; allowing a
+// small ceiling keeps multi-tab UX intact while preventing the unbounded
+// "Sending notification to N client(s)" duplicate-event storm.
+const MAX_SSE_CLIENTS_PER_USER = 3;
+// Force a reconnect every hour so long-lived connections (especially behind
+// reverse proxies that idle-kill silently) get cycled. Frontend reconnects
+// transparently with jittered backoff.
+const SSE_MAX_AGE_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class NotificationService {
@@ -58,28 +73,81 @@ export class NotificationService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
   addSSEClient(userId: string, res: ServerResponse): void {
-    this.sseClients.push({ userId, res });
+    // Trim oldest connections for this user above the cap. Cleaning up here
+    // (not just on socket-close) is important because clients behind ngrok or
+    // suspended tabs sometimes leave their backend `res.on('close')` pending
+    // for tens of seconds, during which a new connection arrives — exactly the
+    // duplicate-fanout we want to prevent.
+    const existingForUser = this.sseClients.filter((c) => c.userId === userId);
+    if (existingForUser.length >= MAX_SSE_CLIENTS_PER_USER) {
+      const toClose = existingForUser
+        .sort((a, b) => a.connectedAt - b.connectedAt)
+        .slice(0, existingForUser.length - (MAX_SSE_CLIENTS_PER_USER - 1));
+      for (const stale of toClose) {
+        this.closeClient(stale, 'replaced-by-newer-connection');
+      }
+    }
+
+    const client: SSEClient = {
+      userId,
+      res,
+      connectedAt: Date.now(),
+    };
+    client.maxAgeTimer = setTimeout(() => {
+      this.closeClient(client, 'max-age-reached');
+    }, SSE_MAX_AGE_MS);
+
+    this.sseClients.push(client);
+    const userCount = this.sseClients.filter((c) => c.userId === userId).length;
     this.logger.log(
-      `SSE client connected: ${userId} (total: ${this.sseClients.length})`,
+      `SSE client connected: ${userId} (user_total=${userCount}, global_total=${this.sseClients.length})`,
     );
   }
 
   removeSSEClient(res: ServerResponse): void {
+    const client = this.sseClients.find((c) => c.res === res);
+    if (client?.maxAgeTimer) clearTimeout(client.maxAgeTimer);
     this.sseClients = this.sseClients.filter((c) => c.res !== res);
     this.logger.log(
       `SSE client disconnected (total: ${this.sseClients.length})`,
     );
   }
 
+  private closeClient(client: SSEClient, reason: string): void {
+    if (client.maxAgeTimer) clearTimeout(client.maxAgeTimer);
+    this.sseClients = this.sseClients.filter((c) => c !== client);
+    try {
+      // Best-effort graceful end so the frontend's reader sees `done` and
+      // reconnects via the standard backoff path rather than treating it as a
+      // network error.
+      client.res.end();
+    } catch {
+      // Socket already gone — nothing to do.
+    }
+    this.logger.log(
+      `SSE client closed (${reason}): ${client.userId} (global_total=${this.sseClients.length})`,
+    );
+  }
+
   private pushToUser(userId: string, event: string, data: any): void {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const client of this.sseClients) {
-      if (client.userId === userId) {
-        try {
-          client.res.write(payload);
-        } catch {
-          // client gone, will be cleaned up on disconnect
-        }
+    const matchingClients = this.sseClients.filter(c => c.userId === userId);
+    
+    if (matchingClients.length === 0) {
+      this.logger.warn(
+        `SSE pushToUser: No clients connected for user ${userId} (event=${event}, total clients=${this.sseClients.length})`,
+      );
+    } else {
+      this.logger.log(
+        `SSE pushToUser: Sending ${event} to ${matchingClients.length} client(s) for user ${userId}`,
+      );
+    }
+    
+    for (const client of matchingClients) {
+      try {
+        client.res.write(payload);
+      } catch (err) {
+        this.logger.warn(`SSE write failed for user ${userId}: ${(err as Error).message}`);
       }
     }
   }
@@ -314,6 +382,104 @@ export class NotificationService {
     }
   }
 
+  /** Emit credit balance change to the user via SSE */
+  emitCreditBalanceChanged(
+    userId: string,
+    balance: number,
+    ledgerEntryId?: string,
+  ): void {
+    this.pushToUser(userId, 'credits.balance_changed', {
+      userId,
+      balance,
+      ledgerEntryId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /** Emit generation progress update via SSE */
+  emitGenerationProgress(
+    userId: string,
+    data: {
+      generationId: string;
+      subtaskKey: string;
+      status: 'queued' | 'running' | 'succeeded' | 'failed';
+      percent?: number;
+      meta?: Record<string, unknown>;
+    },
+  ): void {
+    this.logger.log(
+      `emitGenerationProgress: user=${userId} job=${data.generationId} step=${data.subtaskKey} status=${data.status}`,
+    );
+    this.pushToUser(userId, 'generation.progress', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /** Emit generation completed via SSE */
+  emitGenerationCompleted(
+    userId: string,
+    data: {
+      generationId: string;
+      contentId: string;
+      contentType: string;
+      regenerated?: boolean;
+    },
+  ): void {
+    this.logger.log(
+      `emitGenerationCompleted: user=${userId} job=${data.generationId} content=${data.contentId}`,
+    );
+    this.pushToUser(userId, 'generation.completed', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Emit single-image regeneration completion. Frontend listens for this on
+   * `trndinn:image-regenerated` to swap the image URL in place inside the
+   * post preview/schedule modal without requiring a full content reload.
+   */
+  emitImageRegenerated(
+    userId: string,
+    data: {
+      generationId: string;
+      contentId: string;
+      imageIndex: number;
+      newImageUrl: string;
+    },
+  ): void {
+    this.logger.log(
+      `emitImageRegenerated: user=${userId} job=${data.generationId} content=${data.contentId} index=${data.imageIndex}`,
+    );
+    this.pushToUser(userId, 'generation.image_regenerated', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Emit full-carousel regeneration completion. The frontend uses this to
+   * replace the slide list and PDF URL in the preview modal in place.
+   */
+  emitCarouselRegenerated(
+    userId: string,
+    data: {
+      generationId: string;
+      contentId: string;
+      newImageUrls: string[];
+      newPdfUrl?: string;
+    },
+  ): void {
+    this.logger.log(
+      `emitCarouselRegenerated: user=${userId} job=${data.generationId} content=${data.contentId} slides=${data.newImageUrls.length}`,
+    );
+    this.pushToUser(userId, 'generation.carousel_regenerated', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // Predefined notification creators for common scenarios
 
   /**
@@ -343,14 +509,39 @@ export class NotificationService {
     error: string,
     refundAmount: number,
   ): Promise<void> {
+    const userMessage = this.userFacingGenerationErrorMessage(error);
+    if (userMessage !== error) {
+      this.logger.warn(
+        `notifyGenerationFailed: sanitized for user=${userId} job=${jobId}; technical=${error.slice(0, 2000)}`,
+      );
+    }
+
+    const body = userMessage.endsWith('.') ? userMessage : `${userMessage}.`;
+
     await this.createNotification({
       userId,
       title: '❌ Content Generation Failed',
-      message: `Content generation failed: ${error}. ${refundAmount} credits have been refunded to your account.`,
+      message: `${body} ${refundAmount} credits have been refunded to your account.`,
       type: 'error',
       category: 'generation',
-      data: { jobId, error, credits: refundAmount },
+      data: { jobId, credits: refundAmount },
     });
+  }
+
+  /** Short, non-technical copy for in-app notifications; logs retain full detail. */
+  private userFacingGenerationErrorMessage(error: string): string {
+    const t = error.trim();
+    if (
+      t.startsWith('AI output failed schema validation') ||
+      t.includes('invalid_union') ||
+      /invalid_(literal|type|enum)/i.test(t) ||
+      /\bZod\b/i.test(t) ||
+      /expected .*, received null/i.test(t) ||
+      t.length > 400
+    ) {
+      return "We couldn't generate your content. Please try again.";
+    }
+    return `Content generation failed: ${t}`;
   }
 
   /**

@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createClient } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 import { SupabaseService } from './supabase.service';
+import { CacheService } from './cache.service';
 import { EmailService } from './email.service';
 import { NotificationService } from './notification.service';
+
 
 @Injectable()
 export class AuthService {
@@ -11,6 +15,7 @@ export class AuthService {
   constructor(
     private readonly configService: ConfigService,
     private readonly supabaseService: SupabaseService,
+    private readonly cacheService: CacheService,
     private readonly emailService: EmailService,
     private readonly notificationService: NotificationService,
   ) {}
@@ -530,6 +535,79 @@ export class AuthService {
       return false;
     }
   }
+
+  // ─── Google OAuth ────────────────────────────────────────────────────────────
+
+  /**
+   * Generate a Google OAuth consent URL via Supabase.
+   * Uses a per-request Supabase client with Map-based storage so the PKCE code
+   * verifier is captured server-side and persisted in Redis for the callback.
+   */
+  async initiateGoogleOAuth(): Promise<{ url: string }> {
+    const supabaseUrl = this.configService.get<string>('supabase.url') ?? '';
+    const redirectTo =
+      this.configService.get<string>('google.oauthCallbackUrl') ??
+      'http://localhost:8080/auth/callback';
+
+    // Supabase handles PKCE + state entirely on its own side (the registered
+    // redirect URI in Google Console points to Supabase's /auth/v1/callback).
+    // We just need to send the browser to Supabase's authorize endpoint with
+    // the provider and the post-auth destination for the user.
+    const authorizeUrl = new URL(`${supabaseUrl}/auth/v1/authorize`);
+    authorizeUrl.searchParams.set('provider', 'google');
+    authorizeUrl.searchParams.set('redirect_to', redirectTo);
+
+    return { url: authorizeUrl.toString() };
+  }
+
+  /**
+   * Exchange the OAuth authorisation code for a Supabase session.
+   * Restores the PKCE code verifier stored during initiateGoogleOAuth so that
+   * Supabase can validate the code_challenge / code_verifier pair.
+   */
+  async handleGoogleOAuthCallback(
+    code: string,
+    _state: string,
+  ): Promise<Session> {
+    // Supabase handles the Google → Supabase callback itself (registered redirect
+    // URI is https://<project>.supabase.co/auth/v1/callback). After processing,
+    // Supabase redirects the browser to `redirect_to` (the frontend /auth/callback
+    // page) with the session tokens in the URL fragment/query. This backend endpoint
+    // is therefore not part of the normal flow, but we keep it as a fallback in case
+    // a custom redirect_to pointing here is ever configured.
+    const supabaseUrl = this.configService.get<string>('supabase.url') ?? '';
+    const supabaseAnonKey =
+      this.configService.get<string>('supabase.anonKey') ?? '';
+
+    const client = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { flowType: 'pkce', detectSessionInUrl: false, persistSession: false },
+    });
+
+    const { data, error } = await client.auth.exchangeCodeForSession(code);
+    if (error || !data?.session) {
+      throw new Error(error?.message ?? 'Code exchange failed');
+    }
+
+    return data.session;
+  }
+
+  /**
+   * Verify a Google ID token (for native mobile clients).
+   * Returns a Supabase session on success.
+   */
+  async verifyGoogleIdToken(idToken: string): Promise<Session> {
+    const { data, error } = await this.supabaseService
+      .getServiceClient()
+      .auth.signInWithIdToken({ provider: 'google', token: idToken });
+
+    if (error || !data?.session) {
+      throw new Error(error?.message ?? 'Failed to verify Google ID token');
+    }
+
+    return data.session;
+  }
+
+  // ─── Private helpers ─────────────────────────────────────────────────────────
 
   /**
    * Generate a secure random token

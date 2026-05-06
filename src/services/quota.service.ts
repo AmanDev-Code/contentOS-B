@@ -34,13 +34,49 @@ export class QuotaService {
     private readonly cacheService: CacheService,
   ) {}
 
-  async getUserQuota(userId: string): Promise<UserQuota> {
-    // Check cache first
-    const cacheKey = `quota:${userId}`;
-    const cachedQuota = await this.cacheService.get(cacheKey);
+  /** Normalize view rows, Redis cache JSON, or legacy shapes into `UserQuota`. */
+  private coerceUserQuota(
+    raw: Record<string, unknown>,
+    userId: string,
+  ): UserQuota {
+    const resetRaw = raw.resetDate ?? raw.reset_date;
+    const resetDate =
+      resetRaw instanceof Date
+        ? resetRaw
+        : new Date(
+            typeof resetRaw === 'string' || typeof resetRaw === 'number'
+              ? resetRaw
+              : Date.now(),
+          );
 
-    if (cachedQuota) {
-      return JSON.parse(cachedQuota);
+    return {
+      userId: String(raw.userId ?? raw.user_id ?? userId),
+      totalCredits: Number(raw.totalCredits ?? raw.total_credits ?? 0),
+      usedCredits: Number(raw.usedCredits ?? raw.used_credits ?? 0),
+      remainingCredits: Number(
+        raw.remainingCredits ?? raw.remaining_credits ?? 0,
+      ),
+      percentageUsed: Number(raw.percentageUsed ?? raw.percentage_used ?? 0),
+      planType: (raw.planType ?? raw.plan_type ?? 'free') as UserQuota['planType'],
+      resetDate,
+    };
+  }
+
+  async getUserQuota(
+    userId: string,
+    options?: { bypassCache?: boolean },
+  ): Promise<UserQuota> {
+    const cacheKey = `quota:${userId}`;
+
+    if (!options?.bypassCache) {
+      const cachedQuota = await this.cacheService.get(cacheKey);
+      if (cachedQuota) {
+        const parsed =
+          typeof cachedQuota === 'string'
+            ? (JSON.parse(cachedQuota) as Record<string, unknown>)
+            : (cachedQuota as Record<string, unknown>);
+        return this.coerceUserQuota(parsed, userId);
+      }
     }
 
     try {
@@ -69,15 +105,18 @@ export class QuotaService {
         throw new Error(`Failed to get quota: ${quotaError.message}`);
       }
 
-      const quota: UserQuota = {
-        userId: quotaData.user_id,
-        totalCredits: quotaData.total_credits,
-        usedCredits: quotaData.used_credits,
-        remainingCredits: quotaData.remaining_credits,
-        percentageUsed: parseFloat(quotaData.percentage_used || '0'),
-        planType: quotaData.plan_type,
-        resetDate: new Date(quotaData.reset_date),
-      };
+      const quota = this.coerceUserQuota(
+        {
+          userId: quotaData.user_id,
+          totalCredits: quotaData.total_credits,
+          usedCredits: quotaData.used_credits,
+          remainingCredits: quotaData.remaining_credits,
+          percentageUsed: quotaData.percentage_used,
+          planType: quotaData.plan_type,
+          resetDate: quotaData.reset_date,
+        },
+        userId,
+      );
 
       // Cache for 5 minutes
       await this.cacheService.set(cacheKey, JSON.stringify(quota), 300);
@@ -115,6 +154,7 @@ export class QuotaService {
     operationType: string = 'generation',
     contentType?: string,
     contentId?: string,
+    metadata: Record<string, unknown> = {},
   ): Promise<UserQuota> {
     const txType: 'debit' | 'refund' = creditsUsed >= 0 ? 'debit' : 'refund';
     const amount = Math.abs(creditsUsed);
@@ -130,13 +170,18 @@ export class QuotaService {
           p_description: description,
           p_operation_type: operationType,
           p_content_type: contentType || null,
-          p_metadata: {},
+          p_metadata: metadata,
         });
       if (error) {
-        console.error('Failed to log credit transaction:', error);
+        this.logger.error(
+          `log_credit_transaction failed for user=${userId} type=${txType} amount=${amount}: ${error.message}`,
+        );
+        throw new Error(`Credit ledger update failed: ${error.message}`);
       }
     } catch (error) {
-      console.error('Error logging credit transaction:', error);
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`consumeCredits error user=${userId}: ${msg}`);
+      throw error instanceof Error ? error : new Error(msg);
     }
 
     // Invalidate cache to force refresh
@@ -175,10 +220,11 @@ export class QuotaService {
         });
 
       if (error) {
-        console.error('Failed to log transaction:', error);
+        this.logger.error(`logTransaction RPC failed: ${error.message}`);
       }
     } catch (error) {
-      console.error('Error logging transaction:', error);
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`logTransaction error: ${msg}`);
     }
   }
 
@@ -190,6 +236,7 @@ export class QuotaService {
     operationType: string;
     contentType: string;
     contentId?: string;
+    metadata?: Record<string, unknown>;
   }): Promise<boolean> {
     const key = `quota:debit:${params.userId}:${params.operationId}`;
     const locked = await this.cacheService.setIfAbsent(
@@ -198,15 +245,21 @@ export class QuotaService {
       86400,
     );
     if (!locked) return false;
-    await this.consumeCredits(
-      params.userId,
-      params.amount,
-      params.description,
-      params.operationType,
-      params.contentType,
-      params.contentId,
-    );
-    return true;
+    try {
+      await this.consumeCredits(
+        params.userId,
+        params.amount,
+        params.description,
+        params.operationType,
+        params.contentType,
+        params.contentId,
+        params.metadata ?? {},
+      );
+      return true;
+    } catch (err) {
+      await this.cacheService.delete(key);
+      throw err;
+    }
   }
 
   async refundOnce(params: {
@@ -217,6 +270,7 @@ export class QuotaService {
     operationType: string;
     contentType: string;
     contentId?: string;
+    metadata?: Record<string, unknown>;
   }): Promise<boolean> {
     const key = `quota:refund:${params.userId}:${params.operationId}`;
     const locked = await this.cacheService.setIfAbsent(
@@ -225,15 +279,21 @@ export class QuotaService {
       86400,
     );
     if (!locked) return false;
-    await this.consumeCredits(
-      params.userId,
-      -Math.abs(params.amount),
-      params.description,
-      params.operationType,
-      params.contentType,
-      params.contentId,
-    );
-    return true;
+    try {
+      await this.consumeCredits(
+        params.userId,
+        -Math.abs(params.amount),
+        params.description,
+        params.operationType,
+        params.contentType,
+        params.contentId,
+        params.metadata ?? {},
+      );
+      return true;
+    } catch (err) {
+      await this.cacheService.delete(key);
+      throw err;
+    }
   }
 
   async incrementUsage(userId: string): Promise<void> {

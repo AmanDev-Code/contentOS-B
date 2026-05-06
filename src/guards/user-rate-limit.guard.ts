@@ -76,6 +76,10 @@ export class UserRateLimitGuard implements CanActivate {
         `User rate limit exceeded for user ${userId} on ${endpoint}`,
       );
       const usage = await this.getCurrentUsage(userId, endpoint, config);
+      const retryAfterSeconds = Math.max(
+        1,
+        Math.ceil((usage.resetTime - Date.now()) / 1000),
+      );
       this.applyHeaders(res, {
         'X-RateLimit-Limit': config.max.toString(),
         'X-RateLimit-Remaining': Math.max(
@@ -84,12 +88,14 @@ export class UserRateLimitGuard implements CanActivate {
         ).toString(),
         'X-RateLimit-Reset': usage.resetTime.toString(),
         'X-RateLimit-Window': config.windowMs.toString(),
+        'Retry-After': retryAfterSeconds.toString(),
       });
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
           message: config.message || 'Too many requests',
           error: 'Too Many Requests',
+          retryAfter: retryAfterSeconds,
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );

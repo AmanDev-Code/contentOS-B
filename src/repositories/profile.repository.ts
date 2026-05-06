@@ -18,6 +18,18 @@ export class ProfileRepository {
     return data;
   }
 
+  /** active | suspended | banned — defaults to active when missing */
+  async getAccountStatus(userId: string): Promise<string> {
+    const { data } = await this.supabaseService
+      .getServiceClient()
+      .from('profiles')
+      .select('account_status')
+      .eq('id', userId)
+      .maybeSingle();
+    const raw = (data as { account_status?: string } | null)?.account_status;
+    return raw && typeof raw === 'string' ? raw : 'active';
+  }
+
   async updateCredits(
     userId: string,
     creditsRemaining: number,

@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { SupabaseService } from './supabase.service';
@@ -342,27 +346,99 @@ export class PostSchedulingService {
     actorType?: 'member' | 'organization',
     organizationUrn?: string,
   ): Promise<{ postId: string }> {
-    if (!content.carousel_urls || content.carousel_urls.length === 0) {
-      throw new Error('Carousel images not found for carousel post');
-    }
-    if (!content.pdf_url || !content.pdf_url.startsWith('http')) {
-      throw new Error(
-        'Carousel PDF not found. Please generate carousel with PDF before publishing to LinkedIn.',
-      );
-    }
+    const withPdf = await this.ensureCarouselPdfUrl(content);
 
-    const text = this.formatPostText(content);
+    const text = this.formatPostText(withPdf);
 
     const result = await this.linkedinService.publishPost({
-      userId: content.user_id,
+      userId: withPdf.user_id,
       text,
       mediaType: 'document',
-      mediaUrl: content.pdf_url, // LinkedIn carousel must be a document (PDF)
+      mediaUrl: withPdf.pdf_url as string,
       actorType,
       organizationUrn,
     });
 
     return { postId: result.postId };
+  }
+
+  /**
+   * LinkedIn document posts require a PDF. If slides exist but `pdf_url` is missing, assemble
+   * a PDF from slide URLs, upload to MinIO, and persist `pdf_url` (shared by immediate + scheduled publish).
+   */
+  private async ensureCarouselPdfUrl(content: PostContent): Promise<PostContent> {
+    if (!content.carousel_urls || content.carousel_urls.length === 0) {
+      throw new BadRequestException(
+        'Carousel has no slide images. Generate or attach carousel slides before publishing to LinkedIn.',
+      );
+    }
+
+    if (content.pdf_url?.startsWith('http')) {
+      return content;
+    }
+
+    const slideUrls = content.carousel_urls.filter((u) =>
+      typeof u === 'string' ? u.startsWith('http') : false,
+    );
+    if (slideUrls.length === 0) {
+      throw new BadRequestException(
+        'Carousel slide URLs are missing or invalid. Regenerate the carousel or fix media URLs before publishing.',
+      );
+    }
+
+    this.logger.log(
+      `Carousel publish: pdf_url missing for content ${content.id}; assembling PDF from ${slideUrls.length} slide(s).`,
+    );
+
+    let pdfBuffer: Buffer;
+    try {
+      pdfBuffer =
+        await this.mediaGenerationService.createCarouselPdfFromImageUrls(
+          slideUrls,
+        );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.error(
+        `On-demand carousel PDF assembly failed for ${content.id}: ${msg}`,
+      );
+      throw new BadRequestException(
+        'Could not build a carousel PDF from the saved slide images. Regenerate the carousel or verify slide URLs are reachable.',
+      );
+    }
+
+    const pdfFileName = `carousel-linkedin-${Date.now()}.pdf`;
+    let pdfUrl: string;
+    try {
+      pdfUrl = await this.mediaGenerationService.uploadToMinio(
+        pdfBuffer,
+        pdfFileName,
+        'application/pdf',
+        content.user_id,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.error(`Carousel PDF upload failed for ${content.id}: ${msg}`);
+      throw new Error(`Failed to upload carousel PDF for LinkedIn: ${msg}`);
+    }
+
+    const { error } = await this.supabaseService
+      .getServiceClient()
+      .from('generated_content')
+      .update({
+        pdf_url: pdfUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', content.id);
+
+    if (error) {
+      this.logger.error(
+        `Failed to persist pdf_url for content ${content.id}:`,
+        error,
+      );
+      throw new Error('Failed to save carousel PDF URL after upload');
+    }
+
+    return { ...content, pdf_url: pdfUrl };
   }
 
   private formatPostText(content: PostContent): string {

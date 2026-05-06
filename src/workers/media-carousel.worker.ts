@@ -11,6 +11,28 @@ import { SupabaseService } from '../services/supabase.service';
 import { QuotaService } from '../services/quota.service';
 import { CacheService } from '../services/cache.service';
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const pool = Math.max(1, Math.min(concurrency, items.length));
+  const worker = async () => {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) break;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: pool }, () => worker()));
+  return results;
+}
+
+const CAROUSEL_UPLOAD_CONCURRENCY = 3;
+
 export interface CarouselJobData {
   userId: string;
   contentId: string;
@@ -71,8 +93,10 @@ export class MediaCarouselWorker extends WorkerHost {
       await job.updateProgress(70);
 
       const batchTs = Date.now();
-      const imageUploadResults = await Promise.all(
-        imageBuffers.map(async (buffer, i) => {
+      const imageUploadResults = await mapWithConcurrency(
+        imageBuffers,
+        CAROUSEL_UPLOAD_CONCURRENCY,
+        async (buffer, i) => {
           const optimized = isFreePlan
             ? await this.mediaGenService.optimizeImageWithWatermark(buffer)
             : await this.mediaGenService.optimizeImage(buffer);
@@ -96,7 +120,7 @@ export class MediaCarouselWorker extends WorkerHost {
               public_url: url,
             });
           return url;
-        }),
+        },
       );
 
       await job.updateProgress(85);

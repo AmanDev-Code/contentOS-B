@@ -1,6 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import {
+  Logger,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { Job, UnrecoverableError } from 'bullmq';
 import { PostSchedulingService } from '../services/post-scheduling.service';
 import { SupabaseService } from '../services/supabase.service';
 import { QuotaService } from '../services/quota.service';
@@ -14,6 +18,18 @@ interface PublishJobData {
   organizationUrn?: string;
 }
 
+/**
+ * Scheduled LinkedIn publish worker.
+ *
+ * Idempotency / refunds:
+ * - Duplicate BullMQ attempts after a failure used to call `consumeCredits` (refund) every time.
+ *   Refunds now go through `refundOnce` with a stable `operationId` per `contentId` so the same
+ *   logical failure is not refunded multiple times.
+ * - If `generated_content` is already published (e.g. LinkedIn succeeded but a later DB write
+ *   failed), we complete the job without calling LinkedIn again.
+ * - `BadRequestException` / `ForbiddenException` from publishing (token, URN, product config)
+ *   are treated as non-retryable via `UnrecoverableError` so BullMQ does not burn all attempts.
+ */
 @Processor('post-publishing')
 export class PostPublishingProcessor extends WorkerHost {
   private readonly logger = new Logger(PostPublishingProcessor.name);
@@ -37,6 +53,32 @@ export class PostPublishingProcessor extends WorkerHost {
     this.logger.log(`Processing scheduled post job: ${job.id || 'unknown'}`);
 
     const { contentId, userId, platform, actorType, organizationUrn } = job.data;
+
+    const { data: existingContent } = await this.supabaseService
+      .getServiceClient()
+      .from('generated_content')
+      .select('publish_status, linkedin_post_id')
+      .eq('id', contentId)
+      .maybeSingle();
+
+    if (
+      existingContent?.publish_status === 'published' &&
+      existingContent?.linkedin_post_id
+    ) {
+      this.logger.log(
+        `Content ${contentId} already published; marking scheduled job ${job.id} complete (idempotent).`,
+      );
+      await this.updateScheduledPostStatus(
+        job.id?.toString() || 'unknown',
+        'published',
+        existingContent.linkedin_post_id,
+      );
+      return {
+        success: true,
+        postId: existingContent.linkedin_post_id,
+        idempotent: true,
+      };
+    }
 
     try {
       // Update job status to processing
@@ -100,15 +142,19 @@ export class PostPublishingProcessor extends WorkerHost {
 
       this.logger.log(`Scheduled post published successfully: ${postId}`);
       return { success: true, postId };
-    } catch (error) {
-      this.logger.error(`Failed to publish scheduled post: ${error.message}`);
+    } catch (error: unknown) {
+      const errMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Failed to publish scheduled post: ${errMessage}`,
+      );
 
       // Update job status to failed
       await this.updateScheduledPostStatus(
         job.id?.toString() || 'unknown',
         'failed',
         undefined,
-        error.message,
+        errMessage,
       );
 
       // Also update the generated_content status to failed
@@ -153,44 +199,49 @@ export class PostPublishingProcessor extends WorkerHost {
             contentType = 'image';
           }
 
-          await this.quotaService.consumeCredits(
+          const refunded = await this.quotaService.refundOnce({
             userId,
-            -refundAmount, // Negative for refund
-            `Refund for failed scheduled post publishing (${refundAmount} credits)`,
-            'refund',
+            operationId: `scheduled-publish-fail:${contentId}`,
+            amount: refundAmount,
+            description: `Refund for failed scheduled post publishing (${refundAmount} credits)`,
+            operationType: 'refund',
             contentType,
             contentId,
-          );
+          });
 
-          this.logger.log(
-            `Refunded ${refundAmount} credits to user ${userId} for failed scheduled post ${contentId}`,
-          );
-
-          // SEND FAILURE NOTIFICATION
-          try {
-            // Get content title for notification
-            const contentData = await this.supabaseService
-              .getServiceClient()
-              .from('generated_content')
-              .select('title')
-              .eq('id', contentId)
-              .single();
-
-            const contentTitle =
-              contentData.data?.title || 'Your scheduled post';
-            await this.notificationService.notifyScheduledPostFailed(
-              userId,
-              contentId,
-              contentTitle,
-              error.message || 'Unknown error',
-              refundAmount,
-            );
+          if (refunded) {
             this.logger.log(
-              `Sent scheduled post failure notification to user ${userId}`,
+              `Refunded ${refundAmount} credits to user ${userId} for failed scheduled post ${contentId}`,
             );
-          } catch (notificationError) {
-            this.logger.error(
-              `Failed to send scheduled post failure notification: ${notificationError.message}`,
+
+            try {
+              const titleRow = await this.supabaseService
+                .getServiceClient()
+                .from('generated_content')
+                .select('title')
+                .eq('id', contentId)
+                .single();
+
+              const contentTitle =
+                titleRow.data?.title || 'Your scheduled post';
+              await this.notificationService.notifyScheduledPostFailed(
+                userId,
+                contentId,
+                contentTitle,
+                errMessage || 'Unknown error',
+                refundAmount,
+              );
+              this.logger.log(
+                `Sent scheduled post failure notification to user ${userId}`,
+              );
+            } catch (notificationError) {
+              this.logger.error(
+                `Failed to send scheduled post failure notification: ${notificationError.message}`,
+              );
+            }
+          } else {
+            this.logger.log(
+              `Skipped duplicate refund for scheduled post ${contentId} (already refunded for this failure). jobId=${job.id} attemptsMade=${job.attemptsMade}`,
             );
           }
         }
@@ -198,6 +249,14 @@ export class PostPublishingProcessor extends WorkerHost {
         this.logger.error(
           `Failed to refund credits for failed scheduled post: ${refundError.message}`,
         );
+      }
+
+      const msg = error instanceof Error ? error.message : String(error);
+      if (
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException
+      ) {
+        throw new UnrecoverableError(msg);
       }
 
       throw error;

@@ -32,6 +32,17 @@ import { AdminCareersController } from './controllers/admin-careers.controller';
 import { BlogController } from './controllers/blog.controller';
 import { AdminBlogController } from './controllers/admin-blog.controller';
 import { AdminSeoPagesController } from './controllers/admin-seo-pages.controller';
+import { FeedbackController } from './controllers/feedback.controller';
+import { PlatformAdminFeedbackController } from './controllers/platform-admin-feedback.controller';
+import { PlatformAccessController } from './controllers/platform-access.controller';
+import { PlatformGrantsController } from './controllers/platform-grants.controller';
+import { PlatformUsersController } from './controllers/platform-users.controller';
+import { ModerationController } from './controllers/moderation.controller';
+import {
+  MaintenanceController,
+  AdminMaintenanceController,
+} from './controllers/maintenance.controller';
+import { MaintenanceService } from './services/maintenance.service';
 
 import { SupabaseService } from './services/supabase.service';
 import { GenerationService } from './services/generation.service';
@@ -66,6 +77,14 @@ import { CareersService } from './services/careers.service';
 import { CareersJobCopyAiService } from './services/careers-job-copy-ai.service';
 import { BlogService } from './services/blog.service';
 import { BlogManagementGuard } from './guards/blog-management.guard';
+import { FeedbackService } from './services/feedback.service';
+import { PlatformAccessService } from './services/platform-access.service';
+import { FeedbackQueueBootstrapService } from './services/feedback-queue-bootstrap.service';
+import { PlatformStaffGuard } from './guards/platform-staff.guard';
+import { ModerationGuard } from './guards/moderation.guard';
+import { ModerationService } from './modules/moderation/moderation.service';
+import { CreditPreflightGuard } from './guards/credit-preflight.guard';
+import { CustomTopicCreditService } from './modules/credits/custom-topic-credit.service';
 
 import { ProfileRepository } from './repositories/profile.repository';
 import { OptionalAuthGuard } from './guards/optional-auth.guard';
@@ -78,10 +97,17 @@ import { GenerationWorkerManager } from './workers/generation-worker-manager';
 import { MediaCarouselWorker } from './workers/media-carousel.worker';
 import { PostPublishingProcessor } from './processors/post-publishing.processor';
 import { TrendingHashtagProcessor } from './workers/trending-hashtag.processor';
+import { FeedbackRewardProcessor } from './processors/feedback-reward.processor';
+import { FeedbackReminderProcessor } from './processors/feedback-reminder.processor';
+import { MaintenanceProcessor } from './processors/maintenance.processor';
 import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
 import { UserRateLimitGuard } from './guards/user-rate-limit.guard';
 import { PaywallGuard } from './guards/paywall.guard';
 import { Reflector } from '@nestjs/core';
+
+import { CustomTopicGenerationService } from './modules/post-ai/custom-topic-generation.service';
+import { CarouselTrainingCaptureService } from './services/carousel-training-capture.service';
+import { OpenAIRateLimiterService } from './services/openai-rate-limiter.service';
 
 import { QUEUE_NAMES } from './common/constants';
 import { MiddlewareConsumer, NestModule } from '@nestjs/common';
@@ -119,6 +145,15 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     BullModule.registerQueue({
       name: QUEUE_NAMES.TRENDING_HASHTAGS,
     }),
+    BullModule.registerQueue({
+      name: QUEUE_NAMES.FEEDBACK_REWARD,
+    }),
+    BullModule.registerQueue({
+      name: QUEUE_NAMES.FEEDBACK_REMINDER,
+    }),
+    BullModule.registerQueue({
+      name: QUEUE_NAMES.MAINTENANCE,
+    }),
   ],
   controllers: [
     AppController,
@@ -149,6 +184,14 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     BlogController,
     AdminBlogController,
     AdminSeoPagesController,
+    FeedbackController,
+    PlatformAdminFeedbackController,
+    PlatformAccessController,
+    PlatformGrantsController,
+    PlatformUsersController,
+    ModerationController,
+    MaintenanceController,
+    AdminMaintenanceController,
   ],
   providers: [
     AppService,
@@ -183,6 +226,13 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     CareersJobCopyAiService,
     BlogService,
     BlogManagementGuard,
+    FeedbackService,
+    PlatformAccessService,
+    PlatformStaffGuard,
+    FeedbackQueueBootstrapService,
+    FeedbackRewardProcessor,
+    FeedbackReminderProcessor,
+    MaintenanceProcessor,
     ScraperEventLogService,
     InstagramScraperService,
     TwitterScraperService,
@@ -201,7 +251,15 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     RateLimitMiddleware,
     UserRateLimitGuard,
     PaywallGuard,
+    CreditPreflightGuard,
+    ModerationGuard,
+    ModerationService,
+    CustomTopicCreditService,
     Reflector,
+    CustomTopicGenerationService,
+    CarouselTrainingCaptureService,
+    OpenAIRateLimiterService,
+    MaintenanceService,
   ],
 })
 export class AppModule implements NestModule {

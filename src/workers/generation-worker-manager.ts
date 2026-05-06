@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, forwardRef, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Worker, Job } from 'bullmq';
 import Redis from 'ioredis';
@@ -6,6 +6,7 @@ import { N8nService } from '../services/n8n.service';
 import { PostRefinementService } from '../services/post-refinement.service';
 import { GenerationJobRepository } from '../repositories/generation-job.repository';
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
+import { GenerationWorker } from './generation.worker';
 import { QUEUE_NAMES, JOB_STAGES } from '../common/constants';
 import { JobStatus, ContentStatus, VisualType } from '../common/types';
 import { MediaPostType, N8nGeneratedContentDto } from '../common/dto/media-intent.dto';
@@ -29,6 +30,8 @@ export class GenerationWorkerManager implements OnModuleInit {
     private postRefinementService: PostRefinementService,
     private generationJobRepository: GenerationJobRepository,
     private generatedContentRepository: GeneratedContentRepository,
+    @Inject(forwardRef(() => GenerationWorker))
+    private readonly generationWorker: GenerationWorker,
   ) {
     // Create Redis client for job completion signaling
     this.redis = new Redis({
@@ -44,6 +47,71 @@ export class GenerationWorkerManager implements OnModuleInit {
   async onModuleInit() {
     this.logger.log('Generation Worker Manager initialized');
     // Workers will be created dynamically when users create jobs
+
+    // Clean up stale jobs on startup
+    await this.cleanupStaleJobs();
+
+    // Schedule periodic cleanup every 5 minutes
+    setInterval(() => this.cleanupStaleJobs(), 5 * 60 * 1000);
+  }
+
+  /**
+   * Clean up stale jobs that have been active for too long.
+   * This prevents queue jams from stuck jobs.
+   */
+  private async cleanupStaleJobs(): Promise<void> {
+    const staleThresholdMs = Number(
+      // Must exceed BullMQ lockDuration (600s) so we never auto-fail a job that
+      // is still legitimately processing inside the worker.
+      process.env.GENERATION_ACTIVE_STALE_MS || '660000', // 11 minutes
+    );
+
+    try {
+      // Find all active jobs older than the threshold
+      const staleJobs = await this.generationJobRepository.findStaleActiveJobs(
+        staleThresholdMs,
+      );
+
+      let markedCount = 0;
+      let racedCount = 0;
+      for (const job of staleJobs) {
+        const createdAtMs = new Date(job.createdAt as any).getTime();
+        const ageMs = Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : 0;
+
+        // Atomic guard: if the worker wrote `ready`/`failed` between the SELECT
+        // above and this UPDATE, the row is no longer in an active status and
+        // the update silently no-ops. This prevents a sweeper-vs-worker race
+        // from overwriting a freshly-completed job with `status=failed`, which
+        // previously surfaced to users as ghost "failed" notifications next to
+        // a successfully-generated post.
+        const updated = await this.generationJobRepository.updateErrorIfStillActive(
+          job.id,
+          `Auto-failed stale job after ${Math.round(ageMs / 1000)}s without completion`,
+          job.retryCount || 0,
+        );
+        if (updated) {
+          markedCount += 1;
+          this.logger.warn(
+            `Cleaned up stale job ${job.id} (age=${Math.round(ageMs / 1000)}s)`,
+          );
+        } else {
+          racedCount += 1;
+          this.logger.log(
+            `Stale-sweeper skipped job ${job.id} — already terminal (race with worker completion).`,
+          );
+        }
+      }
+
+      if (markedCount > 0 || racedCount > 0) {
+        this.logger.log(
+          `Stale job cleanup: marked ${markedCount} as failed (${racedCount} skipped — already terminal)`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Stale job cleanup failed: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -66,9 +134,18 @@ export class GenerationWorkerManager implements OnModuleInit {
             password:
               this.configService.get<string>('redis.password') || undefined,
           },
-          concurrency: 1, // One job at a time per user
-          lockDuration: 180000,
+          // Per-user queue: 1 job at a time per user, but global rate limiter handles
+          // cross-user coordination for OpenAI API load
+          concurrency: 1,
+          // Lock duration must comfortably exceed the longest realistic generation
+          // (carousel + slide rendering + MinIO upload). 10 min matches the
+          // frontend hard-timeout in useGenerationJob.ts so both sides agree on
+          // the upper bound before declaring a stall.
+          lockDuration: 600000,
+          // Max stalled count: if job stalls 2 times, mark as failed
           maxStalledCount: 2,
+          // Stalled job check interval: 30 seconds
+          stalledInterval: 30000,
         },
       );
 
@@ -91,10 +168,36 @@ export class GenerationWorkerManager implements OnModuleInit {
   }
 
   /**
-   * Process a job (same logic as before, but per-user)
+   * Process a job (same logic as before, but per-user).
+   *
+   * Custom-topic jobs are delegated to `GenerationWorker.processCustomTopic`
+   * because n8n has no custom-topic workflow; the rest of this method drives
+   * n8n for viral / topic-discovery flows.
    */
   private async processJob(job: Job): Promise<any> {
     const { jobId, userId, preferences } = job.data;
+
+    // Regeneration jobs ride the same per-user queue but never touch n8n —
+    // dispatch them by job name straight to the GenerationWorker handler.
+    // Without this dispatch they'd fall through to the n8n flow below and
+    // silently time out (the @Processor on GenerationWorker is bound to a
+    // different, unused queue name).
+    if (job.name === 'regenerate-image') {
+      return this.generationWorker.processSingleImageRegeneration(job);
+    }
+    if (job.name === 'regenerate-carousel-full') {
+      return this.generationWorker.processFullCarouselRegeneration(job);
+    }
+    if (job.name === 'regenerate-carousel') {
+      return this.generationWorker.processCarouselRegeneration(job);
+    }
+    if (job.name === 'regenerate-images') {
+      return this.generationWorker.processImageRegeneration(job);
+    }
+
+    if (preferences?.jobType === 'custom_topic') {
+      return this.generationWorker.processCustomTopic(job);
+    }
 
     const existingJob = await this.generationJobRepository.findById(jobId);
     if (existingJob?.status === JobStatus.READY && existingJob.contentId) {

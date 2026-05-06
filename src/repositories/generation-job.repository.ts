@@ -112,6 +112,10 @@ export class GenerationJobRepository {
       status,
       progress: 100,
       response,
+      // Clear any prior `error` (e.g. from an earlier sweeper pass that lost
+      // the race with this completion) so the row's final state is internally
+      // consistent: status=ready ⇒ error=null.
+      error: null as string | null,
       updated_at: new Date().toISOString(),
     };
 
@@ -158,5 +162,71 @@ export class GenerationJobRepository {
 
     if (updateError) throw updateError;
     return data;
+  }
+
+  /**
+   * Atomically mark a job as failed ONLY if it is still in a non-terminal
+   * status. Returns `null` when the job has already been finalized (e.g. the
+   * worker wrote `ready` between the sweeper's SELECT and UPDATE), so callers
+   * can skip side-effects like progress logging or retry plumbing.
+   *
+   * This is the safe path for stale-job sweepers; never call it from the
+   * worker's own failure handler (which legitimately needs to overwrite any
+   * status the row currently holds).
+   */
+  async updateErrorIfStillActive(
+    jobId: string,
+    errorMsg: string,
+    retryCount: number,
+  ): Promise<GenerationJob | null> {
+    const { data, error } = await this.supabaseService
+      .getServiceClient()
+      .from('generation_jobs')
+      .update({
+        status: JobStatus.FAILED,
+        error: errorMsg,
+        retry_count: retryCount,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', jobId)
+      .in('status', [
+        JobStatus.PENDING,
+        JobStatus.GENERATING,
+        JobStatus.MEDIA_GENERATING,
+        JobStatus.PUBLISHING,
+      ])
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    return data ? this.mapDatabaseToInterface(data) : null;
+  }
+
+  /**
+   * Find active jobs older than a threshold.
+   * Used for stale job cleanup to prevent queue jams.
+   */
+  async findStaleActiveJobs(olderThanMs: number): Promise<GenerationJob[]> {
+    const threshold = new Date(Date.now() - olderThanMs).toISOString();
+
+    const { data, error } = await this.supabaseService
+      .getServiceClient()
+      .from('generation_jobs')
+      .select('*')
+      .in('status', [
+        JobStatus.GENERATING,
+        'media_generating',
+        'publishing',
+      ])
+      .lt('created_at', threshold)
+      .order('created_at', { ascending: true })
+      .limit(50);
+
+    if (error) {
+      console.error('Error finding stale jobs:', error);
+      return [];
+    }
+
+    return (data || []).map((item) => this.mapDatabaseToInterface(item));
   }
 }

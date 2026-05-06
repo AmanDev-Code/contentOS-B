@@ -374,9 +374,24 @@ export class SubscriptionService {
   ): Promise<UserSubscription> {
     // Get the plan details
     const plans = await this.getSubscriptionPlans();
-    const plan = plans.find((p) => p.planType === planType);
+    let plan = plans.find((p) => p.planType === planType);
     if (!plan) {
-      throw new NotFoundException('Invalid plan type');
+      const cfg = getPlanConfig(planType);
+      if (!cfg) {
+        throw new NotFoundException('Invalid plan type');
+      }
+      plan = {
+        id: `cfg-${cfg.planType}`,
+        planType: cfg.planType,
+        name: cfg.name,
+        description: cfg.description,
+        creditsLimit: cfg.creditsLimit,
+        priceMonthly: cfg.priceMonthly,
+        priceYearly: cfg.priceYearly,
+        features: cfg.features,
+        isActive: true,
+        sortOrder: 0,
+      };
     }
 
     try {

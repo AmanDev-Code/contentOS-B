@@ -50,6 +50,7 @@ export interface GeneratedContent {
   visualUrl?: string;
   visualType: VisualType;
   carouselUrls?: string[];
+  imageUrls?: string[];
   hashtags?: string[];
   aiReasoning?: string;
   performancePrediction?: Record<string, any>;

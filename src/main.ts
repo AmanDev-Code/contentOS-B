@@ -5,6 +5,7 @@ import {
 } from '@nestjs/platform-fastify';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import multipart from '@fastify/multipart';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -12,10 +13,24 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({
       logger: true,
-      bodyLimit: 10485760, // 10MB limit for file uploads
+      bodyLimit: 10485760, // 10MB limit for JSON/text bodies (multipart has its own limit)
     }),
     { rawBody: true },
   );
+
+  // Register multipart parser so endpoints like POST /media/upload-pdf can
+  // accept `multipart/form-data`. Without this, Fastify returns 415 on any
+  // non-JSON content-type. Files are exposed on `req.body[fieldname]` as
+  // multipart objects with a `toBuffer()` method (see @fastify/multipart docs).
+  await app.register(multipart, {
+    attachFieldsToBody: true,
+    limits: {
+      // 26MB allows a 25MB PDF plus minor multipart envelope overhead.
+      fileSize: 26 * 1024 * 1024,
+      files: 1,
+      fields: 10,
+    },
+  });
 
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const corsOriginsFromEnv = (process.env.CORS_ORIGINS || '')

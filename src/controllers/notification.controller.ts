@@ -175,14 +175,17 @@ export class NotificationController {
 
     this.notificationService.addSSEClient(userId, res);
 
+    // Keepalive every 15s to defeat idle-connection killers (ngrok HTTP/2,
+    // most reverse proxies, and corporate firewalls all drop ~30–60s idle
+    // streams). The frontend SSE reader treats `:` comments as no-ops.
     const heartbeat = setInterval(() => {
       try {
-        res.write(`: heartbeat\n\n`);
+        res.write(`: keepalive ${Date.now()}\n\n`);
       } catch {
         clearInterval(heartbeat);
         this.notificationService.removeSSEClient(res);
       }
-    }, 30000);
+    }, 15000);
 
     // Listen on response/socket close (not request close), otherwise
     // Fastify can emit request close early and drop SSE immediately.

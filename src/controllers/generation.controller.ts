@@ -8,6 +8,8 @@ import {
   Query,
   UseGuards,
   Request,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { GenerationService } from '../services/generation.service';
@@ -20,6 +22,8 @@ import { MediaPostType } from '../common/dto/media-intent.dto';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
 import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
+import { ModerationGuard } from '../guards/moderation.guard';
+import { CreditPreflightGuard, CreditPreflightData } from '../guards/credit-preflight.guard';
 
 @ApiTags('generation')
 @Controller('generation')
@@ -72,15 +76,17 @@ export class GenerationController {
     @Request() req,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '20',
+    @Query('source') source?: string,
   ) {
     const userId = req.user?.id || 'c9327732-05cd-41dc-9d4f-e0c17b7fbea3';
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 20)); // Max 50 per page
     const offset = (pageNum - 1) * limitNum;
+    const sourceFilter = source === 'viral' || source === 'custom' ? source : undefined;
 
     const [content, totalCount] = await Promise.all([
-      this.generatedContentRepository.findByUserId(userId, limitNum, offset),
-      this.generatedContentRepository.countByUserId(userId),
+      this.generatedContentRepository.findByUserId(userId, limitNum, offset, sourceFilter),
+      this.generatedContentRepository.countByUserId(userId, sourceFilter),
     ]);
     const refinedContent = await Promise.all(
       content.map((item) => this.ensureRefinedBeforeReturn(item)),
@@ -103,17 +109,29 @@ export class GenerationController {
 
   @Get('content/:contentId')
   @ApiOperation({ summary: 'Get specific content by ID' })
-  async getContent(@Param('contentId') contentId: string) {
+  async getContent(@Request() req, @Param('contentId') contentId: string) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
     const content = await this.generatedContentRepository.findById(contentId);
     if (!content) return null;
+    if ((content as any).user_id !== userId) {
+      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+    }
     return this.ensureRefinedBeforeReturn(content as any);
   }
 
   @Get('job/:jobId/content')
   @ApiOperation({ summary: 'Get content by job ID' })
-  async getContentByJobId(@Param('jobId') jobId: string) {
+  async getContentByJobId(@Request() req, @Param('jobId') jobId: string) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
     const rows = await this.generatedContentRepository.findByJobId(jobId);
-    return Promise.all(rows.map((row) => this.ensureRefinedBeforeReturn(row as any)));
+    const ownedRows = rows.filter((row) => (row as any).user_id === userId);
+    return Promise.all(ownedRows.map((row) => this.ensureRefinedBeforeReturn(row as any)));
   }
 
   @Post('job/:jobId/retry')
@@ -174,6 +192,141 @@ export class GenerationController {
         hasPrev: pageNum > 1,
       },
     };
+  }
+
+  @Delete('job/:jobId/cancel')
+  @ApiOperation({ summary: 'Cancel a generation job and refund reserved credits' })
+  async cancelJob(@Request() req, @Param('jobId') jobId: string) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    return this.generationService.cancelJob(jobId, userId);
+  }
+
+  @Post('content/:contentId/regenerate')
+  @ApiOperation({ summary: 'Regenerate carousel slides or images for existing content' })
+  async regenerateMedia(
+    @Request() req,
+    @Param('contentId') contentId: string,
+    @Body() body: { regenerationType: 'carousel' | 'images' },
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    return this.generationService.regenerateMedia(userId, contentId, body.regenerationType);
+  }
+
+  /**
+   * Regenerate a single AI-generated image at a specific index inside an
+   * existing content's `image_urls` array. Costs `IMAGE_PER_UNIT_CREDITS`
+   * (currently 3) per call. Returns 402 with code `insufficient_credits` if
+   * the user is short on balance — the FE turns that into a tooltip on the
+   * disabled button.
+   */
+  @Post('regenerate/image')
+  @ApiOperation({ summary: 'Regenerate a single image inside existing content' })
+  async regenerateSingleImage(
+    @Request() req,
+    @Body()
+    body: {
+      contentId: string;
+      imageIndex: number;
+      originalPrompt?: string;
+      userOverridePrompt?: string;
+    },
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    if (!body?.contentId) {
+      throw new HttpException('contentId is required', HttpStatus.BAD_REQUEST);
+    }
+    if (typeof body.imageIndex !== 'number' || body.imageIndex < 0) {
+      throw new HttpException(
+        'imageIndex must be a non-negative number',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.generationService.regenerateSingleImage(
+      userId,
+      body.contentId,
+      body.imageIndex,
+      body.userOverridePrompt,
+    );
+  }
+
+  /**
+   * Regenerate the entire carousel of an existing content. Costs
+   * `SLIDE_PER_UNIT_CREDITS × N` (currently 2.5 × N) where N is the slide
+   * count persisted on the original generation. Returns 402 with code
+   * `insufficient_credits` if balance is short.
+   */
+  @Post('regenerate/carousel')
+  @ApiOperation({ summary: 'Regenerate every slide of an existing carousel' })
+  async regenerateCarousel(
+    @Request() req,
+    @Body() body: { contentId: string; slideCount?: number },
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    if (!body?.contentId) {
+      throw new HttpException('contentId is required', HttpStatus.BAD_REQUEST);
+    }
+    return this.generationService.regenerateCarouselFromContent(
+      userId,
+      body.contentId,
+      body.slideCount,
+    );
+  }
+
+  @Post('custom-topic')
+  @UseGuards(ModerationGuard, CreditPreflightGuard)
+  @ApiOperation({ summary: 'Start custom topic AI post generation (credit-gated)' })
+  async startCustomTopicGeneration(
+    @Request() req,
+    @Body()
+    body: {
+      topic: string;
+      platform: 'linkedin' | 'instagram' | 'x';
+      contentType: 'text' | 'image' | 'carousel' | 'post';
+      tonality: string;
+      wordLimit: { kind: 'short' | 'medium' | 'long' } | { kind: 'custom'; words: number };
+      imageCount?: number;
+      slideCount?: number;
+      carouselVisualStyle?:
+        | 'auto'
+        | 'handwritten_notebook'
+        | 'handwritten_notebook_dense'
+        | 'whiteboard_notes'
+        | 'diagram_clean'
+        | 'stock_visual';
+      carouselNoteDensity?: 'compact' | 'standard' | 'dense';
+      carouselSubjectMode?: 'auto' | 'programming' | 'general';
+      /** Educational deck preset (cover + TOC + body). Honored when tonality=educational. */
+      carouselDocumentMode?:
+        | 'auto'
+        | 'none'
+        | 'handwritten_notes'
+        | 'structured_document';
+      /** Optional cover author / handle for document-deck presets. */
+      carouselDocumentAuthor?: string;
+      /** Opt in to internal SaaS dataset capture (does not retrain external providers). */
+      trainingDataCaptureOptIn?: boolean;
+    },
+  ) {
+    const userId = req.user?.id;
+    const preflight: CreditPreflightData = req.creditPreflight;
+    return this.generationService.startCustomTopicGeneration(
+      userId,
+      body,
+      preflight.creditSlices,
+      preflight.totalCost,
+    );
   }
 
   private async ensureRefinedBeforeReturn(item: any): Promise<any> {

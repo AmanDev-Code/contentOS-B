@@ -48,6 +48,12 @@ export default () => ({
     appTitle: process.env.AI_REFINEMENT_APP_TITLE || 'Trndinn',
   },
 
+  google: {
+    oauthCallbackUrl:
+      process.env.GOOGLE_OAUTH_CALLBACK_URL ||
+      'http://localhost:3000/auth/google/callback',
+  },
+
   linkedin: {
     clientId: process.env.LINKEDIN_CLIENT_ID || '',
     clientSecret: process.env.LINKEDIN_CLIENT_SECRET || '',

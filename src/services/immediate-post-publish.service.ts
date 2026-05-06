@@ -6,6 +6,7 @@ import { NotificationService } from './notification.service';
 import { CacheService } from './cache.service';
 import { IdempotencyService } from './idempotency.service';
 import { ContentStatus } from '../common/types';
+import { FeedbackService } from './feedback.service';
 
 export interface ImmediatePublishParams {
   userId: string;
@@ -17,6 +18,7 @@ export interface ImmediatePublishParams {
   mediaUrls?: string[];
   hashtags?: string[];
   idempotencyKey?: string;
+  pdfUrl?: string;
 }
 
 @Injectable()
@@ -30,11 +32,17 @@ export class ImmediatePostPublishService {
     private readonly cacheService: CacheService,
     private readonly idempotencyService: IdempotencyService,
     private readonly configService: ConfigService,
+    private readonly feedbackService: FeedbackService,
   ) {}
 
   async publishImmediate(
     params: ImmediatePublishParams,
-  ): Promise<{ success: boolean; postId: string; message: string }> {
+  ): Promise<{
+    success: boolean;
+    postId: string;
+    message: string;
+    feedbackPromptSuggested?: boolean;
+  }> {
     const {
       userId,
       contentId,
@@ -45,6 +53,7 @@ export class ImmediatePostPublishService {
       mediaUrls,
       hashtags,
       idempotencyKey,
+      pdfUrl,
     } = params;
 
     if (
@@ -112,6 +121,11 @@ export class ImmediatePostPublishService {
       }
     }
 
+    // Add 12 credits for PDF attachment
+    if (pdfUrl) {
+      creditCost += 12;
+    }
+
     const hasQuota = await this.quotaService.checkQuotaAvailable(
       userId,
       creditCost,
@@ -139,13 +153,16 @@ export class ImmediatePostPublishService {
       contentId,
     });
 
-    if (content || mediaUrls || hashtags) {
+    if (content || mediaUrls || hashtags || pdfUrl) {
       const updateData: Record<string, unknown> = {};
       if (content) updateData.content = content;
       if (hashtags) updateData.hashtags = hashtags;
       if (mediaUrls && mediaUrls.length > 0) {
         updateData.visual_url = mediaUrls[0];
         updateData.media_urls = mediaUrls;
+      }
+      if (pdfUrl) {
+        updateData.pdf_url = pdfUrl;
       }
 
       await this.postSchedulingService['supabaseService']
@@ -216,10 +233,13 @@ export class ImmediatePostPublishService {
         postId,
       );
 
+      const fb = await this.feedbackService.recordFirstAction(userId);
+
       const result = {
         success: true,
         postId,
         message: 'Post published successfully',
+        feedbackPromptSuggested: fb.promptSuggested,
       };
       if (idempotencyKey) {
         await this.idempotencyService.setResult(

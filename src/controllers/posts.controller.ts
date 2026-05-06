@@ -22,6 +22,7 @@ import { NotificationService } from '../services/notification.service';
 import { CacheService } from '../services/cache.service';
 import { IdempotencyService } from '../services/idempotency.service';
 import { ImmediatePostPublishService } from '../services/immediate-post-publish.service';
+import { FeedbackService } from '../services/feedback.service';
 import { ConfigService } from '@nestjs/config';
 import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
 
@@ -44,6 +45,7 @@ export class PostsController {
     private readonly idempotencyService: IdempotencyService,
     private readonly configService: ConfigService,
     private readonly immediatePostPublishService: ImmediatePostPublishService,
+    private readonly feedbackService: FeedbackService,
   ) {}
 
   @Post('publish')
@@ -59,6 +61,7 @@ export class PostsController {
       mediaUrls?: string[];
       hashtags?: string[];
       idempotencyKey?: string;
+      pdfUrl?: string;
     },
     @Headers('x-idempotency-key') idemHeader?: string,
   ) {
@@ -72,6 +75,7 @@ export class PostsController {
         organizationUrn,
         mediaUrls,
         hashtags,
+        pdfUrl,
       } = body;
       const idempotencyKey = body.idempotencyKey || idemHeader;
 
@@ -85,12 +89,16 @@ export class PostsController {
         mediaUrls,
         hashtags,
         idempotencyKey,
+        pdfUrl,
       });
     } catch (error) {
       this.logger.error('Failed to publish post:', error.message);
+      if (error instanceof HttpException) {
+        throw error;
+      }
       throw new HttpException(
         error.message || 'Failed to publish post',
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
@@ -110,6 +118,7 @@ export class PostsController {
       content?: string;
       mediaUrls?: string[];
       hashtags?: string[];
+      pdfUrl?: string;
     },
     @Headers('x-user-timezone') userTimezoneHeader?: string,
   ) {
@@ -126,6 +135,7 @@ export class PostsController {
         content,
         mediaUrls,
         hashtags,
+        pdfUrl,
       } = body;
 
       // Validate scheduled time
@@ -196,6 +206,11 @@ export class PostsController {
         // Text post remains 4
       }
 
+      // Add 12 credits for PDF attachment
+      if (pdfUrl) {
+        creditCost += 12;
+      }
+
       // Check quota (scheduling costs more than immediate posting)
       const hasQuota = await this.quotaService.checkQuotaAvailable(
         userId,
@@ -224,13 +239,16 @@ export class PostsController {
       );
 
       // Update content if custom data provided
-      if (content || mediaUrls || hashtags) {
+      if (content || mediaUrls || hashtags || pdfUrl) {
         const updateData: any = {};
         if (content) updateData.content = content;
         if (hashtags) updateData.hashtags = hashtags;
         if (mediaUrls && mediaUrls.length > 0) {
           updateData.visual_url = mediaUrls[0]; // Use first image as primary
           updateData.media_urls = mediaUrls;
+        }
+        if (pdfUrl) {
+          updateData.pdf_url = pdfUrl;
         }
 
         await this.postSchedulingService['supabaseService']
@@ -285,11 +303,14 @@ export class PostsController {
           effectiveTimezone,
         );
 
+        const fb = await this.feedbackService.recordFirstAction(userId);
+
         return {
           success: true,
           jobId,
           scheduledFor: scheduledDate.toISOString(),
           message: 'Post scheduled successfully',
+          feedbackPromptSuggested: fb.promptSuggested,
         };
       } catch (scheduleError) {
         // Update status back to 'ready' on scheduling failure

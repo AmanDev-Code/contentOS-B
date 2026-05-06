@@ -3,9 +3,11 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { SupabaseService } from '../services/supabase.service';
+import { ProfileRepository } from '../repositories/profile.repository';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -15,9 +17,14 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
+const SAFE_READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 @Injectable()
 export class AuthGuard implements CanActivate {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly profileRepository: ProfileRepository,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -44,6 +51,21 @@ export class AuthGuard implements CanActivate {
         email: user.email || '',
         role: user.role || 'user',
       };
+
+      const accountStatus = await this.profileRepository.getAccountStatus(
+        user.id,
+      );
+      if (
+        accountStatus === 'suspended' ||
+        accountStatus === 'banned'
+      ) {
+        const method = request.method?.toUpperCase() || 'GET';
+        if (!SAFE_READ_METHODS.has(method)) {
+          throw new ForbiddenException(
+            'This account cannot perform this action.',
+          );
+        }
+      }
 
       return true;
     } catch (error) {

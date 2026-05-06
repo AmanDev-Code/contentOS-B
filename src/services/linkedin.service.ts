@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import sharp from 'sharp';
 import { ConfigService } from '@nestjs/config';
 import { ProfileRepository } from '../repositories/profile.repository';
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
@@ -53,6 +54,13 @@ export interface LinkedInInsightsPayload {
 
 @Injectable()
 export class LinkedinService {
+  /** Known LinkedIn Marketing API versions (YYYYMM). Avoid calendar-month guesses — they are often not published yet. */
+  private static readonly LINKEDIN_VERSION_FALLBACKS: readonly string[] = [
+    '202411',
+    '202410',
+    '202401',
+  ];
+
   private readonly logger = new Logger(LinkedinService.name);
   private readonly clientId: string;
   private readonly clientSecret: string;
@@ -102,20 +110,181 @@ export class LinkedinService {
     return yyyymm;
   }
 
-  private getCurrentLinkedinVersion(): string {
-    const now = new Date();
-    const y = now.getUTCFullYear();
-    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-    return `${y}${m}`;
-  }
-
   private async getLinkedinVersionCandidates(): Promise<string[]> {
     const effective = await this.scraperCredentialsService.getEffective();
     const configured = this.sanitizeLinkedinVersion(
       effective.linkedinApiVersion || this.linkedinApiVersion,
     );
-    const current = this.getCurrentLinkedinVersion();
-    return Array.from(new Set([current, configured].filter(Boolean) as string[]));
+    const ordered: string[] = [];
+    if (configured) ordered.push(configured);
+    for (const v of LinkedinService.LINKEDIN_VERSION_FALLBACKS) {
+      if (!ordered.includes(v)) ordered.push(v);
+    }
+    return ordered;
+  }
+
+  /**
+   * Log LinkedIn error payloads without echoing tokens. Prefer JSON `message` / `code` / `status`.
+   */
+  private logLinkedinApiFailure(
+    context: string,
+    status: number,
+    version: string,
+    rawBody: string,
+  ): void {
+    let summary = rawBody?.slice(0, 800) || '';
+    try {
+      const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+      const msg = parsed.message || parsed.errorDetails || parsed.code;
+      if (msg !== undefined) {
+        summary = typeof msg === 'string' ? msg : JSON.stringify(msg).slice(0, 800);
+      } else {
+        summary = JSON.stringify(parsed).slice(0, 800);
+      }
+    } catch {
+      /* keep truncated raw text */
+    }
+    this.logger.warn(
+      `${context} status=${status} LinkedIn-Version=${version} body=${summary}`,
+    );
+  }
+
+  /**
+   * Media initialize endpoints (`/rest/images`, `/rest/documents`) are sensitive to `LinkedIn-Version`.
+   * Try each configured fallback until one succeeds so we are not stuck on an unpublished month.
+   */
+  private async fetchLinkedinRestMediaInitWithVersionFallback(
+    url: string,
+    accessToken: string,
+    init: {
+      method: string;
+      body?: string;
+      headers?: Record<string, string>;
+    },
+  ): Promise<Response> {
+    const versions = await this.getLinkedinVersionCandidates();
+    let last: Response | null = null;
+    for (const version of versions) {
+      const response = await fetch(url, {
+        method: init.method,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+          'LinkedIn-Version': version,
+          ...(init.headers || {}),
+        },
+        body: init.body,
+      });
+      if (response.ok) {
+        if (version !== versions[0]) {
+          this.logger.log(
+            `LinkedIn media init succeeded using API version ${version} (configured version failed or was unsupported).`,
+          );
+        }
+        return response;
+      }
+      const errorText = await response.text().catch(() => '');
+      this.logLinkedinApiFailure(
+        `LinkedIn media initializeUpload`,
+        response.status,
+        version,
+        errorText,
+      );
+      last = new Response(errorText, {
+        status: response.status,
+        statusText: response.statusText,
+      });
+    }
+    return (
+      last ||
+      new Response('LinkedIn media init failed for all API versions', {
+        status: 400,
+        statusText: 'Bad Request',
+      })
+    );
+  }
+
+  /**
+   * LinkedIn's servers fetch the asset from our URL in some flows; we always re-upload bytes.
+   * Reject hosts that the backend cannot reach (localhost, loopback, obvious private URL mistakes).
+   */
+  private assertFetchableAssetUrl(assetUrl: string, label: string): URL {
+    let parsed: URL;
+    try {
+      parsed = new URL(assetUrl);
+    } catch {
+      throw new BadRequestException(
+        `${label} URL is invalid. Use a public or signed HTTPS URL reachable from your API server.`,
+      );
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new BadRequestException(
+        `${label} URL must use http(s). Got: ${parsed.protocol}`,
+      );
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host.endsWith('.localhost')
+    ) {
+      throw new BadRequestException(
+        `${label} URL must not be localhost — LinkedIn and this server cannot fetch it. Use your public MinIO/base URL.`,
+      );
+    }
+    return parsed;
+  }
+
+  private detectImageMimeFromBytes(buffer: ArrayBuffer): string {
+    const u8 = new Uint8Array(buffer.slice(0, 12));
+    if (u8.length >= 3 && u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) {
+      return 'image/jpeg';
+    }
+    if (
+      u8.length >= 8 &&
+      u8[0] === 0x89 &&
+      u8[1] === 0x50 &&
+      u8[2] === 0x4e &&
+      u8[3] === 0x47
+    ) {
+      return 'image/png';
+    }
+    if (
+      u8.length >= 12 &&
+      u8[0] === 0x52 &&
+      u8[1] === 0x49 &&
+      u8[2] === 0x46 &&
+      u8[3] === 0x46
+    ) {
+      return 'image/webp';
+    }
+    return 'application/octet-stream';
+  }
+
+  private async fetchAssetAsArrayBuffer(
+    assetUrl: string,
+    label: string,
+  ): Promise<{ buffer: ArrayBuffer; contentType: string | null }> {
+    this.assertFetchableAssetUrl(assetUrl, label);
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const imageResponse = await fetch(assetUrl, { signal: controller.signal });
+      if (!imageResponse.ok) {
+        throw new Error(
+          `HTTP ${imageResponse.status} downloading ${label} from origin`,
+        );
+      }
+      const contentType = imageResponse.headers.get('content-type');
+      const imageBuffer = await imageResponse.arrayBuffer();
+      if (!imageBuffer || imageBuffer.byteLength < 32) {
+        throw new Error(`${label} download was empty or too small`);
+      }
+      return { buffer: imageBuffer, contentType };
+    } finally {
+      clearTimeout(t);
+    }
   }
 
   private async fetchLinkedinRestWithVersionRetry(
@@ -1403,7 +1572,7 @@ export class LinkedinService {
     const linkedinUserId = await this.getLinkedinUserId(
       profile.linkedin_access_token,
     );
-    const ownerUrn =
+    let ownerUrn =
       request.actorType === 'organization'
         ? request.organizationUrn
         : `urn:li:person:${linkedinUserId}`;
@@ -1411,6 +1580,13 @@ export class LinkedinService {
       throw new BadRequestException(
         'organizationUrn is required for organization publishing',
       );
+    }
+    if (
+      request.actorType === 'organization' &&
+      ownerUrn &&
+      !ownerUrn.startsWith('urn:li:')
+    ) {
+      ownerUrn = `urn:li:organization:${ownerUrn}`;
     }
 
     let postData: any;
@@ -1588,8 +1764,32 @@ export class LinkedinService {
     ownerUrn: string,
   ): Promise<string> {
     try {
-      // Initialize upload
-      const initResponse = await this.fetchLinkedinRestWithVersionRetry(
+      if (
+        !imageUrl ||
+        imageUrl === 'generated-image' ||
+        !imageUrl.startsWith('http')
+      ) {
+        throw new BadRequestException(
+          `Invalid image URL: ${imageUrl}. Ensure the image is stored with a reachable URL.`,
+        );
+      }
+
+      const { buffer: rawBuffer, contentType: headerMime } =
+        await this.fetchAssetAsArrayBuffer(imageUrl, 'image');
+
+      let putBody: Buffer = Buffer.from(rawBuffer);
+      let putMime =
+        this.detectImageMimeFromBytes(rawBuffer) ||
+        headerMime?.split(';')[0]?.trim() ||
+        'application/octet-stream';
+
+      // LinkedIn feed images are most reliable as JPEG; transcode PNG/WebP when needed.
+      if (putMime !== 'image/jpeg') {
+        putBody = await sharp(rawBuffer).jpeg({ quality: 92 }).toBuffer();
+        putMime = 'image/jpeg';
+      }
+
+      const initResponse = await this.fetchLinkedinRestMediaInitWithVersionFallback(
         'https://api.linkedin.com/rest/images?action=initializeUpload',
         accessToken,
         {
@@ -1606,49 +1806,57 @@ export class LinkedinService {
       );
 
       if (!initResponse.ok) {
-        throw new Error('Failed to initialize image upload');
-      }
-
-      const initData = await initResponse.json();
-      const uploadUrl = initData.value.uploadUrl;
-      const imageUrn = initData.value.image;
-
-      // Validate image URL
-      if (
-        !imageUrl ||
-        imageUrl === 'generated-image' ||
-        !imageUrl.startsWith('http')
-      ) {
+        const errText = await initResponse.text().catch(() => '');
+        this.logLinkedinApiFailure(
+          'LinkedIn image initializeUpload (final)',
+          initResponse.status,
+          'exhausted',
+          errText,
+        );
         throw new Error(
-          `Invalid image URL: ${imageUrl}. Please ensure the image is properly uploaded to MinIO.`,
+          `Failed to initialize image upload (HTTP ${initResponse.status})`,
         );
       }
 
-      // Download image from MinIO
-      const imageResponse = await fetch(imageUrl);
-      if (!imageResponse.ok) {
-        throw new Error('Failed to download image from MinIO');
+      const initData = await initResponse.json();
+      const uploadUrl = initData.value?.uploadUrl;
+      const imageUrn = initData.value?.image;
+      if (!uploadUrl || !imageUrn) {
+        this.logger.warn(
+          `LinkedIn initializeUpload missing uploadUrl/image: ${JSON.stringify(initData).slice(0, 500)}`,
+        );
+        throw new Error('LinkedIn initializeUpload returned an unexpected body');
       }
 
-      const imageBuffer = await imageResponse.arrayBuffer();
+      const uploadBlob = new Blob([new Uint8Array(putBody)], { type: putMime });
 
-      // Upload to LinkedIn
       const uploadResponse = await fetch(uploadUrl, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'image/jpeg',
+          'Content-Type': putMime,
         },
-        body: imageBuffer,
+        body: uploadBlob,
       });
 
       if (!uploadResponse.ok) {
-        throw new Error('Failed to upload image to LinkedIn');
+        const upText = await uploadResponse.text().catch(() => '');
+        this.logger.warn(
+          `LinkedIn binary upload failed status=${uploadResponse.status} body=${upText.slice(0, 500)}`,
+        );
+        throw new Error(
+          `Failed to upload image bytes to LinkedIn (HTTP ${uploadResponse.status})`,
+        );
       }
 
       return imageUrn;
     } catch (error) {
-      this.logger.error('Failed to upload image to LinkedIn:', error);
-      throw new BadRequestException('Failed to upload image to LinkedIn');
+      if (error instanceof BadRequestException) throw error;
+      const message =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to upload image to LinkedIn: ${message}`);
+      throw new BadRequestException(
+        `Failed to upload image to LinkedIn: ${message}`,
+      );
     }
   }
 
@@ -1658,40 +1866,48 @@ export class LinkedinService {
     ownerUrn: string,
   ): Promise<string> {
     try {
-      // Initialize document upload
-      const initResponse = await this.fetchLinkedinRestWithVersionRetry(
-        'https://api.linkedin.com/rest/documents?action=initializeUpload',
-        accessToken,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            initializeUploadRequest: {
-              owner: ownerUrn,
-            },
-          }),
-        },
+      const { buffer: documentBuffer } = await this.fetchAssetAsArrayBuffer(
+        documentUrl,
+        'document',
       );
 
+      const initResponse =
+        await this.fetchLinkedinRestMediaInitWithVersionFallback(
+          'https://api.linkedin.com/rest/documents?action=initializeUpload',
+          accessToken,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              initializeUploadRequest: {
+                owner: ownerUrn,
+              },
+            }),
+          },
+        );
+
       if (!initResponse.ok) {
-        throw new Error('Failed to initialize document upload');
+        const errText = await initResponse.text().catch(() => '');
+        this.logLinkedinApiFailure(
+          'LinkedIn document initializeUpload (final)',
+          initResponse.status,
+          'exhausted',
+          errText,
+        );
+        throw new Error(
+          `Failed to initialize document upload (HTTP ${initResponse.status})`,
+        );
       }
 
       const initData = await initResponse.json();
-      const uploadUrl = initData.value.uploadUrl;
-      const documentUrn = initData.value.document;
-
-      // Download document from MinIO
-      const documentResponse = await fetch(documentUrl);
-      if (!documentResponse.ok) {
-        throw new Error('Failed to download document from MinIO');
+      const uploadUrl = initData.value?.uploadUrl;
+      const documentUrn = initData.value?.document;
+      if (!uploadUrl || !documentUrn) {
+        throw new Error('LinkedIn document initializeUpload returned an unexpected body');
       }
 
-      const documentBuffer = await documentResponse.arrayBuffer();
-
-      // Upload to LinkedIn
       const uploadResponse = await fetch(uploadUrl, {
         method: 'PUT',
         headers: {
@@ -1701,13 +1917,24 @@ export class LinkedinService {
       });
 
       if (!uploadResponse.ok) {
-        throw new Error('Failed to upload document to LinkedIn');
+        const upText = await uploadResponse.text().catch(() => '');
+        this.logger.warn(
+          `LinkedIn document binary upload failed status=${uploadResponse.status} body=${upText.slice(0, 500)}`,
+        );
+        throw new Error(
+          `Failed to upload document to LinkedIn (HTTP ${uploadResponse.status})`,
+        );
       }
 
       return documentUrn;
     } catch (error) {
-      this.logger.error('Failed to upload document to LinkedIn:', error);
-      throw new BadRequestException('Failed to upload document to LinkedIn');
+      if (error instanceof BadRequestException) throw error;
+      const message =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to upload document to LinkedIn: ${message}`);
+      throw new BadRequestException(
+        `Failed to upload document to LinkedIn: ${message}`,
+      );
     }
   }
 

@@ -31,6 +31,14 @@ export const QUEUE_NAMES = {
   MEDIA_SINGLE: 'media-single',
   MEDIA_CAROUSEL: 'media-carousel',
   TRENDING_HASHTAGS: 'trending-hashtags',
+  FEEDBACK_REWARD: 'feedback-reward',
+  FEEDBACK_REMINDER: 'feedback-reminder',
+  MAINTENANCE: 'maintenance',
+};
+
+export const MAINTENANCE_JOB_NAMES = {
+  ENABLE: 'maintenance-enable',
+  DISABLE: 'maintenance-disable',
 };
 
 export const HASHTAG_JOB_NAMES = {

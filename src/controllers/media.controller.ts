@@ -834,6 +834,152 @@ export class MediaController {
     }
   }
 
+  @Post('upload-pdf')
+  @UseGuards(AuthGuard)
+  async uploadPdf(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: any,
+  ) {
+    try {
+      const userId = req.user.id;
+
+      // The body is parsed by @fastify/multipart (attachFieldsToBody: true).
+      // For file fields, body.file is a MultipartFile with toBuffer()/filename/mimetype.
+      // We also keep legacy string/Buffer paths for backward compatibility (e.g. tests).
+      let pdfBuffer: Buffer;
+      let originalFilename = 'document.pdf';
+      let declaredMimetype = 'application/pdf';
+
+      const fileField = body?.file;
+      if (!fileField) {
+        throw new HttpException(
+          'No PDF file provided',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      if (
+        typeof fileField === 'object' &&
+        fileField !== null &&
+        typeof fileField.toBuffer === 'function'
+      ) {
+        // @fastify/multipart parsed file
+        pdfBuffer = await fileField.toBuffer();
+        originalFilename = fileField.filename || originalFilename;
+        declaredMimetype = fileField.mimetype || declaredMimetype;
+      } else if (fileField instanceof Buffer) {
+        pdfBuffer = fileField;
+      } else if (typeof fileField === 'string') {
+        // Base64 encoded (legacy path)
+        const base64Data = fileField.startsWith('data:')
+          ? fileField.split(',')[1]
+          : fileField;
+        pdfBuffer = Buffer.from(base64Data, 'base64');
+      } else if (fileField.buffer) {
+        pdfBuffer = Buffer.from(fileField.buffer);
+        originalFilename = fileField.originalname || originalFilename;
+      } else {
+        throw new HttpException(
+          'Invalid file format',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Reject obviously wrong client-declared content types early.
+      if (declaredMimetype !== 'application/pdf') {
+        throw new HttpException(
+          'Only PDF files are allowed',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Check file size (25MB max). @fastify/multipart enforces a hard 26MB
+      // limit at the parser level; this guard handles legacy/base64 paths and
+      // gives a clean 400 instead of a parser error.
+      if (pdfBuffer.length > 25 * 1024 * 1024) {
+        throw new HttpException(
+          'PDF file must be less than 25MB',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Validate PDF magic bytes (defence-in-depth in case mimetype is spoofed).
+      const pdfMagic = pdfBuffer.subarray(0, 5).toString('ascii');
+      if (!pdfMagic.startsWith('%PDF-')) {
+        throw new HttpException(
+          'Invalid PDF file',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Generate filename
+      const sanitizedName = originalFilename
+        .replace(/[^\w\s.-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/--+/g, '-')
+        .toLowerCase();
+      const baseName = sanitizedName.includes('.')
+        ? sanitizedName.slice(0, sanitizedName.lastIndexOf('.'))
+        : sanitizedName;
+      const filename = `${baseName}-${Date.now()}.pdf`;
+      const minioPath = `user-uploads/${userId}/pdfs/${filename}`;
+
+      // Upload to MinIO
+      await this.minioService.uploadFile(
+        this.minioService['bucketName'],
+        minioPath,
+        pdfBuffer,
+        'application/pdf',
+      );
+
+      // Get public URL
+      const publicUrl = await this.minioService.getPublicUrl(
+        this.minioService['bucketName'],
+        minioPath,
+      );
+
+      // Save to database
+      const { data: mediaFile, error } = await this.supabaseService
+        .getServiceClient()
+        .from('media_files')
+        .insert({
+          user_id: userId,
+          file_name: filename,
+          file_type: 'pdf',
+          file_size: pdfBuffer.length,
+          minio_path: minioPath,
+          public_url: publicUrl,
+          content_id: null,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        this.logger.error('Failed to save PDF record:', error);
+        throw new HttpException(
+          'Failed to save PDF record',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      this.logger.log(
+        `PDF uploaded for user ${userId}: ${filename} (${pdfBuffer.length} bytes)`,
+      );
+
+      return {
+        success: true,
+        url: publicUrl,
+        mediaFile,
+      };
+    } catch (error) {
+      this.logger.error('PDF upload failed:', error.message);
+      throw new HttpException(
+        error.message || 'PDF upload failed',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Get('usage')
   @UseGuards(AuthGuard)
   async getMediaUsage(@Request() req: AuthenticatedRequest) {

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { SubscriptionService } from '../services/subscription.service';
+import { PlatformAccessService } from '../services/platform-access.service';
 import { getPlanConfig } from '../config/plans.config';
 import { REQUIRE_PLAN_FEATURE_KEY } from './paywall.decorator';
 
@@ -22,6 +23,7 @@ export class PaywallGuard implements CanActivate {
   constructor(
     private readonly subscriptionService: SubscriptionService,
     private readonly reflector: Reflector,
+    private readonly platformAccess: PlatformAccessService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -44,11 +46,15 @@ export class PaywallGuard implements CanActivate {
       '/subscription',
       '/billing',
       '/quota',
+      '/moderation',
     ];
     if (allowlistPrefixes.some((p) => url.startsWith(p))) return true;
 
     // Admin endpoints are already protected by AdminGuard.
     if (url.startsWith('/admin')) return true;
+
+    // Platform staff APIs — same bypass as /admin (no subscription required)
+    if (url.startsWith('/platform-admin')) return true;
 
     // Payload-less preflight requests should never be blocked.
     if (method === 'OPTIONS') return true;
@@ -69,6 +75,12 @@ export class PaywallGuard implements CanActivate {
       await this.subscriptionService.getUserSubscription(userId);
 
     if (!subscription || !subscription.isActive) {
+      const staff = await this.platformAccess.hasStaffAccess({
+        id: userId,
+        email: req?.user?.email,
+      });
+      if (staff) return true;
+
       throw new HttpException(
         'Subscription required to use this feature.',
         HttpStatus.PAYMENT_REQUIRED,
