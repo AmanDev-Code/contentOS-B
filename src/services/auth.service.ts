@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient } from '@supabase/supabase-js';
 import type { Session } from '@supabase/supabase-js';
@@ -6,6 +6,7 @@ import { SupabaseService } from './supabase.service';
 import { CacheService } from './cache.service';
 import { EmailService } from './email.service';
 import { NotificationService } from './notification.service';
+import { ReferralService } from './referral.service';
 
 
 @Injectable()
@@ -18,6 +19,8 @@ export class AuthService {
     private readonly cacheService: CacheService,
     private readonly emailService: EmailService,
     private readonly notificationService: NotificationService,
+    @Inject(forwardRef(() => ReferralService))
+    private readonly referralService: ReferralService,
   ) {}
 
   /**
@@ -29,8 +32,9 @@ export class AuthService {
     password: string;
     username?: string;
     fullName?: string;
+    referralCode?: string;
   }): Promise<{ userId: string }> {
-    const { email, password, username, fullName } = data;
+    const { email, password, username, fullName, referralCode } = data;
 
     const { data: newUser, error } = await this.supabaseService
       .getServiceClient()
@@ -87,6 +91,13 @@ export class AuthService {
       .catch((err) => {
         this.logger.error(`Background notification failed: ${err.message}`);
       });
+
+    // Record referral if a valid code was provided
+    if (referralCode) {
+      this.referralService.recordReferral(userId, referralCode).catch((err) => {
+        this.logger.error(`Background referral recording failed: ${err.message}`);
+      });
+    }
 
     return { userId };
   }

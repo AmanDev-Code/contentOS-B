@@ -7,6 +7,7 @@ import { GenerationJobRepository } from '../repositories/generation-job.reposito
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
 import { QuotaService } from '../services/quota.service';
 import { NotificationService } from '../services/notification.service';
+import { ReferralService } from '../services/referral.service';
 import { CustomTopicGenerationService } from '../modules/post-ai/custom-topic-generation.service';
 import { CustomTopicCreditService } from '../modules/credits/custom-topic-credit.service';
 import { MinioService } from '../services/minio.service';
@@ -69,6 +70,7 @@ export class GenerationWorker extends WorkerHost {
     private generatedContentRepository: GeneratedContentRepository,
     private quotaService: QuotaService,
     private notificationService: NotificationService,
+    private referralService: ReferralService,
     private customTopicGenerationService: CustomTopicGenerationService,
     private customTopicCreditService: CustomTopicCreditService,
     private minioService: MinioService,
@@ -911,6 +913,18 @@ export class GenerationWorker extends WorkerHost {
         contentRecord.id,
         contentRecord.title || 'Custom topic post',
       );
+
+      // Process referral completion if this is the user's first generation
+      try {
+        const referralResult = await this.referralService.processReferralCompletion(userId);
+        if (referralResult.success && referralResult.creditsAwarded && referralResult.creditsAwarded > 0) {
+          this.logger.log(
+            `Referral completed for user ${userId}: referrer ${referralResult.referrerId} earned ${referralResult.creditsAwarded} credits`,
+          );
+        }
+      } catch (referralError) {
+        this.logger.warn(`Referral processing failed for user ${userId}: ${(referralError as Error).message}`);
+      }
 
       try {
         const quotaAfter = await this.quotaService.getUserQuota(userId, {

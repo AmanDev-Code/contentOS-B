@@ -36,6 +36,7 @@ interface RegisterDto {
   password: string;
   username?: string;
   fullName?: string;
+  referralCode?: string;
 }
 
 interface ForgotPasswordDto {
@@ -77,6 +78,7 @@ export class AuthController {
         password: body.password,
         username: body.username,
         fullName: body.fullName,
+        referralCode: body.referralCode,
       });
 
       return { success: true, userId: result.userId };

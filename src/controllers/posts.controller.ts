@@ -16,6 +16,8 @@ import {
 import { ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
+import { SocialChannelGuard } from '../guards/social-channel.guard';
+import { RequireSocialChannel } from '../decorators/require-social-channel.decorator';
 import { PostSchedulingService } from '../services/post-scheduling.service';
 import { QuotaService } from '../services/quota.service';
 import { NotificationService } from '../services/notification.service';
@@ -49,6 +51,8 @@ export class PostsController {
   ) {}
 
   @Post('publish')
+  @UseGuards(SocialChannelGuard)
+  @RequireSocialChannel('linkedin')
   async publishPost(
     @Request() req: AuthenticatedRequest,
     @Body()
@@ -104,6 +108,8 @@ export class PostsController {
   }
 
   @Post('schedule')
+  @UseGuards(SocialChannelGuard)
+  @RequireSocialChannel('linkedin')
   async schedulePost(
     @Request() req: AuthenticatedRequest,
     @Body()

@@ -20,6 +20,7 @@ import { NotificationService } from '../services/notification.service';
 import { SubscriptionService } from '../services/subscription.service';
 import { QuotaService } from '../services/quota.service';
 import { CacheService } from '../services/cache.service';
+import { OnboardingService } from '../services/onboarding.service';
 
 interface AuthReq extends Request {
   user: { id: string; email: string };
@@ -38,6 +39,7 @@ export class PlatformUsersController {
     private readonly subscriptionService: SubscriptionService,
     private readonly quotaService: QuotaService,
     private readonly cacheService: CacheService,
+    private readonly onboardingService: OnboardingService,
   ) {}
 
   /** Same semantics as QuotaService when `user_quota_view` has no row (no active subscription). */
@@ -491,5 +493,43 @@ export class PlatformUsersController {
         resetDate: resetIso,
       },
     };
+  }
+
+  @Get(':userId/onboarding-responses')
+  @ApiOperation({ summary: 'Get user onboarding responses (staff)' })
+  async getUserOnboardingResponses(@Param('userId') userId: string) {
+    const { data: profile, error: pErr } = await this.supabaseService
+      .getServiceClient()
+      .from('profiles')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (pErr) {
+      throw new BadRequestException(pErr.message);
+    }
+    if (!profile) {
+      throw new NotFoundException('User not found');
+    }
+
+    try {
+      const responses =
+        await this.onboardingService.getUserResponsesForAdmin(userId);
+      const hasCompleted =
+        await this.onboardingService.hasUserCompletedOnboarding(userId);
+
+      return {
+        success: true,
+        data: {
+          responses,
+          hasCompletedOnboarding: hasCompleted,
+          responseCount: responses.length,
+        },
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        error.message || 'Failed to fetch onboarding responses',
+      );
+    }
   }
 }

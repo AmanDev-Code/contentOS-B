@@ -25,6 +25,7 @@ import { EmailWebhookController } from './controllers/email-webhook.controller';
 import { AuthController } from './controllers/auth.controller';
 import { ProfileController } from './controllers/profile.controller';
 import { OnboardingController } from './controllers/onboarding.controller';
+import { AdminOnboardingController } from './controllers/admin-onboarding.controller';
 import { PaddleController } from './controllers/paddle.controller';
 import { InternalController } from './controllers/internal.controller';
 import { CareersController } from './controllers/careers.controller';
@@ -32,6 +33,8 @@ import { AdminCareersController } from './controllers/admin-careers.controller';
 import { BlogController } from './controllers/blog.controller';
 import { AdminBlogController } from './controllers/admin-blog.controller';
 import { AdminSeoPagesController } from './controllers/admin-seo-pages.controller';
+import { ReferralController, PublicReferralController } from './controllers/referral.controller';
+import { AdminReferralController } from './controllers/admin-referral.controller';
 import { FeedbackController } from './controllers/feedback.controller';
 import { UserFeedbackController } from './controllers/user-feedback.controller';
 import { PlatformAdminFeedbackController } from './controllers/platform-admin-feedback.controller';
@@ -83,6 +86,7 @@ import { BlogManagementGuard } from './guards/blog-management.guard';
 import { FeedbackService } from './services/feedback.service';
 import { UserFeedbackService } from './services/user-feedback.service';
 import { PlatformAccessService } from './services/platform-access.service';
+import { ReferralService } from './services/referral.service';
 import { FeedbackQueueBootstrapService } from './services/feedback-queue-bootstrap.service';
 import { PlatformStaffGuard } from './guards/platform-staff.guard';
 import { ModerationGuard } from './guards/moderation.guard';
@@ -107,6 +111,7 @@ import { MaintenanceProcessor } from './processors/maintenance.processor';
 import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
 import { UserRateLimitGuard } from './guards/user-rate-limit.guard';
 import { PaywallGuard } from './guards/paywall.guard';
+import { SocialChannelGuard } from './guards/social-channel.guard';
 import { Reflector } from '@nestjs/core';
 
 import { CustomTopicGenerationService } from './modules/post-ai/custom-topic-generation.service';
@@ -181,6 +186,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     AuthController,
     ProfileController,
     OnboardingController,
+    AdminOnboardingController,
     PaddleController,
     InternalController,
     CareersController,
@@ -198,6 +204,9 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     ModerationController,
     MaintenanceController,
     AdminMaintenanceController,
+    ReferralController,
+    PublicReferralController,
+    AdminReferralController,
   ],
   providers: [
     AppService,
@@ -235,6 +244,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     FeedbackService,
     UserFeedbackService,
     PlatformAccessService,
+    ReferralService,
     PlatformStaffGuard,
     FeedbackQueueBootstrapService,
     FeedbackRewardProcessor,
@@ -258,6 +268,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     RateLimitMiddleware,
     UserRateLimitGuard,
     PaywallGuard,
+    SocialChannelGuard,
     CreditPreflightGuard,
     ModerationGuard,
     ModerationService,

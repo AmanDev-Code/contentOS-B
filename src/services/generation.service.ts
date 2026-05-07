@@ -1053,4 +1053,145 @@ export class GenerationService {
       message: `Carousel regeneration started. ${creditsCost} credits reserved.`,
     };
   }
+
+  /**
+   * Format and improve user content using AI for LinkedIn posting.
+   * This is a lightweight operation that costs 0.5 credits.
+   */
+  async formatContentWithAI(
+    userId: string,
+    content: string,
+  ): Promise<{ formattedContent: string; creditsCost: number }> {
+    const creditsCost = 0.5;
+
+    // Check if user has enough credits
+    const hasQuota = await this.quotaService.checkQuotaAvailable(userId, creditsCost);
+    if (!hasQuota) {
+      throw new HttpException(
+        {
+          code: 'insufficient_credits',
+          message: `Insufficient credits. Formatting content costs ${creditsCost} credits.`,
+          requiredCredits: creditsCost,
+        },
+        HttpStatus.PAYMENT_REQUIRED,
+      );
+    }
+
+    // Deduct credits upfront
+    await this.quotaService.consumeCredits(
+      userId,
+      creditsCost,
+      'AI content formatting',
+      'generation',
+      'text',
+    );
+
+    try {
+      const openaiApiKey = this.configService.get<string>('OPENAI_API_KEY');
+      if (!openaiApiKey) {
+        // Refund credits if OpenAI is not configured
+        await this.quotaService.consumeCredits(
+          userId,
+          -creditsCost,
+          'Refund: OpenAI not configured',
+          'refund',
+          'text',
+        );
+        throw new HttpException(
+          'AI formatting is not available at this time',
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
+      }
+
+      const systemPrompt = `You are a text editor assistant. Your job is to LIGHTLY format and clean up the user's post.
+
+STRICT RULES:
+- Fix spelling and grammar mistakes ONLY
+- Add line breaks between paragraphs if needed
+- Keep the EXACT same length and message - do NOT expand or add new content
+- Do NOT add greetings, sign-offs, or calls-to-action
+- Do NOT add questions or engagement prompts
+- Do NOT make it longer than the original
+- Do NOT add hashtags
+- Do NOT use markdown formatting (no **, __, etc.)
+- Keep the user's original voice and tone
+- If the content is already well-formatted, return it as-is with only spelling fixes
+
+Return ONLY the cleaned-up text, nothing else.`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: content },
+          ],
+          temperature: 0.3,
+          max_tokens: 2000,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error(`OpenAI API error: ${response.status} - ${errorText}`);
+        // Refund credits on API error
+        await this.quotaService.consumeCredits(
+          userId,
+          -creditsCost,
+          'Refund: AI formatting failed',
+          'refund',
+          'text',
+        );
+        throw new HttpException(
+          'Failed to format content. Please try again.',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      const data = await response.json();
+      const formattedContent = data.choices?.[0]?.message?.content?.trim();
+
+      if (!formattedContent) {
+        // Refund credits if no content returned
+        await this.quotaService.consumeCredits(
+          userId,
+          -creditsCost,
+          'Refund: No formatted content returned',
+          'refund',
+          'text',
+        );
+        throw new HttpException(
+          'Failed to format content. Please try again.',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      return {
+        formattedContent,
+        creditsCost,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Format content error: ${error.message}`);
+      // Refund credits on unexpected error
+      await this.quotaService.consumeCredits(
+        userId,
+        -creditsCost,
+        `Refund: Unexpected error - ${error.message}`,
+        'refund',
+        'text',
+      );
+      throw new HttpException(
+        'Failed to format content. Please try again.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }

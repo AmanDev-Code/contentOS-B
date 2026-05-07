@@ -24,6 +24,8 @@ import { PaywallGuard } from '../guards/paywall.guard';
 import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
 import { ModerationGuard } from '../guards/moderation.guard';
 import { CreditPreflightGuard, CreditPreflightData } from '../guards/credit-preflight.guard';
+import { SocialChannelGuard } from '../guards/social-channel.guard';
+import { RequireSocialChannel } from '../decorators/require-social-channel.decorator';
 
 @ApiTags('generation')
 @Controller('generation')
@@ -38,6 +40,8 @@ export class GenerationController {
   ) {}
 
   @Post('start')
+  @UseGuards(SocialChannelGuard)
+  @RequireSocialChannel('linkedin')
   @ApiOperation({ summary: 'Start content generation' })
   async startGeneration(
     @Request() req,
@@ -303,7 +307,8 @@ export class GenerationController {
   }
 
   @Post('custom-topic')
-  @UseGuards(ModerationGuard, CreditPreflightGuard)
+  @UseGuards(ModerationGuard, CreditPreflightGuard, SocialChannelGuard)
+  @RequireSocialChannel('linkedin')
   @ApiOperation({ summary: 'Start custom topic AI post generation (credit-gated)' })
   async startCustomTopicGeneration(
     @Request() req,
@@ -345,6 +350,98 @@ export class GenerationController {
       preflight.creditSlices,
       preflight.totalCost,
     );
+  }
+
+  /**
+   * Create a content record for user-provided content (no AI generation).
+   * This is used for the "Your Content" flow where users paste their own content.
+   * No credits are charged for creating the record - credits are only charged
+   * when the user actually publishes or schedules the post.
+   */
+  /**
+   * Format/improve user content using AI for LinkedIn posting.
+   * This is a lightweight operation that costs 0.5 credits.
+   */
+  @Post('format-content')
+  @ApiOperation({ summary: 'Format and improve content using AI for LinkedIn' })
+  async formatContent(
+    @Request() req,
+    @Body() body: { content: string },
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    const { content } = body;
+    if (!content || content.trim().length < 20) {
+      throw new HttpException(
+        'Content must be at least 20 characters',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return this.generationService.formatContentWithAI(userId, content.trim());
+  }
+
+  @Post('content/create-own')
+  @ApiOperation({ summary: 'Create content record for user-provided content' })
+  async createOwnContent(
+    @Request() req,
+    @Body()
+    body: {
+      content: string;
+      title?: string;
+      hashtags?: string[];
+      mediaUrls?: string[];
+      pdfUrl?: string;
+    },
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    const { content, title, hashtags, mediaUrls, pdfUrl } = body;
+
+    if (!content || content.trim().length === 0) {
+      throw new HttpException(
+        'Content is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // Determine visual type based on what's provided
+    let visualType: 'text' | 'image' | 'carousel' = 'text';
+    if (pdfUrl) {
+      visualType = 'carousel';
+    } else if (mediaUrls && mediaUrls.length > 0) {
+      visualType = 'image';
+    }
+
+    const created = await this.generatedContentRepository.create(
+      userId,
+      title || 'Your Content',
+      content.trim(),
+      {
+        visualType: visualType as any,
+        visualUrl: mediaUrls?.[0] || undefined,
+        imageUrls: mediaUrls || undefined,
+        pdfUrl: pdfUrl || undefined,
+        hashtags: hashtags || [],
+        source: 'custom',
+        status: 'ready' as any,
+        performancePrediction: {
+          source: 'user-provided',
+          isOwnContent: true,
+        },
+      },
+    );
+
+    return {
+      success: true,
+      content: created,
+    };
   }
 
   private async ensureRefinedBeforeReturn(item: any): Promise<any> {
