@@ -548,9 +548,9 @@ export class GenerationService {
    * Throws 429 (Too Many Requests) when count >= MAX_IN_FLIGHT_PER_USER.
    */
   private async enforceInFlightLimit(userId: string): Promise<void> {
-    // Keep in lockstep with worker-manager cleanup; must exceed BullMQ lockDuration
-    // (600s) so an in-progress 9-minute carousel isn't auto-failed mid-render.
-    const staleAfterMs = Number(process.env.GENERATION_ACTIVE_STALE_MS || '660000');
+    // Default to 5 minutes (300000ms) to match n8n workflow timeout.
+    // Can be increased via GENERATION_ACTIVE_STALE_MS env var for long-running jobs.
+    const staleAfterMs = Number(process.env.GENERATION_ACTIVE_STALE_MS || '300000');
     const existingJobs = await this.generationJobRepository.findByUserId(userId);
     const activeJobs = existingJobs.filter(
       (j) =>
@@ -559,18 +559,33 @@ export class GenerationService {
         j.status === JobStatus.PUBLISHING,
     );
 
+    let cleanedCount = 0;
     for (const staleCandidate of activeJobs) {
       const createdAtMs = new Date(staleCandidate.createdAt as any).getTime();
       const ageMs = Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : 0;
       if (ageMs > staleAfterMs) {
         // Atomic guard: skip if the worker has already finalized the row.
         // See `updateErrorIfStillActive` for rationale.
-        await this.generationJobRepository.updateErrorIfStillActive(
+        const updated = await this.generationJobRepository.updateErrorIfStillActive(
           staleCandidate.id,
-          `Auto-failed stale active job after ${Math.round(ageMs / 1000)}s without completion`,
+          `Auto-failed stale active job after ${Math.round(ageMs / 1000)}s without completion (n8n callback timeout)`,
           staleCandidate.retryCount || 0,
         );
+        if (updated) {
+          cleanedCount++;
+          this.logger.warn(
+            `Cleaned up stale job ${staleCandidate.id} for user ${userId} (age=${Math.round(ageMs / 1000)}s, threshold=${Math.round(staleAfterMs / 1000)}s)`,
+          );
+          // Refund credits for the stale job
+          await this.refundGenerationCredits(userId, staleCandidate.id, 'stale job timeout');
+        }
       }
+    }
+
+    if (cleanedCount > 0) {
+      this.logger.log(
+        `Cleaned up ${cleanedCount} stale jobs for user ${userId} before enforcing in-flight limit`,
+      );
     }
 
     const liveCount = activeJobs.filter((j) => {

@@ -778,4 +778,82 @@ export class AdminController {
       );
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GENERATION JOB CLEANUP
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  @Post('generation/cleanup-stale')
+  @ApiOperation({
+    summary: 'Clean up stale generation jobs that are stuck in active status',
+  })
+  async cleanupStaleGenerationJobs(
+    @Request() req: AuthenticatedRequest,
+    @Body() body?: { userId?: string; maxAgeMinutes?: number },
+  ) {
+    try {
+      const maxAgeMs = Math.max(1, Math.min(body?.maxAgeMinutes ?? 5, 60)) * 60 * 1000;
+      const client = this.supabaseService.getServiceClient();
+      
+      // Build query for stale active jobs
+      let query = client
+        .from('generation_jobs')
+        .select('id, user_id, status, created_at, updated_at')
+        .in('status', ['generating', 'media_generating', 'publishing'])
+        .lt('updated_at', new Date(Date.now() - maxAgeMs).toISOString())
+        .order('updated_at', { ascending: true })
+        .limit(100);
+      
+      if (body?.userId) {
+        query = query.eq('user_id', body.userId);
+      }
+      
+      const { data: staleJobs, error: fetchError } = await query;
+      
+      if (fetchError) {
+        throw new HttpException(fetchError.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+      
+      if (!staleJobs || staleJobs.length === 0) {
+        return {
+          success: true,
+          message: 'No stale jobs found',
+          data: { cleanedCount: 0 },
+        };
+      }
+      
+      // Mark stale jobs as failed
+      const jobIds = staleJobs.map((j: any) => j.id);
+      const { error: updateError } = await client
+        .from('generation_jobs')
+        .update({
+          status: 'failed',
+          error: `Admin cleanup: job was stuck for more than ${Math.round(maxAgeMs / 60000)} minutes`,
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', jobIds)
+        .in('status', ['generating', 'media_generating', 'publishing']);
+      
+      if (updateError) {
+        throw new HttpException(updateError.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+      
+      return {
+        success: true,
+        message: `Cleaned up ${jobIds.length} stale generation jobs`,
+        data: {
+          cleanedCount: jobIds.length,
+          cleanedJobIds: jobIds,
+          maxAgeMinutes: Math.round(maxAgeMs / 60000),
+          cleanedBy: req.user.id,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        error.message || 'Failed to clean up stale jobs',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }

@@ -74,9 +74,9 @@ export class GenerationWorkerManager implements OnModuleInit {
    */
   private async cleanupStaleJobs(): Promise<void> {
     const staleThresholdMs = Number(
-      // Must exceed BullMQ lockDuration (600s) so we never auto-fail a job that
-      // is still legitimately processing inside the worker.
-      process.env.GENERATION_ACTIVE_STALE_MS || '660000', // 11 minutes
+      // Default to 5 minutes (300000ms) to match n8n workflow timeout.
+      // Can be increased via GENERATION_ACTIVE_STALE_MS env var for long-running jobs.
+      process.env.GENERATION_ACTIVE_STALE_MS || '300000',
     );
 
     try {

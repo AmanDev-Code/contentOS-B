@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
 const CACHE_PREFIX = 'app:cache:';
@@ -9,21 +10,25 @@ export class CacheService implements OnModuleInit {
   private redis: Redis | null = null;
   private fallback = new Map<string, { data: any; expires: number }>();
 
+  constructor(private configService: ConfigService) {}
+
   async onModuleInit() {
     try {
-      const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
-      this.logger.log(`CacheService: Connecting to Redis on port ${redisPort}`);
+      const redisPort = this.configService.get<number>('redis.port') || 6379;
+      const redisHost = this.configService.get<string>('redis.host') || 'localhost';
+      const redisPassword = this.configService.get<string>('redis.password') || undefined;
+      this.logger.log(`CacheService: Connecting to Redis at ${redisHost}:${redisPort}`);
       this.redis = new Redis({
-        host: process.env.REDIS_HOST || 'localhost',
+        host: redisHost,
         port: redisPort,
-        password: process.env.REDIS_PASSWORD || undefined,
+        password: redisPassword,
         maxRetriesPerRequest: 3,
         retryStrategy: (times) => Math.min(times * 200, 3000),
         lazyConnect: true,
       });
 
       await this.redis.connect();
-      this.logger.log(`Redis cache connected on port ${redisPort}`);
+      this.logger.log(`Redis cache connected at ${redisHost}:${redisPort}`);
     } catch (error) {
       this.logger.warn(
         'Redis unavailable, using in-memory fallback:',
