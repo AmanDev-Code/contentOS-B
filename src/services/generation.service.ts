@@ -48,13 +48,15 @@ export class GenerationService {
   private getUserQueue(userId: string): Queue {
     if (!this.userQueues.has(userId)) {
       const queueName = `${QUEUE_NAMES.CONTENT_GENERATION}-${userId}`;
+      // Use config service for Redis connection - port comes from REDIS_PORT env var
+      const redisPort = this.configService.get<number>('redis.port');
+      this.logger.log(
+        `Creating queue ${queueName} with Redis port=${redisPort} (from config)`,
+      );
       const queue = new Queue(queueName, {
         connection: {
           host: this.configService.get<string>('redis.host') || 'localhost',
-          port: parseInt(
-            this.configService.get<string>('redis.port') || '6380',
-            10,
-          ),
+          port: redisPort || 6379,
           password:
             this.configService.get<string>('redis.password') || undefined,
         },

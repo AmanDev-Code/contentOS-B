@@ -11,9 +11,11 @@ export class CacheService implements OnModuleInit {
 
   async onModuleInit() {
     try {
+      const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
+      this.logger.log(`CacheService: Connecting to Redis on port ${redisPort}`);
       this.redis = new Redis({
         host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        port: redisPort,
         password: process.env.REDIS_PASSWORD || undefined,
         maxRetriesPerRequest: 3,
         retryStrategy: (times) => Math.min(times * 200, 3000),
@@ -21,7 +23,7 @@ export class CacheService implements OnModuleInit {
       });
 
       await this.redis.connect();
-      this.logger.log('Redis cache connected');
+      this.logger.log(`Redis cache connected on port ${redisPort}`);
     } catch (error) {
       this.logger.warn(
         'Redis unavailable, using in-memory fallback:',

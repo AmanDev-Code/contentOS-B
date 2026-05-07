@@ -32,6 +32,7 @@ import { BrowserPoolService } from '../services/scrapers/browser-pool.service';
 import { SupabaseService } from '../services/supabase.service';
 import { CacheService } from '../services/cache.service';
 import { TrendingHashtagEngineService } from '../services/trending-hashtag-engine.service';
+import { AppSettingsService } from '../services/app-settings.service';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -87,6 +88,7 @@ export class AdminController {
     private readonly supabaseService: SupabaseService,
     private readonly cacheService: CacheService,
     private readonly trendingHashtagEngine: TrendingHashtagEngineService,
+    private readonly appSettingsService: AppSettingsService,
   ) {}
 
   @Post('scraper/purge-inhouse')
@@ -669,4 +671,111 @@ export class AdminController {
   //   // This could check a user_roles table, profile metadata, or environment variables
   //   return false;
   // }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // REDIS / CACHE MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  @Post('redis/flush')
+  @ApiOperation({
+    summary: 'Flush all Redis cache data (FLUSHALL equivalent for app cache)',
+  })
+  async flushRedisCache(@Request() req: AuthenticatedRequest) {
+    try {
+      await this.cacheService.clear();
+      return {
+        success: true,
+        message: 'Redis cache flushed successfully',
+        data: {
+          flushedAt: new Date().toISOString(),
+          flushedBy: req.user.id,
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to flush Redis cache',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // APP SETTINGS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  @Get('settings/free-credit-limit')
+  @ApiOperation({ summary: 'Get the global free user credit limit' })
+  async getFreeCreditLimit() {
+    try {
+      const limit = await this.appSettingsService.getFreeCreditLimit();
+      return {
+        success: true,
+        data: {
+          freeCreditLimit: limit,
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to get free credit limit',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Put('settings/free-credit-limit')
+  @ApiOperation({ summary: 'Update the global free user credit limit' })
+  async setFreeCreditLimit(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: { limit: number },
+  ) {
+    const { limit } = body;
+
+    if (limit === undefined || limit === null) {
+      throw new HttpException('limit is required', HttpStatus.BAD_REQUEST);
+    }
+
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 0) {
+      throw new HttpException(
+        'limit must be a non-negative integer',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (limit > 100000) {
+      throw new HttpException(
+        'limit cannot exceed 100,000',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const success = await this.appSettingsService.setFreeCreditLimit(
+        limit,
+        req.user.id,
+      );
+
+      if (!success) {
+        throw new HttpException(
+          'Failed to update free credit limit',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      return {
+        success: true,
+        message: 'Free credit limit updated successfully',
+        data: {
+          freeCreditLimit: limit,
+          updatedAt: new Date().toISOString(),
+          updatedBy: req.user.id,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        error.message || 'Failed to update free credit limit',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }

@@ -30,7 +30,8 @@ export class GenerationJobRepository {
       .insert({
         user_id: userId,
         status: JobStatus.GENERATING,
-        progress: 0,
+        progress: 5,
+        current_stage: 'initializing',
         webhook_url: webhookUrl,
         retry_count: 0,
       })
@@ -111,6 +112,7 @@ export class GenerationJobRepository {
       content_id: contentId,
       status,
       progress: 100,
+      current_stage: 'done',
       response,
       // Clear any prior `error` (e.g. from an earlier sweeper pass that lost
       // the race with this completion) so the row's final state is internally
@@ -218,8 +220,8 @@ export class GenerationJobRepository {
         'media_generating',
         'publishing',
       ])
-      .lt('created_at', threshold)
-      .order('created_at', { ascending: true })
+      .lt('updated_at', threshold)
+      .order('updated_at', { ascending: true })
       .limit(50);
 
     if (error) {

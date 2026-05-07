@@ -204,6 +204,24 @@ export class GenerationController {
     return this.generationService.cancelJob(jobId, userId);
   }
 
+  @Delete('content/:contentId')
+  @ApiOperation({ summary: 'Soft-delete generated content' })
+  async deleteContent(@Request() req, @Param('contentId') contentId: string) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    const content = await this.generatedContentRepository.findById(contentId);
+    if (!content) {
+      throw new HttpException('Content not found', HttpStatus.NOT_FOUND);
+    }
+    if ((content as any).user_id !== userId) {
+      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+    }
+    await this.generatedContentRepository.softDelete(contentId);
+    return { success: true, message: 'Content deleted' };
+  }
+
   @Post('content/:contentId/regenerate')
   @ApiOperation({ summary: 'Regenerate carousel slides or images for existing content' })
   async regenerateMedia(

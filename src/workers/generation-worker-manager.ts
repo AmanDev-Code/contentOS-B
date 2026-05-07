@@ -34,17 +34,30 @@ export class GenerationWorkerManager implements OnModuleInit {
     private readonly generationWorker: GenerationWorker,
   ) {
     // Create Redis client for job completion signaling
+    // Port comes from REDIS_PORT env var via config service (DragonflyDB uses 6380)
+    const redisPort = this.configService.get<number>('redis.port') || 6379;
+    this.logger.log(`GenerationWorkerManager: Connecting to Redis on port ${redisPort}`);
     this.redis = new Redis({
       host: this.configService.get<string>('redis.host') || 'localhost',
-      port: parseInt(
-        this.configService.get<string>('redis.port') || '6379',
-        10,
-      ),
+      port: redisPort,
       password: this.configService.get<string>('redis.password') || undefined,
     });
   }
 
   async onModuleInit() {
+    // Log configuration for debugging
+    const baseUrl = this.configService.get<string>('app.baseUrl');
+    const n8nWebhookUrl = this.configService.get<string>('n8n.webhookUrl');
+    const redisPort = this.configService.get<number>('redis.port');
+    this.logger.log(
+      JSON.stringify({
+        event: 'worker_manager.init',
+        baseUrl,
+        n8nWebhookUrl,
+        redisPort,
+        hasWebhookSecret: !!this.configService.get<string>('n8n.webhookSecret'),
+      }),
+    );
     this.logger.log('Generation Worker Manager initialized');
     // Workers will be created dynamically when users create jobs
 
@@ -75,8 +88,8 @@ export class GenerationWorkerManager implements OnModuleInit {
       let markedCount = 0;
       let racedCount = 0;
       for (const job of staleJobs) {
-        const createdAtMs = new Date(job.createdAt as any).getTime();
-        const ageMs = Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : 0;
+        const updatedAtMs = new Date((job.updatedAt || job.createdAt) as any).getTime();
+        const ageMs = Number.isFinite(updatedAtMs) ? Date.now() - updatedAtMs : 0;
 
         // Atomic guard: if the worker wrote `ready`/`failed` between the SELECT
         // above and this UPDATE, the row is no longer in an active status and
@@ -120,6 +133,7 @@ export class GenerationWorkerManager implements OnModuleInit {
   getWorkerForUser(userId: string): Worker {
     if (!this.workers.has(userId)) {
       const queueName = `${QUEUE_NAMES.CONTENT_GENERATION}-${userId}`;
+      const redisPort = this.configService.get<number>('redis.port') || 6379;
 
       const worker = new Worker(
         queueName,
@@ -127,10 +141,7 @@ export class GenerationWorkerManager implements OnModuleInit {
         {
           connection: {
             host: this.configService.get<string>('redis.host') || 'localhost',
-            port: parseInt(
-              this.configService.get<string>('redis.port') || '6379',
-              10,
-            ),
+            port: redisPort,
             password:
               this.configService.get<string>('redis.password') || undefined,
           },
@@ -196,8 +207,28 @@ export class GenerationWorkerManager implements OnModuleInit {
     }
 
     if (preferences?.jobType === 'custom_topic') {
+      this.logger.log(
+        JSON.stringify({
+          event: 'generation.flow_routing',
+          jobId,
+          flow: 'custom_topic_direct',
+          contentType: preferences?.contentType,
+          reason: 'jobType=custom_topic → OpenAI direct (no n8n)',
+        }),
+      );
       return this.generationWorker.processCustomTopic(job);
     }
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'generation.flow_routing',
+        jobId,
+        flow: 'viral_n8n',
+        contentType: preferences?.contentType,
+        jobType: preferences?.jobType,
+        reason: 'jobType≠custom_topic → n8n webhook pipeline',
+      }),
+    );
 
     const existingJob = await this.generationJobRepository.findById(jobId);
     if (existingJob?.status === JobStatus.READY && existingJob.contentId) {
@@ -247,8 +278,10 @@ export class GenerationWorkerManager implements OnModuleInit {
 
       // Build callback URL for n8n to call when job completes
       const baseUrl =
-        this.configService.get<string>('app.baseUrl') ||
-        'http://localhost:3000';
+        this.configService.get<string>('app.baseUrl');
+      if (!baseUrl) {
+        throw new Error('BACKEND_URL env var is required for n8n callback');
+      }
       const webhookSecret = this.configService.get<string>('n8n.webhookSecret') || '';
       const callbackQuery = new URLSearchParams({ jobId });
       if (webhookSecret) {
@@ -261,8 +294,26 @@ export class GenerationWorkerManager implements OnModuleInit {
       const useCarousel = ct === 'carousel' && carouselUrl.length > 0;
 
       this.logger.log(
-        `n8n route: contentType=${String(ct)} jobType=${String(preferences?.jobType)} ` +
-          `→ ${useCarousel ? `carousel webhook (${carouselUrl})` : 'default webhook'} | callback=${callbackUrl}`,
+        JSON.stringify({
+          event: 'generation.n8n.config',
+          jobId,
+          baseUrl,
+          callbackUrl,
+          n8nWebhookUrl: this.configService.get<string>('n8n.webhookUrl'),
+          carouselWebhookUrl: carouselUrl,
+          useCarousel,
+          contentType: ct,
+          jobType: preferences?.jobType,
+          hasWebhookSecret: !!webhookSecret,
+        }),
+      );
+
+      // Update progress to 15% before triggering n8n
+      await this.generationJobRepository.updateStatus(
+        jobId,
+        JobStatus.GENERATING,
+        15,
+        JOB_STAGES.N8N_TRIGGERED,
       );
 
       const trigger = await this.n8nService.triggerContentGeneration(
@@ -461,7 +512,7 @@ export class GenerationWorkerManager implements OnModuleInit {
         jobId,
         JobStatus.GENERATING,
         30,
-        JOB_STAGES.CONTENT_GENERATION,
+        JOB_STAGES.WAITING_FOR_CALLBACK,
       );
 
       this.logger.log(

@@ -130,8 +130,12 @@ export class AuthController {
     @Query('error') oauthError?: string,
   ) {
     const frontendUrl =
-      this.configService.get<string>('frontendUrl') ||
-      'http://localhost:5173';
+      this.configService.get<string>('frontendUrl');
+
+    if (!frontendUrl) {
+      this.logger.error('FRONTEND_URL env var is not set');
+      return { url: '/auth?error=server_misconfigured' };
+    }
 
     if (oauthError || !code || !state) {
       this.logger.warn(

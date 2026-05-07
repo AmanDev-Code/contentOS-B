@@ -54,11 +54,14 @@ export interface LinkedInInsightsPayload {
 
 @Injectable()
 export class LinkedinService {
-  /** Known LinkedIn Marketing API versions (YYYYMM). Avoid calendar-month guesses — they are often not published yet. */
+  /** Known LinkedIn Marketing API versions (YYYYMM). Updated May 2026 — older versions (202504 and earlier) are sunset. */
   private static readonly LINKEDIN_VERSION_FALLBACKS: readonly string[] = [
-    '202411',
-    '202410',
-    '202401',
+    '202604',
+    '202603',
+    '202602',
+    '202601',
+    '202511',
+    '202510',
   ];
 
   private readonly logger = new Logger(LinkedinService.name);
@@ -79,7 +82,7 @@ export class LinkedinService {
     this.redirectUri =
       this.configService.get<string>('linkedin.redirectUri') || '';
     this.linkedinApiVersion =
-      this.configService.get<string>('LINKEDIN_API_VERSION') || '202401';
+      this.configService.get<string>('LINKEDIN_API_VERSION') || '202604';
   }
 
   private toLinkedinText(value: unknown, fallback: string): string {
@@ -1140,21 +1143,34 @@ export class LinkedinService {
     }
 
     try {
-      const personalMetrics = await this.getProfileMetrics(userId);
-      const posts = await this.getPostAnalytics(userId, 30);
-      const orgAnalytics = await this.getOrganizationAnalytics(userId);
+      // Run all LinkedIn API calls in parallel for faster response
+      const [personalMetrics, posts, orgAnalytics] = await Promise.all([
+        this.getProfileMetrics(userId).catch((e) => {
+          this.logger.warn('getProfileMetrics failed:', e.message);
+          return { followers: 0 };
+        }),
+        this.getPostAnalytics(userId, 30).catch((e) => {
+          this.logger.warn('getPostAnalytics failed:', e.message);
+          return null;
+        }),
+        this.getOrganizationAnalytics(userId).catch((e) => {
+          this.logger.warn('getOrganizationAnalytics failed:', e.message);
+          return { followers: 0, posts: 0, engagement: 0 };
+        }),
+      ]);
 
       const followers =
         orgAnalytics.followers > 0
           ? orgAnalytics.followers
           : personalMetrics.followers;
+      const postsArray = posts ?? [];
       const postsCount =
-        orgAnalytics.posts > 0 ? orgAnalytics.posts : (posts?.length ?? 0);
+        orgAnalytics.posts > 0 ? orgAnalytics.posts : postsArray.length;
       const avgEngagement =
         orgAnalytics.posts > 0
           ? orgAnalytics.engagement
           : postsCount > 0
-            ? posts!.reduce((sum, post) => sum + post.engagementRate, 0) /
+            ? postsArray.reduce((sum, post) => sum + post.engagementRate, 0) /
               postsCount
             : 0;
 

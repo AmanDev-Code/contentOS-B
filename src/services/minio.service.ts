@@ -125,6 +125,13 @@ export class MinioService implements OnModuleInit {
         return `${publicUrl.replace(/\/$/, '')}/${bucketName}/${objectName}`;
       }
 
+      const nodeEnv = process.env.NODE_ENV || 'development';
+      if (nodeEnv === 'production') {
+        throw new Error(
+          'MINIO_PUBLIC_URL is required in production. Media assets will not be reachable by LinkedIn without a public URL.',
+        );
+      }
+
       const endpoint =
         this.configService.get<string>('minio.endpoint') ||
         process.env.MINIO_ENDPOINT ||

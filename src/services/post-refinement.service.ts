@@ -577,9 +577,20 @@ export class PostRefinementService {
     text: string,
     sourceUrl?: string,
   ): string {
-    if (!sourceUrl) return text;
+    if (!sourceUrl) {
+      // Strip any placeholder patterns when no source URL is provided
+      return text
+        .replace(/🔗\s*\[Source URL\]/gi, '')
+        .replace(/🔗\s*\[Source\]/gi, '')
+        .replace(/\[Source URL\]/gi, '')
+        .replace(/\[link to [^\]]+\]/gi, '')
+        .replace(/\[source\]/gi, '')
+        .replace(/\[read more\]/gi, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
     const placeholderRegex =
-      /\[link to [^\]]+\]|\[source\]|\[read more\]/i;
+      /\[link to [^\]]+\]|\[source\]|\[read more\]|\[Source URL\]/i;
     if (!placeholderRegex.test(text)) return text;
     return text.replace(placeholderRegex, sourceUrl);
   }
@@ -776,6 +787,9 @@ export class PostRefinementService {
 
     const systemPrompt =
       'You are a world-class LinkedIn ghostwriter. Rewrite posts to feel deeply human, emotionally intelligent, and unique per request. Vary structure every time (do not reuse the same outline). Keep facts and intent intact, avoid hallucinations, and produce polished LinkedIn-ready content.';
+    const sourceUrlLine = sourceUrl
+      ? `Source URL: ${sourceUrl}`
+      : 'Source URL: (none provided — do NOT add any source URL placeholder or link to the content)';
     const userPrompt = [
       'Rewrite this content for LinkedIn with strong human voice and emotional clarity.',
       'Requirements:',
@@ -788,12 +802,12 @@ export class PostRefinementService {
       '- Put all hashtags only in the "hashtags" JSON array — do not paste hashtag lines into the content body.',
       '- Emphasize key phrases using **bold**, *italic*, and optionally __underline__ or ==highlight== where meaningful.',
       '- End with a thoughtful CTA question.',
-      '- Include the source URL once if provided.',
+      '- Include the source URL once ONLY if a real URL is provided. If no source URL is provided, do NOT add any placeholder like "[Source URL]" or "🔗 [Source URL]".',
       '- Include relevant hashtags at end; preserve provided hashtags unless clearly irrelevant.',
       '- Keep output under 2200 characters.',
       '',
       `Title: ${input.content.title || ''}`,
-      `Source URL: ${sourceUrl || ''}`,
+      sourceUrlLine,
       `Provided hashtags: ${seedHashtags.join(' ')}`,
       '',
       'Original content:',

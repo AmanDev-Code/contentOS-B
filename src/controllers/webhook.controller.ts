@@ -36,12 +36,12 @@ export class WebhookController {
     private postRefinementService: PostRefinementService,
   ) {
     // Create Redis client for signaling job completion to workers
+    // Port comes from REDIS_PORT env var via config service (DragonflyDB uses 6380)
+    const redisPort = this.configService.get<number>('redis.port') || 6379;
+    this.logger.log(`WebhookController: Connecting to Redis on port ${redisPort}`);
     this.redis = new Redis({
       host: this.configService.get<string>('redis.host') || 'localhost',
-      port: parseInt(
-        this.configService.get<string>('redis.port') || '6379',
-        10,
-      ),
+      port: redisPort,
       password: this.configService.get<string>('redis.password') || undefined,
     });
   }
@@ -137,6 +137,22 @@ export class WebhookController {
   @Post('n8n-callback')
   @ApiOperation({ summary: 'Receive callback from n8n workflow' })
   async handleN8nCallback(@Req() req: Request, @Body() body: unknown) {
+    this.logger.log(
+      JSON.stringify({
+        event: 'n8n.callback.received',
+        method: req.method,
+        url: req.url,
+        queryJobId: (req.query as any)?.jobId || '(none)',
+        hasBody: body !== undefined && body !== null,
+        bodyType: Array.isArray(body) ? 'array' : typeof body,
+        bodyKeys: body && typeof body === 'object' && !Array.isArray(body)
+          ? Object.keys(body as Record<string, unknown>).slice(0, 10)
+          : [],
+        contentType: req.headers['content-type'] || '(none)',
+        hasSecretHeader: !!(req.headers['x-n8n-webhook-secret']),
+        hasSecretQuery: !!(req.query as any)?.secret,
+      }),
+    );
     this.assertN8nWebhookSecret(req);
     let payload: ReturnType<typeof normalizeN8nCallbackBody>;
     try {

@@ -463,8 +463,11 @@ export class EmailService {
    * Send welcome email for new users
    */
   async sendWelcomeEmail(email: string, userName: string): Promise<boolean> {
-    const frontendUrl =
-      this.configService.get('frontendUrl') || 'http://localhost:5173';
+    const frontendUrl = this.configService.get('frontendUrl');
+    if (!frontendUrl) {
+      this.logger.error('FRONTEND_URL env var is not set — skipping welcome email');
+      return false;
+    }
     const result = await this.sendEmail({
       to: email,
       subject: 'Welcome to Trndinn - Your AI Content Journey Begins!',

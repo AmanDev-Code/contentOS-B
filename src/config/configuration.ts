@@ -1,10 +1,10 @@
 export default () => ({
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  frontendUrl: process.env.FRONTEND_URL || '',
 
   app: {
-    baseUrl: process.env.BACKEND_URL || 'http://localhost:3000',
+    baseUrl: process.env.BACKEND_URL || '',
   },
 
   supabase: {
@@ -46,12 +46,6 @@ export default () => ({
     timeoutMs: parseInt(process.env.AI_REFINEMENT_TIMEOUT_MS || '12000', 10),
     referer: process.env.AI_REFINEMENT_REFERER || '',
     appTitle: process.env.AI_REFINEMENT_APP_TITLE || 'Trndinn',
-  },
-
-  google: {
-    oauthCallbackUrl:
-      process.env.GOOGLE_OAUTH_CALLBACK_URL ||
-      'http://localhost:3000/auth/google/callback',
   },
 
   linkedin: {

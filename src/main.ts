@@ -32,7 +32,8 @@ async function bootstrap() {
     },
   });
 
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = process.env.FRONTEND_URL || '';
+  const isDev = process.env.NODE_ENV !== 'production';
   const corsOriginsFromEnv = (process.env.CORS_ORIGINS || '')
     .split(',')
     .map((v) => v.trim())
@@ -44,18 +45,14 @@ async function bootstrap() {
       if (!origin) return callback(null, true);
 
       const exactAllowed = new Set([
-        frontendUrl,
+        ...(frontendUrl ? [frontendUrl] : []),
         ...corsOriginsFromEnv,
-        'http://localhost:8080',
-        'http://localhost:3000',
-        'http://localhost:5173',
-        'https://alfonso-pseudooriental-cyclonically.ngrok-free.dev',
       ]);
 
       const isLocalhost = /^http:\/\/localhost:\d+$/.test(origin);
       const isNgrok = /^https:\/\/[a-z0-9-]+\.ngrok-free\.dev$/.test(origin);
 
-      if (exactAllowed.has(origin) || isLocalhost || isNgrok) {
+      if (exactAllowed.has(origin) || (isDev && isLocalhost) || isNgrok) {
         return callback(null, true);
       }
       return callback(new Error(`CORS blocked origin: ${origin}`), false);
@@ -101,10 +98,28 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
 
   const port = process.env.PORT || 3000;
+
+  if (process.env.NODE_ENV === 'production') {
+    const required = [
+      'FRONTEND_URL',
+      'BACKEND_URL',
+      'SUPABASE_URL',
+      'SUPABASE_SERVICE_ROLE_KEY',
+      'MINIO_PUBLIC_URL',
+    ];
+    const missing = required.filter((k) => !process.env[k]);
+    if (missing.length > 0) {
+      console.error(
+        `FATAL: Missing required env vars for production: ${missing.join(', ')}`,
+      );
+      process.exit(1);
+    }
+  }
+
   await app.listen(port, '0.0.0.0');
 
-  console.log(`🚀 Trndinn Backend running on: http://localhost:${port}`);
-  console.log(`📚 API Documentation: http://localhost:${port}/api`);
+  console.log(`Trndinn Backend running on port ${port}`);
+  console.log(`API Documentation: /api`);
 }
 
 bootstrap();

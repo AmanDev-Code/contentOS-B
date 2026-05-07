@@ -8,14 +8,18 @@ import {
   Redirect,
   UseGuards,
   BadRequestException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { LinkedinService } from '../services/linkedin.service';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
 import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
 import { LinkedinOAuthStateService } from '../services/linkedin-oauth-state.service';
 import { ImmediatePostPublishService } from '../services/immediate-post-publish.service';
+import { CacheService } from '../services/cache.service';
 
 /**
  * OAuth callback has no AuthGuard (browser redirect). Start flow uses
@@ -28,6 +32,8 @@ export class LinkedinController {
     private readonly linkedinService: LinkedinService,
     private readonly linkedinOAuthStateService: LinkedinOAuthStateService,
     private readonly immediatePostPublishService: ImmediatePostPublishService,
+    private readonly configService: ConfigService,
+    private readonly cacheService: CacheService,
   ) {}
 
   @Get('auth')
@@ -37,7 +43,13 @@ export class LinkedinController {
   })
   @Redirect()
   deprecatedInitiateAuth() {
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = this.configService.get<string>('frontendUrl');
+    if (!frontendUrl) {
+      throw new HttpException(
+        'FRONTEND_URL env var is not set',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
     return {
       url: `${frontendUrl}/settings?linkedin=error&reason=deprecated_connect_flow`,
     };
@@ -69,7 +81,12 @@ export class LinkedinController {
     @Query('error') oauthError?: string,
     @Query('error_description') oauthErrorDescription?: string,
   ) {
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = this.configService.get<string>('frontendUrl');
+    if (!frontendUrl) {
+      return {
+        url: '/settings?linkedin=error&reason=server_misconfigured',
+      };
+    }
 
     if (oauthError) {
       const reason = encodeURIComponent(
@@ -178,7 +195,17 @@ export class LinkedinController {
   @ApiOperation({ summary: 'Get LinkedIn metrics for dashboard' })
   async getDashboardMetrics(@Request() req) {
     const userId = req.user?.id;
-    return this.linkedinService.getDashboardMetrics(userId);
+    
+    // Cache dashboard metrics for 60 seconds to avoid hammering LinkedIn API
+    const cacheKey = `linkedin:dashboard:${userId}`;
+    const cached = await this.cacheService.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
+    const result = await this.linkedinService.getDashboardMetrics(userId);
+    await this.cacheService.set(cacheKey, result, 60);
+    return result;
   }
 
   @Get('insights')

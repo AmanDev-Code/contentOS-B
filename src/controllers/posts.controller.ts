@@ -455,6 +455,7 @@ export class PostsController {
           .select('*')
           .eq('user_id', userId)
           .eq('publish_status', 'published')
+          .is('deleted_at', null)
           .gte('published_at', startDate.toISOString())
           .lte('published_at', endDate.toISOString());
 
@@ -540,6 +541,7 @@ export class PostsController {
         .select('*')
         .eq('user_id', userId)
         .eq('publish_status', 'published')
+        .is('deleted_at', null)
         .gte('published_at', startDate.toISOString())
         .lte('published_at', endDate.toISOString());
 
@@ -737,6 +739,21 @@ export class PostsController {
         throw new Error(`Failed to cancel post: ${updateError.message}`);
       }
 
+      // Also update the generated_content publish_status to 'cancelled' so it shows correctly
+      if (scheduledPost.content_id) {
+        await this.postSchedulingService['supabaseService']
+          .getServiceClient()
+          .from('generated_content')
+          .update({
+            publish_status: 'cancelled',
+            scheduled_for: null,
+            is_scheduled: false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', scheduledPost.content_id)
+          .eq('user_id', userId);
+      }
+
       await this.cacheService.invalidateUser(userId);
 
       return {
@@ -799,6 +816,19 @@ export class PostsController {
 
       if (deleteError) {
         throw new Error(`Failed to delete post: ${deleteError.message}`);
+      }
+
+      // Soft-delete the generated content so it no longer appears in recent generations
+      if (scheduledPost.content_id) {
+        await this.postSchedulingService['supabaseService']
+          .getServiceClient()
+          .from('generated_content')
+          .update({
+            deleted_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', scheduledPost.content_id)
+          .eq('user_id', userId);
       }
 
       await this.cacheService.invalidateUser(userId);

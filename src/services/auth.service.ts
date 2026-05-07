@@ -545,9 +545,15 @@ export class AuthService {
    */
   async initiateGoogleOAuth(): Promise<{ url: string }> {
     const supabaseUrl = this.configService.get<string>('supabase.url') ?? '';
-    const redirectTo =
-      this.configService.get<string>('google.oauthCallbackUrl') ??
-      'http://localhost:8080/auth/callback';
+    const frontendUrl = this.configService.get<string>('frontendUrl');
+
+    if (!frontendUrl) {
+      throw new Error(
+        'FRONTEND_URL env var is required for Google OAuth redirect.',
+      );
+    }
+
+    const redirectTo = `${frontendUrl}/auth/callback`;
 
     // Supabase handles PKCE + state entirely on its own side (the registered
     // redirect URI in Google Console points to Supabase's /auth/v1/callback).

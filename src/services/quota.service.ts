@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SupabaseService } from './supabase.service';
 import { CacheService } from './cache.service';
+import { AppSettingsService } from './app-settings.service';
 
 export interface UserQuota {
   userId: string;
@@ -23,7 +24,7 @@ export interface QuotaLimits {
 export class QuotaService {
   private readonly logger = new Logger(QuotaService.name);
   private readonly quotaLimits: QuotaLimits = {
-    free: 50,
+    free: 50, // Default, will be overridden by app settings
     standard: 500,
     pro: 2000,
     ultimate: 10000,
@@ -32,7 +33,12 @@ export class QuotaService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly cacheService: CacheService,
+    private readonly appSettingsService: AppSettingsService,
   ) {}
+
+  private async getFreeCreditLimit(): Promise<number> {
+    return this.appSettingsService.getFreeCreditLimit();
+  }
 
   /** Normalize view rows, Redis cache JSON, or legacy shapes into `UserQuota`. */
   private coerceUserQuota(
@@ -79,6 +85,9 @@ export class QuotaService {
       }
     }
 
+    // Get dynamic free credit limit
+    const freeCreditLimit = await this.getFreeCreditLimit();
+
     try {
       // Use the user_quota_view for efficient quota calculation
       const { data: quotaData, error: quotaError } = await this.supabaseService
@@ -94,9 +103,9 @@ export class QuotaService {
           console.log('No subscription found, using free plan defaults');
           return {
             userId,
-            totalCredits: this.quotaLimits.free,
+            totalCredits: freeCreditLimit,
             usedCredits: 0,
-            remainingCredits: this.quotaLimits.free,
+            remainingCredits: freeCreditLimit,
             percentageUsed: 0,
             planType: 'free',
             resetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -105,13 +114,20 @@ export class QuotaService {
         throw new Error(`Failed to get quota: ${quotaError.message}`);
       }
 
+      // For free plan users, use the dynamic free credit limit
+      const isFreeUser = quotaData.plan_type === 'free';
+      const totalCredits = isFreeUser ? freeCreditLimit : quotaData.total_credits;
+      const usedCredits = quotaData.used_credits;
+      const remainingCredits = totalCredits - usedCredits;
+      const percentageUsed = totalCredits > 0 ? Math.round((usedCredits / totalCredits) * 100 * 100) / 100 : 0;
+
       const quota = this.coerceUserQuota(
         {
           userId: quotaData.user_id,
-          totalCredits: quotaData.total_credits,
-          usedCredits: quotaData.used_credits,
-          remainingCredits: quotaData.remaining_credits,
-          percentageUsed: quotaData.percentage_used,
+          totalCredits,
+          usedCredits,
+          remainingCredits,
+          percentageUsed,
           planType: quotaData.plan_type,
           resetDate: quotaData.reset_date,
         },
@@ -128,9 +144,9 @@ export class QuotaService {
       // Return default free plan quota on error
       return {
         userId,
-        totalCredits: this.quotaLimits.free,
+        totalCredits: freeCreditLimit,
         usedCredits: 0,
-        remainingCredits: this.quotaLimits.free,
+        remainingCredits: freeCreditLimit,
         percentageUsed: 0,
         planType: 'free',
         resetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now

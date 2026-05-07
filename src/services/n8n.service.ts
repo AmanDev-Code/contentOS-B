@@ -7,10 +7,12 @@ export class N8nService {
   private readonly logger = new Logger(N8nService.name);
   private readonly webhookUrl: string;
   private readonly apiKey: string;
+  private readonly webhookSecret: string;
 
   constructor(private configService: ConfigService) {
     this.webhookUrl = this.configService.get<string>('n8n.webhookUrl') || '';
     this.apiKey = this.configService.get<string>('n8n.apiKey') || '';
+    this.webhookSecret = this.configService.get<string>('n8n.webhookSecret') || '';
   }
 
   async triggerContentGeneration(
@@ -31,11 +33,35 @@ export class N8nService {
         headers['Authorization'] = `Bearer ${this.apiKey}`;
       }
 
+      if (this.webhookSecret) {
+        headers['X-N8N-Webhook-Secret'] = this.webhookSecret;
+      }
+
+      this.logger.log(
+        JSON.stringify({
+          event: 'n8n.trigger.request',
+          jobId: payload.jobId,
+          targetUrl,
+          callbackUrl: payload.callbackUrl || payload.callback_url || '(none)',
+          hasApiKey: !!this.apiKey,
+          hasWebhookSecret: !!this.webhookSecret,
+          payloadKeys: Object.keys(payload),
+          // Log the full callback URL for debugging
+          fullCallbackUrl: payload.callbackUrl,
+        }),
+      );
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+
       const response = await fetch(targetUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -74,6 +100,12 @@ export class N8nService {
         data: parsed,
       };
     } catch (error) {
+      if (error.name === 'AbortError') {
+        this.logger.error(
+          `n8n webhook timed out after 60s for job ${payload.jobId} (url=${options?.webhookUrlOverride?.trim() || this.webhookUrl})`,
+        );
+        throw new Error('n8n webhook request timed out after 60 seconds');
+      }
       this.logger.error(`Failed to trigger n8n webhook: ${error.message}`);
       throw error;
     }

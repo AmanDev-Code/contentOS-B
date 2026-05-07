@@ -49,7 +49,10 @@ export const HASHTAG_JOB_NAMES = {
 };
 
 export const JOB_STAGES = {
+  INITIALIZING: 'initializing',
   TOPIC_DISCOVERY: 'topic_discovery',
+  N8N_TRIGGERED: 'n8n_triggered',
+  WAITING_FOR_CALLBACK: 'waiting_for_callback',
   CONTENT_GENERATION: 'content_generation',
   IMAGE_GENERATION: 'image_generation',
   CAROUSEL_GENERATION: 'carousel_generation',

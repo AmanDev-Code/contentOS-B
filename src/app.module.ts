@@ -33,7 +33,9 @@ import { BlogController } from './controllers/blog.controller';
 import { AdminBlogController } from './controllers/admin-blog.controller';
 import { AdminSeoPagesController } from './controllers/admin-seo-pages.controller';
 import { FeedbackController } from './controllers/feedback.controller';
+import { UserFeedbackController } from './controllers/user-feedback.controller';
 import { PlatformAdminFeedbackController } from './controllers/platform-admin-feedback.controller';
+import { PlatformAdminUserFeedbackController } from './controllers/platform-admin-user-feedback.controller';
 import { PlatformAccessController } from './controllers/platform-access.controller';
 import { PlatformGrantsController } from './controllers/platform-grants.controller';
 import { PlatformUsersController } from './controllers/platform-users.controller';
@@ -43,6 +45,7 @@ import {
   AdminMaintenanceController,
 } from './controllers/maintenance.controller';
 import { MaintenanceService } from './services/maintenance.service';
+import { AppSettingsService } from './services/app-settings.service';
 
 import { SupabaseService } from './services/supabase.service';
 import { GenerationService } from './services/generation.service';
@@ -78,6 +81,7 @@ import { CareersJobCopyAiService } from './services/careers-job-copy-ai.service'
 import { BlogService } from './services/blog.service';
 import { BlogManagementGuard } from './guards/blog-management.guard';
 import { FeedbackService } from './services/feedback.service';
+import { UserFeedbackService } from './services/user-feedback.service';
 import { PlatformAccessService } from './services/platform-access.service';
 import { FeedbackQueueBootstrapService } from './services/feedback-queue-bootstrap.service';
 import { PlatformStaffGuard } from './guards/platform-staff.guard';
@@ -185,7 +189,9 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     AdminBlogController,
     AdminSeoPagesController,
     FeedbackController,
+    UserFeedbackController,
     PlatformAdminFeedbackController,
+    PlatformAdminUserFeedbackController,
     PlatformAccessController,
     PlatformGrantsController,
     PlatformUsersController,
@@ -227,6 +233,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     BlogService,
     BlogManagementGuard,
     FeedbackService,
+    UserFeedbackService,
     PlatformAccessService,
     PlatformStaffGuard,
     FeedbackQueueBootstrapService,
@@ -260,6 +267,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     CarouselTrainingCaptureService,
     OpenAIRateLimiterService,
     MaintenanceService,
+    AppSettingsService,
   ],
 })
 export class AppModule implements NestModule {

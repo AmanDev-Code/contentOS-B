@@ -115,8 +115,10 @@ export class GenerationWorker extends WorkerHost {
 
       // Build callback URL for n8n to call when job completes
       const baseUrl =
-        this.configService.get<string>('app.baseUrl') ||
-        'http://localhost:3000';
+        this.configService.get<string>('app.baseUrl');
+      if (!baseUrl) {
+        throw new Error('BACKEND_URL env var is required for n8n callback');
+      }
       const webhookSecret = this.configService.get<string>('n8n.webhookSecret') || '';
       const callbackQuery = new URLSearchParams({ jobId });
       if (webhookSecret) {
@@ -369,15 +371,16 @@ export class GenerationWorker extends WorkerHost {
 
     try {
       emitProgress('validating', 'running', 5);
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 10, 'Validating topic');
+      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 10, 'validating');
       await job.updateProgress(10);
       emitProgress('validating', 'succeeded', 8);
 
       emitProgress('reserving_credits', 'running', 10);
+      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 15, 'reserving_credits');
       emitProgress('reserving_credits', 'succeeded', 15);
 
       emitProgress('generating_text', 'running', 20);
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 25, 'Generating text');
+      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 25, 'generating_text');
       await job.updateProgress(25);
 
       if (preferences.contentType === 'carousel' && preferences.trainingDataCaptureOptIn) {
@@ -451,7 +454,7 @@ export class GenerationWorker extends WorkerHost {
               jobId,
               JobStatus.GENERATING,
               46,
-              stage,
+              'enhancing_text',
             );
           },
           onTextEnhancementComplete: (meta) => {
@@ -535,7 +538,7 @@ export class GenerationWorker extends WorkerHost {
           },
         });
       }
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 50, 'Text generated');
+      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 50, 'composing_pages');
       await job.updateProgress(50);
 
       let mediaUrls: string[] = [];
@@ -844,6 +847,7 @@ export class GenerationWorker extends WorkerHost {
       }
 
       emitProgress('saving', 'running', 85);
+      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 85, 'saving');
 
       const contentRecord = await this.generatedContentRepository.create(
         userId,
@@ -884,6 +888,8 @@ export class GenerationWorker extends WorkerHost {
       );
 
       emitProgress('saving', 'succeeded', 95);
+
+      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 95, 'done');
 
       await this.generationJobRepository.updateWithContent(
         jobId,
