@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -531,5 +533,59 @@ export class PlatformUsersController {
         error.message || 'Failed to fetch onboarding responses',
       );
     }
+  }
+
+  @Delete(':userId')
+  @UseGuards(AdminGuard)
+  @ApiOperation({
+    summary: 'Delete a user completely (super-admin). Cascades to all related data.',
+  })
+  async deleteUser(
+    @Request() req: AuthReq,
+    @Param('userId') userId: string,
+  ) {
+    if (req.user.id === userId) {
+      throw new ForbiddenException('Cannot delete your own account');
+    }
+
+    const client = this.supabaseService.getServiceClient();
+
+    const { data: profile, error: loadErr } = await client
+      .from('profiles')
+      .select('id, username, full_name')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (loadErr) {
+      throw new BadRequestException(loadErr.message);
+    }
+    if (!profile) {
+      throw new NotFoundException('User not found');
+    }
+
+    const userIdentifier =
+      profile.username || profile.full_name || userId.slice(0, 8);
+
+    const { error: deleteErr } = await client.auth.admin.deleteUser(userId);
+
+    if (deleteErr) {
+      console.error(
+        `[AdminDeleteUser] Failed to delete user ${userId}:`,
+        deleteErr,
+      );
+      throw new BadRequestException(
+        `Failed to delete user: ${deleteErr.message}`,
+      );
+    }
+
+    console.log(
+      `[AdminDeleteUser] User deleted by admin ${req.user.id}: userId=${userId}, identifier=${userIdentifier}`,
+    );
+
+    return {
+      success: true,
+      message: `User ${userIdentifier} has been permanently deleted`,
+      deletedUserId: userId,
+    };
   }
 }
