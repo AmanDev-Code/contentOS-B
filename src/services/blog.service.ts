@@ -100,7 +100,7 @@ export class BlogService {
       .replace(/^\/+|\/+$/g, '')
       .toLowerCase();
     if (!p) throw new BadRequestException('Path cannot be empty');
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)?(?:\/[a-z0-9]+(?:-[a-z0-9]+)?)*$/.test(p)) {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/.test(p)) {
       throw new BadRequestException(
         'Path must be URL segments of lowercase slugs, e.g. releases/v2-notes',
       );
