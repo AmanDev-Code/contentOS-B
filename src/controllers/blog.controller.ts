@@ -63,14 +63,16 @@ export class BlogController {
   }
 
   @Get('page-seo')
-  @ApiOperation({ summary: 'Public SEO overrides for a marketing route (e.g. /pricing)' })
+  @ApiOperation({
+    summary:
+      'Public SEO for a marketing route: CMS overrides (static_page_seo) plus primary keyword assignment',
+  })
   async pageSeo(@Query('route') route: string) {
     try {
       if (!route?.trim()) {
         return {};
       }
-      const row = await this.blogService.getStaticPageSeo(route);
-      return row || {};
+      return await this.blogService.getPublicPageSeoPayload(route);
     } catch (e: any) {
       this.logger.error(e?.message);
       throw new HttpException(

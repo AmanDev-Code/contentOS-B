@@ -12,6 +12,7 @@ import {
   HttpStatus,
   Logger,
   Headers,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -31,6 +32,11 @@ import { IdempotencyService } from '../services/idempotency.service';
 import { CacheService } from '../services/cache.service';
 import { QUEUE_NAMES } from '../common/constants';
 import { CarouselJobData } from '../workers/media-carousel.worker';
+import { isPlatformAdmin } from '../common/platform-admin';
+import {
+  buildAdminCmsObjectKey,
+  normalizeCmsRelativePath,
+} from '../common/admin-media-storage';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -721,7 +727,8 @@ export class MediaController {
   @UseGuards(AuthGuard)
   async uploadMedia(
     @Request() req: AuthenticatedRequest,
-    @Body() body: { image?: string; filename?: string; file?: any },
+    @Body()
+    body: { image?: string; filename?: string; file?: any; cmsPath?: string },
   ) {
     try {
       const userId = req.user.id;
@@ -778,7 +785,19 @@ export class MediaController {
           )
         : await this.mediaGenerationService.optimizeImage(imageBuffer);
 
-      const minioPath = `user-uploads/${userId}/${filename}`;
+      const wantsCms =
+        body.cmsPath !== undefined && typeof body.cmsPath === 'string';
+      let minioPath: string;
+      if (wantsCms) {
+        const cmsPath = body.cmsPath as string;
+        if (!isPlatformAdmin(req.user)) {
+          throw new ForbiddenException('CMS path uploads require admin');
+        }
+        normalizeCmsRelativePath(cmsPath);
+        minioPath = buildAdminCmsObjectKey(cmsPath, filename);
+      } else {
+        minioPath = `user-uploads/${userId}/${filename}`;
+      }
 
       // Upload to MinIO
       const uploadResult = await this.minioService.uploadFile(

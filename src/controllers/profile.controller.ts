@@ -54,19 +54,31 @@ export class ProfileController {
   }
 
   /**
-   * Update profile (username, full_name, avatar_url)
+   * Update profile (username, full_name, avatar_url, blog author defaults)
    */
   @Patch()
   @UseGuards(AuthGuard, PaywallGuard)
   async updateProfile(
     @Body()
-    body: { username?: string; full_name?: string; avatar_url?: string },
+    body: {
+      username?: string;
+      full_name?: string | null;
+      avatar_url?: string | null;
+      author_bio?: string | null;
+      author_role?: string | null;
+      author_avatar_url?: string | null;
+      author_linkedin_url?: string | null;
+    },
     @GetUser() user: { id: string },
   ) {
     const updates: {
       username?: string;
-      full_name?: string;
-      avatar_url?: string;
+      full_name?: string | null;
+      avatar_url?: string | null;
+      author_bio?: string | null;
+      author_role?: string | null;
+      author_avatar_url?: string | null;
+      author_linkedin_url?: string | null;
     } = {};
 
     if (body.username !== undefined) {
@@ -90,11 +102,28 @@ export class ProfileController {
     }
 
     if (body.full_name !== undefined) {
-      updates.full_name = body.full_name.trim() || undefined;
+      if (body.full_name === null || body.full_name === '') {
+        updates.full_name = null;
+      } else {
+        updates.full_name = String(body.full_name).trim() || null;
+      }
     }
 
     if (body.avatar_url !== undefined) {
-      updates.avatar_url = body.avatar_url.trim() || undefined;
+      updates.avatar_url = body.avatar_url?.trim() || null;
+    }
+
+    if (body.author_bio !== undefined) {
+      updates.author_bio = body.author_bio?.trim() || null;
+    }
+    if (body.author_role !== undefined) {
+      updates.author_role = body.author_role?.trim() || null;
+    }
+    if (body.author_avatar_url !== undefined) {
+      updates.author_avatar_url = body.author_avatar_url?.trim() || null;
+    }
+    if (body.author_linkedin_url !== undefined) {
+      updates.author_linkedin_url = body.author_linkedin_url?.trim() || null;
     }
 
     if (Object.keys(updates).length === 0) {

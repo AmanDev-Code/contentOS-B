@@ -618,12 +618,127 @@ export class LinkedinService {
         expiresAt,
       );
       this.logger.log(`LinkedIn tokens saved successfully for user: ${userId}`);
+
+      try {
+        const publicUrl =
+          await this.resolveLinkedInPublicProfileUrl(accessToken);
+        if (publicUrl) {
+          await this.profileRepository.updateProfile(userId, {
+            author_linkedin_url: publicUrl,
+          });
+          this.logger.log(
+            `Synced LinkedIn profile URL for user ${userId}: ${publicUrl}`,
+          );
+        } else {
+          this.logger.warn(
+            `LinkedIn connected for ${userId} but public profile URL could not be resolved (vanity/API).`,
+          );
+        }
+      } catch (syncErr) {
+        this.logger.warn(
+          `LinkedIn profile URL sync failed for ${userId} (tokens still saved): ${syncErr instanceof Error ? syncErr.message : String(syncErr)}`,
+        );
+      }
     } catch (error) {
       this.logger.error(
         `Failed to save LinkedIn tokens for user: ${userId}`,
         error,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Public member profile URL (https://www.linkedin.com/in/{vanity}).
+   * Tries OIDC userinfo extras, then v2/me vanityName projection.
+   */
+  private normalizeLinkedInProfileUrl(raw: string): string | null {
+    const s = raw.trim();
+    if (!s) return null;
+    if (/^https?:\/\//i.test(s)) {
+      try {
+        const u = new URL(s);
+        const seg = u.pathname.replace(/^\/+|\/+$/g, '').split('/');
+        const inIdx = seg.findIndex((p) => p.toLowerCase() === 'in');
+        if (inIdx >= 0 && seg[inIdx + 1]) {
+          const vanity = decodeURIComponent(seg[inIdx + 1]);
+          return `https://www.linkedin.com/in/${vanity}`;
+        }
+        return s;
+      } catch {
+        return null;
+      }
+    }
+    const clean = s.replace(/^\/+|\/+$/g, '').replace(/^in\//i, '');
+    return clean.length ? `https://www.linkedin.com/in/${clean}` : null;
+  }
+
+  private vanityFromLinkedInUserinfo(
+    payload: Record<string, unknown>,
+  ): string | null {
+    const str = (k: string): string | undefined => {
+      const v = payload[k];
+      return typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined;
+    };
+    const direct =
+      str('vanity_name') ||
+      str('vanityName') ||
+      str('nickname') ||
+      str('preferred_username') ||
+      str('profile');
+    if (direct) return direct;
+
+    return null;
+  }
+
+  private async resolveLinkedInPublicProfileUrl(
+    accessToken: string,
+  ): Promise<string | null> {
+    try {
+      const ui = await fetch('https://api.linkedin.com/v2/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (ui.ok) {
+        const j = (await ui.json()) as Record<string, unknown>;
+        const fromInfo = this.vanityFromLinkedInUserinfo(j);
+        const normalized = fromInfo ? this.normalizeLinkedInProfileUrl(fromInfo) : null;
+        if (normalized) return normalized;
+      }
+    } catch (e) {
+      this.logger.warn(
+        `LinkedIn userinfo unavailable for profile URL sync: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    try {
+      const me = await fetch(
+        'https://api.linkedin.com/v2/me?projection=(vanityName)',
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        },
+      );
+      if (!me.ok) {
+        const errText = await me.text().catch(() => '');
+        this.logLinkedinApiFailure(
+          'LinkedIn v2/me vanityName',
+          me.status,
+          'n/a',
+          errText.slice(0, 800),
+        );
+        return null;
+      }
+      const data = (await me.json()) as { vanityName?: string };
+      const vn =
+        typeof data.vanityName === 'string' ? data.vanityName.trim() : '';
+      return vn.length ? this.normalizeLinkedInProfileUrl(vn) : null;
+    } catch (e) {
+      this.logger.warn(
+        `LinkedIn v2/me failed for profile URL sync: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return null;
     }
   }
 

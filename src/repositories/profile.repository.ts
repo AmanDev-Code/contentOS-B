@@ -116,7 +116,15 @@ export class ProfileRepository {
 
   async updateProfile(
     userId: string,
-    updates: { username?: string; full_name?: string; avatar_url?: string },
+    updates: {
+      username?: string;
+      full_name?: string | null;
+      avatar_url?: string | null;
+      author_bio?: string | null;
+      author_role?: string | null;
+      author_avatar_url?: string | null;
+      author_linkedin_url?: string | null;
+    },
   ): Promise<Profile> {
     const payload: Record<string, unknown> = { updated_at: new Date() };
     if (updates.username !== undefined)
@@ -125,6 +133,14 @@ export class ProfileRepository {
       payload.full_name = updates.full_name?.trim() || null;
     if (updates.avatar_url !== undefined)
       payload.avatar_url = updates.avatar_url?.trim() || null;
+    if (updates.author_bio !== undefined)
+      payload.author_bio = updates.author_bio?.trim() || null;
+    if (updates.author_role !== undefined)
+      payload.author_role = updates.author_role?.trim() || null;
+    if (updates.author_avatar_url !== undefined)
+      payload.author_avatar_url = updates.author_avatar_url?.trim() || null;
+    if (updates.author_linkedin_url !== undefined)
+      payload.author_linkedin_url = updates.author_linkedin_url?.trim() || null;
 
     const { data, error } = await this.supabaseService
       .getServiceClient()

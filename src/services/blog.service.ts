@@ -4,9 +4,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from './supabase.service';
+import { SeoKeywordsService } from './seo-keywords.service';
 import { isPlatformAdmin } from '../common/platform-admin';
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+const FEATURED_IMAGE_OBJECT_POSITION = new Set([
+  'left',
+  'center',
+  'right',
+  'top',
+  'bottom',
+]);
 
 export type BlogPostKind =
   | 'article'
@@ -25,15 +34,23 @@ export interface CreateBlogPostInput {
   subtitle?: string | null;
   excerpt?: string | null;
   body?: string;
+  /** Editorial bucket for marketing blog cards (distinct from structural post_kind). */
+  content_category?: string | null;
   post_kind?: BlogPostKind;
   status?: BlogPostStatus;
   scheduled_publish_at?: string | null;
   published_at?: string | null;
   display_order?: number;
   featured_image_url?: string | null;
+  /** Lowercase presets: left, center, right, top, bottom; omit for default crops. */
+  featured_image_object_position?: string | null;
   hero_style?: string;
   reading_minutes?: number | null;
   author_display_name?: string | null;
+  author_bio?: string | null;
+  author_avatar_url?: string | null;
+  author_role?: string | null;
+  author_linkedin_url?: string | null;
   tags?: string[];
   custom_css?: string | null;
   settings?: Record<string, unknown>;
@@ -61,7 +78,10 @@ export interface StaticPageSeoInput {
 
 @Injectable()
 export class BlogService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly seoKeywordsService: SeoKeywordsService,
+  ) {}
 
   isPlatformAdminUser(user: { id: string; email?: string }): boolean {
     return isPlatformAdmin(user);
@@ -76,6 +96,14 @@ export class BlogService {
       .eq('user_id', user.id)
       .maybeSingle();
     return !!data;
+  }
+
+  /** Accepts lowercase presets only; anything else maps to null. */
+  sanitizeFeaturedImageObjectPosition(raw: unknown): string | null {
+    if (raw === null || raw === undefined || raw === '') return null;
+    const s = String(raw).trim().toLowerCase();
+    if (!FEATURED_IMAGE_OBJECT_POSITION.has(s)) return null;
+    return s;
   }
 
   normalizeSlug(raw: string): string {
@@ -140,7 +168,7 @@ export class BlogService {
     let q = client
       .from('blog_posts')
       .select(
-        'id, parent_id, path, slug, title, subtitle, excerpt, post_kind, published_at, scheduled_publish_at, status, featured_image_url, reading_minutes, author_display_name, tags, seo_title, seo_description, og_image_url',
+        'id, parent_id, path, slug, title, subtitle, excerpt, post_kind, content_category, published_at, scheduled_publish_at, status, featured_image_url, featured_image_object_position, reading_minutes, author_display_name, author_role, author_avatar_url, tags, seo_title, seo_description, og_image_url',
       )
       .in('status', ['published', 'scheduled'])
       .order('published_at', { ascending: false, nullsFirst: false })
@@ -177,7 +205,7 @@ export class BlogService {
     let q = client
       .from('blog_posts')
       .select(
-        'id, parent_id, path, slug, title, post_kind, status, published_at, scheduled_publish_at, updated_at, tags',
+        'id, parent_id, path, slug, title, post_kind, content_category, status, published_at, scheduled_publish_at, updated_at, tags',
       )
       .order('updated_at', { ascending: false });
     if (filters?.status) q = q.eq('status', filters.status);
@@ -190,7 +218,11 @@ export class BlogService {
         (row: any) =>
           String(row.title || '')
             .toLowerCase()
-            .includes(s) || String(row.path || '').toLowerCase().includes(s),
+            .includes(s) ||
+          String(row.path || '').toLowerCase().includes(s) ||
+          String(row.id || '')
+            .toLowerCase()
+            .includes(s),
       );
     }
     return { posts: list };
@@ -234,15 +266,22 @@ export class BlogService {
       subtitle: input.subtitle?.trim() || null,
       excerpt: input.excerpt?.trim() || null,
       body: input.body ?? '',
+      content_category: input.content_category?.trim() || null,
       post_kind: input.post_kind ?? 'article',
       status: input.status ?? 'draft',
       scheduled_publish_at: input.scheduled_publish_at || null,
       published_at: input.published_at || null,
       display_order: input.display_order ?? 0,
       featured_image_url: input.featured_image_url || null,
+      featured_image_object_position:
+        this.sanitizeFeaturedImageObjectPosition(input.featured_image_object_position),
       hero_style: input.hero_style ?? 'default',
       reading_minutes: input.reading_minutes ?? null,
       author_display_name: input.author_display_name?.trim() || null,
+      author_bio: input.author_bio?.trim() || null,
+      author_avatar_url: input.author_avatar_url?.trim() || null,
+      author_role: input.author_role?.trim() || null,
+      author_linkedin_url: input.author_linkedin_url?.trim() || null,
       tags: input.tags ?? [],
       custom_css: input.custom_css || null,
       settings: input.settings ?? {},
@@ -279,6 +318,11 @@ export class BlogService {
     const forbidden = ['id', 'path', 'slug', 'parent_id', 'created_by', 'created_at'];
     for (const k of forbidden) {
       if (k in patch) delete patch[k];
+    }
+    if ('featured_image_object_position' in patch) {
+      patch.featured_image_object_position = this.sanitizeFeaturedImageObjectPosition(
+        patch.featured_image_object_position,
+      );
     }
     const client = this.supabaseService.getServiceClient();
     if (Object.keys(patch).length === 0) {
@@ -344,6 +388,23 @@ export class BlogService {
       .maybeSingle();
     if (error) throw new BadRequestException(error.message);
     return data;
+  }
+
+  /**
+   * Public marketing SEO payload for Next.js metadata: `static_page_seo` row (if any) plus
+   * the primary assigned keyword phrase for `target_type=route` (drives title/description when
+   * CMS fields are empty).
+   */
+  async getPublicPageSeoPayload(routePath: string) {
+    const path = this.normalizeRoutePath(routePath);
+    const row = await this.getStaticPageSeo(path);
+    const assignment_primary_keyword = await this.seoKeywordsService.getPublicPrimaryRouteKeyword(
+      path,
+    );
+    return {
+      ...(row ?? {}),
+      assignment_primary_keyword,
+    };
   }
 
   async listStaticPageSeo() {

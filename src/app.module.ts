@@ -33,8 +33,11 @@ import { AdminCareersController } from './controllers/admin-careers.controller';
 import { BlogController } from './controllers/blog.controller';
 import { AdminBlogController } from './controllers/admin-blog.controller';
 import { AdminSeoPagesController } from './controllers/admin-seo-pages.controller';
+import { AdminSeoKeywordsController, AdminSeoAssignmentsController } from './controllers/admin-seo-keywords.controller';
+import { SeoKeywordsService } from './services/seo-keywords.service';
 import { ReferralController, PublicReferralController } from './controllers/referral.controller';
 import { AdminReferralController } from './controllers/admin-referral.controller';
+import { AdminMediaController } from './controllers/admin-media.controller';
 import { FeedbackController } from './controllers/feedback.controller';
 import { UserFeedbackController } from './controllers/user-feedback.controller';
 import { PlatformAdminFeedbackController } from './controllers/platform-admin-feedback.controller';
@@ -194,6 +197,8 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     BlogController,
     AdminBlogController,
     AdminSeoPagesController,
+    AdminSeoKeywordsController,
+    AdminSeoAssignmentsController,
     FeedbackController,
     UserFeedbackController,
     PlatformAdminFeedbackController,
@@ -207,6 +212,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     ReferralController,
     PublicReferralController,
     AdminReferralController,
+    AdminMediaController,
   ],
   providers: [
     AppService,
@@ -240,6 +246,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     CareersService,
     CareersJobCopyAiService,
     BlogService,
+    SeoKeywordsService,
     BlogManagementGuard,
     FeedbackService,
     UserFeedbackService,

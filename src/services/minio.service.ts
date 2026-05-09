@@ -184,6 +184,60 @@ export class MinioService implements OnModuleInit {
     }
   }
 
+  /** Configured default bucket name (after onModuleInit). */
+  getBucketName(): string {
+    return this.bucketName;
+  }
+
+  /**
+   * List a single hierarchy level under `prefix` (delimiter `/`), like S3 CommonPrefixes.
+   * Stream items may be `{ prefix }` (subfolder) or `{ name, size, lastModified }` (object).
+   */
+  async listOneLevel(
+    bucketName: string,
+    prefix: string,
+    maxKeys = 1000,
+  ): Promise<{
+    prefixes: string[];
+    objects: Array<{
+      name: string;
+      size: number;
+      lastModified?: Date;
+    }>;
+  }> {
+    // ListObjects V1 can return empty/erroneously on some gateways; V2 matches AWS S3 reliably.
+    const stream = this.minioClient.listObjectsV2(bucketName, prefix, false);
+    const prefixes = new Set<string>();
+    const objects: Array<{ name: string; size: number; lastModified?: Date }> =
+      [];
+
+    await new Promise<void>((resolve, reject) => {
+      stream.on('data', (obj: Record<string, unknown>) => {
+        if (objects.length + prefixes.size >= maxKeys) return;
+        if (typeof obj.prefix === 'string' && obj.prefix.length > 0) {
+          prefixes.add(obj.prefix);
+          return;
+        }
+        const name = obj.name as string | undefined;
+        if (!name) return;
+        const size = Number(obj.size) || 0;
+        const lastModified = obj.lastModified as Date | undefined;
+        if (name.endsWith('/') && size === 0) {
+          prefixes.add(name);
+          return;
+        }
+        objects.push({ name, size, lastModified });
+      });
+      stream.on('end', () => resolve());
+      stream.on('error', (err) => reject(err));
+    });
+
+    return {
+      prefixes: [...prefixes].sort(),
+      objects: objects.sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }
+
   async listFiles(
     bucketName: string,
     prefix?: string,

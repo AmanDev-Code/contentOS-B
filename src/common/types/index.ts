@@ -82,6 +82,11 @@ export interface Profile {
   username?: string;
   full_name?: string;
   avatar_url?: string;
+  /** Blog/CMS defaults — nullable strings */
+  author_bio?: string | null;
+  author_role?: string | null;
+  author_avatar_url?: string | null;
+  author_linkedin_url?: string | null;
   plan: PlanType;
   credits_remaining: number;
   monthly_credits: number;
