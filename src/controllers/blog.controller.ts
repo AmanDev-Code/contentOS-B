@@ -44,6 +44,20 @@ export class BlogController {
     }
   }
 
+  @Get('sitemap-paths')
+  @ApiOperation({ summary: 'All published post paths + timestamps for sitemap generation (no pagination cap)' })
+  async sitemapPaths() {
+    try {
+      return await this.blogService.listAllPublishedPathsForSitemap();
+    } catch (e: any) {
+      this.logger.error(e?.message);
+      throw new HttpException(
+        e.message || 'Failed to list sitemap paths',
+        e.status || HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Get('post')
   @ApiOperation({ summary: 'Get a single published post by path (e.g. releases/v2)' })
   async getPost(@Query('path') path: string) {

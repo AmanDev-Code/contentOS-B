@@ -160,6 +160,26 @@ export class BlogService {
     return false;
   }
 
+  async listAllPublishedPathsForSitemap(): Promise<
+    { path: string; published_at: string | null; updated_at: string | null }[]
+  > {
+    const client = this.supabaseService.getServiceClient();
+    const { data, error } = await client
+      .from('blog_posts')
+      .select('path, published_at, updated_at, status, scheduled_publish_at')
+      .in('status', ['published', 'scheduled'])
+      .not('path', 'is', null)
+      .order('published_at', { ascending: false, nullsFirst: false });
+    if (error) throw new BadRequestException(error.message);
+    return (data || [])
+      .filter((r: any) => this.isRowPubliclyVisible(r) && r.path)
+      .map((r: any) => ({
+        path: r.path as string,
+        published_at: (r.published_at as string) ?? null,
+        updated_at: (r.updated_at as string) ?? null,
+      }));
+  }
+
   async listPublishedPosts(params: {
     post_kind?: string;
     tag?: string;
