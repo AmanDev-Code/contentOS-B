@@ -93,6 +93,14 @@ export default () => ({
     apiKey: process.env.PADDLE_API_KEY || '',
     webhookSecret: process.env.PADDLE_WEBHOOK_SECRET || '',
     webhookUrl: process.env.PADDLE_WEBHOOK_URL || '',
+    /**
+     * Push admin display pricing to Paddle catalog on `PUT /admin/subscription-plans/:plan`.
+     * If unset: enabled in production when `PADDLE_API_KEY` is set; disabled in non-production.
+     * Explicit `true`/`1` / `false`/`0` always wins (except when API key is missing — then sync is always skipped).
+     */
+    syncPricesOnAdminSave: process.env.PADDLE_SYNC_PRICES_ON_ADMIN_SAVE,
+    /** Optional master switch: `false` disables catalog sync regardless of other defaults. `true` forces sync when API key exists. */
+    enableCatalogSync: process.env.PADDLE_ENABLE_CATALOG_SYNC,
     prices: {
       standardMonthly: process.env.PADDLE_PRICE_STANDARD_MONTHLY || '',
       standardYearly: process.env.PADDLE_PRICE_STANDARD_YEARLY || '',

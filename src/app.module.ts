@@ -33,11 +33,13 @@ import { AdminCareersController } from './controllers/admin-careers.controller';
 import { BlogController } from './controllers/blog.controller';
 import { AdminBlogController } from './controllers/admin-blog.controller';
 import { AdminSeoPagesController } from './controllers/admin-seo-pages.controller';
+import { AdminSeoAiFillController } from './controllers/admin-seo-ai-fill.controller';
 import { AdminSeoKeywordsController, AdminSeoAssignmentsController } from './controllers/admin-seo-keywords.controller';
 import { SeoKeywordsService } from './services/seo-keywords.service';
 import { ReferralController, PublicReferralController } from './controllers/referral.controller';
 import { AdminReferralController } from './controllers/admin-referral.controller';
 import { AdminMediaController } from './controllers/admin-media.controller';
+import { AdminSubscriptionPlansController } from './controllers/admin-subscription-plans.controller';
 import { FeedbackController } from './controllers/feedback.controller';
 import { UserFeedbackController } from './controllers/user-feedback.controller';
 import { PlatformAdminFeedbackController } from './controllers/platform-admin-feedback.controller';
@@ -84,6 +86,7 @@ import { ScraperCredentialsService } from './services/scrapers/scraper-credentia
 import { PostRefinementService } from './services/post-refinement.service';
 import { CareersService } from './services/careers.service';
 import { CareersJobCopyAiService } from './services/careers-job-copy-ai.service';
+import { SeoAiFillService } from './services/seo-ai-fill.service';
 import { BlogService } from './services/blog.service';
 import { BlogManagementGuard } from './guards/blog-management.guard';
 import { FeedbackService } from './services/feedback.service';
@@ -197,6 +200,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     BlogController,
     AdminBlogController,
     AdminSeoPagesController,
+    AdminSeoAiFillController,
     AdminSeoKeywordsController,
     AdminSeoAssignmentsController,
     FeedbackController,
@@ -213,6 +217,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     PublicReferralController,
     AdminReferralController,
     AdminMediaController,
+    AdminSubscriptionPlansController,
   ],
   providers: [
     AppService,
@@ -245,6 +250,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     PostRefinementService,
     CareersService,
     CareersJobCopyAiService,
+    SeoAiFillService,
     BlogService,
     SeoKeywordsService,
     BlogManagementGuard,

@@ -1,12 +1,39 @@
 import {
-  Injectable,
+  BadRequestException,
   ForbiddenException,
+  Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from './supabase.service';
 import { CacheService } from './cache.service';
-import { getPublicPlans, getPlanConfig } from '../config/plans.config';
+import { AppSettingsService, APP_SETTING_KEYS } from './app-settings.service';
+import {
+  getPublicPlans,
+  getPlanConfig,
+  PLAN_CONFIGURATIONS,
+} from '../config/plans.config';
 import { PaddleService } from './paddle.service';
+
+/** Display-only tiers per ISO 4217 code (marketing + app UI). Checkout stays on Paddle price IDs. */
+export interface PlanDisplayTier {
+  symbol: string;
+  listMonthly: number;
+  listYearly: number;
+  offerMonthly: number | null;
+  offerYearly: number | null;
+}
+
+export type PlanDisplayPricingMap = Record<string, PlanDisplayTier>;
+
+export interface PricingDisplaySettings {
+  defaultCurrency: string;
+  supportedCurrencies: string[];
+}
+
+export interface PublicPlansPayload {
+  plans: SubscriptionPlan[];
+  pricingDisplay: PricingDisplaySettings;
+}
 
 export interface UserSubscription {
   id: string;
@@ -39,6 +66,8 @@ export interface SubscriptionPlan {
   features: string[];
   isActive: boolean;
   sortOrder: number;
+  /** When null/empty, UI falls back to priceMonthly/priceYearly with USD formatting. */
+  displayPricing?: PlanDisplayPricingMap | null;
 }
 
 export interface BillingInfo {
@@ -73,7 +102,373 @@ export class SubscriptionService {
     private readonly supabaseService: SupabaseService,
     private readonly cacheService: CacheService,
     private readonly paddleService: PaddleService,
+    private readonly appSettingsService: AppSettingsService,
   ) {}
+
+  private sanitizeDisplayPricing(raw: unknown): PlanDisplayPricingMap | null {
+    if (raw === null || raw === undefined) return null;
+    if (typeof raw !== 'object') return null;
+    const out: PlanDisplayPricingMap = {};
+    for (const [code, val] of Object.entries(raw as Record<string, unknown>)) {
+      if (!/^[A-Za-z]{3}$/.test(code)) continue;
+      const upper = code.toUpperCase();
+      if (!val || typeof val !== 'object') continue;
+      const v = val as Record<string, unknown>;
+      const symbol =
+        typeof v.symbol === 'string' && v.symbol.length ? v.symbol : upper;
+      const listMonthly = Number(v.listMonthly);
+      const listYearly = Number(v.listYearly);
+      if (!Number.isFinite(listMonthly) || !Number.isFinite(listYearly)) continue;
+      const om = v.offerMonthly;
+      const oy = v.offerYearly;
+      const offerMonthly =
+        om === null || om === undefined || om === ''
+          ? null
+          : Number.isFinite(Number(om))
+            ? Number(om)
+            : null;
+      const offerYearly =
+        oy === null || oy === undefined || oy === ''
+          ? null
+          : Number.isFinite(Number(oy))
+            ? Number(oy)
+            : null;
+      out[upper] = {
+        symbol,
+        listMonthly,
+        listYearly,
+        offerMonthly,
+        offerYearly,
+      };
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
+  private mapRowToPlan(plan: Record<string, unknown>): SubscriptionPlan {
+    const featuresRaw = plan.features;
+    let features: string[] = [];
+    if (Array.isArray(featuresRaw)) {
+      features = featuresRaw.filter((x) => typeof x === 'string') as string[];
+    }
+    const displayRaw = Object.prototype.hasOwnProperty.call(
+      plan,
+      'display_pricing',
+    )
+      ? plan.display_pricing
+      : (plan as { displayPricing?: unknown }).displayPricing;
+
+    return {
+      id: String(plan.id ?? ''),
+      planType: String(plan.plan_type ?? plan.planType ?? ''),
+      name: String(plan.name ?? ''),
+      description: typeof plan.description === 'string' ? plan.description : '',
+      creditsLimit: Number(plan.credits_limit ?? plan.creditsLimit ?? 0),
+      priceMonthly: Number.parseFloat(
+        String(plan.price_monthly ?? plan.priceMonthly ?? '0'),
+      ),
+      priceYearly: Number.parseFloat(
+        String(plan.price_yearly ?? plan.priceYearly ?? '0'),
+      ),
+      features,
+      isActive: Boolean(plan.is_active ?? plan.isActive ?? true),
+      sortOrder: Number(plan.sort_order ?? plan.sortOrder ?? 0),
+      displayPricing: this.sanitizeDisplayPricing(displayRaw),
+    };
+  }
+
+  async getPricingDisplayMeta(): Promise<PricingDisplaySettings> {
+    const raw = await this.appSettingsService.get<{
+      defaultCurrency?: string;
+      supportedCurrencies?: string[];
+    }>(APP_SETTING_KEYS.PRICING_DISPLAY);
+
+    let defaultCurrency =
+      typeof raw?.defaultCurrency === 'string' &&
+      /^[A-Z]{3}$/i.test(raw.defaultCurrency)
+        ? raw.defaultCurrency.toUpperCase()
+        : 'USD';
+
+    let supportedCurrencies =
+      Array.isArray(raw?.supportedCurrencies) && raw.supportedCurrencies.length
+        ? raw.supportedCurrencies
+            .filter((c): c is string => typeof c === 'string' && /^[A-Z]{3}$/i.test(c))
+            .map((c) => c.toUpperCase())
+        : ['USD', 'INR'];
+
+    supportedCurrencies = Array.from(new Set(supportedCurrencies));
+    if (!supportedCurrencies.includes(defaultCurrency)) {
+      supportedCurrencies = [defaultCurrency, ...supportedCurrencies];
+    }
+    return { defaultCurrency, supportedCurrencies };
+  }
+
+  async upsertPricingDisplayMeta(
+    body: PricingDisplaySettings,
+    updatedBy?: string,
+  ): Promise<boolean> {
+    const ok = await this.appSettingsService.set(
+      APP_SETTING_KEYS.PRICING_DISPLAY,
+      {
+        defaultCurrency: body.defaultCurrency,
+        supportedCurrencies: body.supportedCurrencies,
+      },
+      updatedBy,
+    );
+    await this.cacheService.delete('subscription_plans');
+    return ok;
+  }
+
+  async invalidateSubscriptionPlansCache(): Promise<void> {
+    await this.cacheService.delete('subscription_plans');
+  }
+
+  async adminListAllPlans(): Promise<SubscriptionPlan[]> {
+    const { data, error } = await this.supabaseService
+      .getServiceClient()
+      .from('subscription_plans')
+      .select('*')
+      .order('sort_order');
+
+    if (error || !data?.length) {
+      return PLAN_CONFIGURATIONS.map((plan, index) => ({
+        id: `config-${plan.planType}`,
+        planType: plan.planType,
+        name: plan.name,
+        description: plan.description,
+        creditsLimit: plan.creditsLimit,
+        priceMonthly: plan.priceMonthly,
+        priceYearly: plan.priceYearly,
+        features: plan.features,
+        isActive: true,
+        sortOrder: index + 1,
+        displayPricing: null,
+      }));
+    }
+
+    return data.map((row) =>
+      this.mapRowToPlan(row as Record<string, unknown>),
+    );
+  }
+
+  async adminUpdateSubscriptionPlan(
+    planType: string,
+    patch: Partial<{
+      name: string;
+      description: string;
+      creditsLimit: number;
+      priceMonthly: number;
+      priceYearly: number;
+      features: string[];
+      sortOrder: number;
+      isActive: boolean;
+      displayPricing: PlanDisplayPricingMap | null;
+    }>,
+  ): Promise<{ paddleCatalogUpdated: boolean }> {
+    const allowed = ['free', 'standard', 'pro', 'ultimate'];
+    if (!allowed.includes(planType)) {
+      throw new NotFoundException('Invalid plan type');
+    }
+
+    const row: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (patch.name !== undefined) row.name = patch.name;
+    if (patch.description !== undefined) row.description = patch.description;
+    if (patch.creditsLimit !== undefined)
+      row.credits_limit = patch.creditsLimit;
+    if (patch.priceMonthly !== undefined)
+      row.price_monthly = patch.priceMonthly;
+    if (patch.priceYearly !== undefined)
+      row.price_yearly = patch.priceYearly;
+    if (patch.features !== undefined) row.features = patch.features;
+    if (patch.sortOrder !== undefined) row.sort_order = patch.sortOrder;
+    if (patch.isActive !== undefined) row.is_active = patch.isActive;
+    if (patch.displayPricing !== undefined) {
+      row.display_pricing =
+        patch.displayPricing === null ? null : patch.displayPricing;
+    }
+
+    const { error } = await this.supabaseService
+      .getServiceClient()
+      .from('subscription_plans')
+      .update(row)
+      .eq('plan_type', planType);
+
+    if (error) {
+      throw new Error(`Failed to update plan: ${error.message}`);
+    }
+
+    await this.invalidateSubscriptionPlansCache();
+
+    /**
+     * Paddle catalog sync runs **after** the DB commit (Supabase update completes above).
+     * If Paddle PATCH fails we throw `BadGatewayException`: operators should retry the same save;
+     * the database already reflects the new display pricing (may diverge from Paddle until retry succeeds).
+     */
+    let paddleCatalogUpdated = false;
+    if (planType !== 'free') {
+      const { data: fresh, error: readErr } = await this.supabaseService
+        .getServiceClient()
+        .from('subscription_plans')
+        .select('display_pricing')
+        .eq('plan_type', planType)
+        .maybeSingle();
+      if (readErr) {
+        throw new Error(readErr.message);
+      }
+      const pricing = this.sanitizeDisplayPricing(fresh?.display_pricing);
+      const meta = await this.getPricingDisplayMeta();
+      paddleCatalogUpdated =
+        await this.paddleService.syncPaidPlanPricesFromDisplayPricing(
+          planType as 'standard' | 'pro' | 'ultimate',
+          pricing,
+          meta.defaultCurrency,
+        );
+    }
+
+    return { paddleCatalogUpdated };
+  }
+
+  /** Live Paddle `unit_price` for each env-configured catalog price (read-only). */
+  async getPaddleCatalogLiveSnapshot() {
+    return this.paddleService.fetchCatalogLiveSnapshot();
+  }
+
+  /**
+   * Pull Paddle catalog amounts into Supabase `display_pricing` for the Paddle currency tier
+   * (list fields only; clears offers for that tier) and updates legacy `price_monthly` /
+   * `price_yearly` columns for each paid plan.
+   */
+  async importDisplayPricingFromPaddleCatalog(): Promise<{
+    ok: true;
+    updatedPlanTypes: Array<'standard' | 'pro' | 'ultimate'>;
+    warnings: string[];
+  }> {
+    const snap = await this.paddleService.fetchCatalogLiveSnapshot();
+    if (!snap.apiKeyConfigured) {
+      throw new BadRequestException(
+        'Configure PADDLE_API_KEY on the server to read the catalog.',
+      );
+    }
+
+    type PT = 'standard' | 'pro' | 'ultimate';
+    const buckets: Record<
+      PT,
+      { monthly?: (typeof snap.items)[0]; yearly?: (typeof snap.items)[0] }
+    > = {
+      standard: {},
+      pro: {},
+      ultimate: {},
+    };
+
+    for (const row of snap.items) {
+      const b = buckets[row.planType as PT];
+      if (!b) continue;
+      if (row.billingCycle === 'monthly') b.monthly = row;
+      else b.yearly = row;
+    }
+
+    const fail: string[] = [];
+    const warnings: string[] = [];
+    for (const pt of ['standard', 'pro', 'ultimate'] as PT[]) {
+      const b = buckets[pt];
+      const m = b.monthly;
+      const y = b.yearly;
+      if (!m || m.error || m.amountMajor == null) {
+        fail.push(`${pt}: missing or failed monthly Paddle price read`);
+      }
+      if (!y || y.error || y.amountMajor == null) {
+        fail.push(`${pt}: missing or failed yearly Paddle price read`);
+      }
+      if (
+        m?.currencyCode &&
+        y?.currencyCode &&
+        m.currencyCode !== y.currencyCode
+      ) {
+        warnings.push(
+          `${pt}: monthly currency ${m.currencyCode} differs from yearly ${y.currencyCode} — tier key uses monthly’s ISO code.`,
+        );
+      }
+    }
+
+    if (fail.length) {
+      throw new BadRequestException({
+        message: 'Cannot import: verify PADDLE_PRICE_* ids and Paddle API responses.',
+        errors: fail,
+      });
+    }
+
+    const updatedPlanTypes: PT[] = [];
+
+    for (const pt of ['standard', 'pro', 'ultimate'] as PT[]) {
+      const b = buckets[pt];
+      const monthly = b.monthly!;
+      const yearly = b.yearly!;
+      const tierCode = (
+        monthly.currencyCode ||
+        yearly.currencyCode ||
+        ''
+      ).toUpperCase();
+      if (!tierCode) {
+        throw new BadRequestException(`${pt}: could not resolve catalog currency`);
+      }
+
+      const { data: existing, error: readErr } = await this.supabaseService
+        .getServiceClient()
+        .from('subscription_plans')
+        .select('display_pricing')
+        .eq('plan_type', pt)
+        .maybeSingle();
+
+      if (readErr) {
+        throw new Error(readErr.message);
+      }
+
+      const prev = this.sanitizeDisplayPricing(existing?.display_pricing) ?? {};
+      const merged: PlanDisplayPricingMap = { ...prev };
+
+      merged[tierCode] = {
+        symbol:
+          (prev[tierCode]?.symbol?.trim()?.length ?? 0) > 0
+            ? prev[tierCode]!.symbol
+            : tierCode === 'USD'
+              ? '$'
+              : tierCode,
+        listMonthly: monthly.amountMajor!,
+        listYearly: yearly.amountMajor!,
+        offerMonthly: null,
+        offerYearly: null,
+      };
+
+      const { error: upErr } = await this.supabaseService
+        .getServiceClient()
+        .from('subscription_plans')
+        .update({
+          display_pricing: merged as unknown as Record<string, unknown>,
+          price_monthly: monthly.amountMajor!,
+          price_yearly: yearly.amountMajor!,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('plan_type', pt);
+
+      if (upErr) {
+        throw new Error(`Failed to update ${pt}: ${upErr.message}`);
+      }
+      updatedPlanTypes.push(pt);
+    }
+
+    await this.invalidateSubscriptionPlansCache();
+
+    return { ok: true, updatedPlanTypes, warnings };
+  }
+
+  async getPublicPlansPayload(): Promise<PublicPlansPayload> {
+    const [plans, pricingDisplay] = await Promise.all([
+      this.getSubscriptionPlans(),
+      this.getPricingDisplayMeta(),
+    ]);
+    return { plans, pricingDisplay };
+  }
 
   private formatBillingAmount(
     amount: number | string,
@@ -166,16 +561,15 @@ export class SubscriptionService {
         .getServiceClient()
         .from('subscription_plans')
         .select('*')
-        .eq('is_active', true)
-        .neq('plan_type', 'free') // Exclude free plan from public API
+        .or('plan_type.eq.free,is_active.eq.true')
         .order('sort_order');
 
       let plans: SubscriptionPlan[];
 
       if (error || !data || data.length === 0) {
         console.log('Using fallback plan configuration');
-        // Fallback to configuration file
-        const configPlans = getPublicPlans();
+        const freeCfg = PLAN_CONFIGURATIONS.find((p) => p.planType === 'free');
+        const configPlans = freeCfg ? [freeCfg, ...getPublicPlans()] : getPublicPlans();
         plans = configPlans.map((plan, index) => ({
           id: `config-${plan.planType}`,
           planType: plan.planType,
@@ -187,20 +581,12 @@ export class SubscriptionService {
           features: plan.features,
           isActive: true,
           sortOrder: index + 1,
+          displayPricing: null,
         }));
       } else {
-        plans = data.map((plan) => ({
-          id: plan.id,
-          planType: plan.plan_type,
-          name: plan.name,
-          description: plan.description,
-          creditsLimit: plan.credits_limit,
-          priceMonthly: parseFloat(plan.price_monthly),
-          priceYearly: parseFloat(plan.price_yearly),
-          features: plan.features || [],
-          isActive: plan.is_active,
-          sortOrder: plan.sort_order,
-        }));
+        plans = data.map((plan) =>
+          this.mapRowToPlan(plan as Record<string, unknown>),
+        );
       }
 
       // Cache for 1 hour
@@ -210,8 +596,8 @@ export class SubscriptionService {
     } catch (error) {
       console.error('Error getting subscription plans:', error);
 
-      // Final fallback to configuration
-      const configPlans = getPublicPlans();
+      const freeCfg = PLAN_CONFIGURATIONS.find((p) => p.planType === 'free');
+      const configPlans = freeCfg ? [freeCfg, ...getPublicPlans()] : getPublicPlans();
       return configPlans.map((plan, index) => ({
         id: `fallback-${plan.planType}`,
         planType: plan.planType,
@@ -223,6 +609,7 @@ export class SubscriptionService {
         features: plan.features,
         isActive: true,
         sortOrder: index + 1,
+        displayPricing: null,
       }));
     }
   }
@@ -253,6 +640,7 @@ export class SubscriptionService {
           features: cfg.features,
           isActive: true,
           sortOrder: 0,
+          displayPricing: null,
         };
       }
     }
@@ -391,6 +779,7 @@ export class SubscriptionService {
         features: cfg.features,
         isActive: true,
         sortOrder: 0,
+        displayPricing: null,
       };
     }
 

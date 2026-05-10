@@ -2,6 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import {
   SubscriptionService,
   SubscriptionPlan,
+  PublicPlansPayload,
 } from '../services/subscription.service';
 
 @Controller('public')
@@ -9,13 +10,13 @@ export class PublicController {
   constructor(private readonly subscriptionService: SubscriptionService) {}
 
   @Get('plans')
-  async getSubscriptionPlans(): Promise<SubscriptionPlan[]> {
+  async getSubscriptionPlans(): Promise<PublicPlansPayload> {
     try {
-      return await this.subscriptionService.getSubscriptionPlans();
+      return await this.subscriptionService.getPublicPlansPayload();
     } catch (error) {
       console.error('Error getting subscription plans:', error);
-      // Return fallback plans
-      return [
+
+      const plans: SubscriptionPlan[] = [
         {
           id: 'standard',
           planType: 'standard',
@@ -31,6 +32,7 @@ export class PublicController {
           ],
           isActive: true,
           sortOrder: 1,
+          displayPricing: null,
         },
         {
           id: 'pro',
@@ -47,6 +49,7 @@ export class PublicController {
           ],
           isActive: true,
           sortOrder: 2,
+          displayPricing: null,
         },
         {
           id: 'ultimate',
@@ -63,8 +66,17 @@ export class PublicController {
           ],
           isActive: true,
           sortOrder: 3,
+          displayPricing: null,
         },
       ];
+
+      return {
+        plans,
+        pricingDisplay: {
+          defaultCurrency: 'USD',
+          supportedCurrencies: ['USD', 'INR'],
+        },
+      };
     }
   }
 }

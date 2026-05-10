@@ -14,6 +14,8 @@ export interface AppSetting {
 
 export const APP_SETTING_KEYS = {
   FREE_CREDIT_LIMIT: 'free_credit_limit',
+  /** Default + supported currencies for marketing / billing UI (checkout still uses Paddle). */
+  PRICING_DISPLAY: 'pricing_display',
 } as const;
 
 @Injectable()

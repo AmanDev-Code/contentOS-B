@@ -1,13 +1,35 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { SupabaseService } from './supabase.service';
 import { getPlanConfig } from '../config/plans.config';
 import { MinioService } from './minio.service';
 import { CacheService } from './cache.service';
+import {
+  buildRegionalOverridesForCycle,
+  effectiveDisplayAmountMajor,
+  majorToMinorAmountString,
+  paddleAmountStringToMajor,
+  type DisplayTierLike,
+} from '../utils/paddle-price-sync.util';
 
 type PlanType = 'standard' | 'pro' | 'ultimate';
 type BillingCycle = 'monthly' | 'yearly';
+
+export type PaddleCatalogLiveSlot = {
+  planType: PlanType;
+  billingCycle: BillingCycle;
+  priceId: string;
+  amountMajor: number | null;
+  currencyCode: string | null;
+  httpStatus?: number;
+  error?: string;
+};
 
 type PaddleWebhookEvent = {
   event_id: string;
@@ -73,6 +95,155 @@ export class PaddleService {
     return (await res.json()) as T;
   }
 
+  private async paddleGetDetailed(
+    path: string,
+  ): Promise<
+    | { ok: true; status: number; bodyText: string; data?: unknown }
+    | { ok: false; status: number; bodyText: string }
+  > {
+    const apiKey = this.configService.get<string>('paddle.apiKey') || '';
+    if (!apiKey) {
+      return {
+        ok: false,
+        status: 401,
+        bodyText: '{"error":"PADDLE_API_KEY is not configured"}',
+      };
+    }
+
+    const res = await fetch(`${this.getApiBaseUrl()}${path}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+      },
+    });
+    const bodyText = await res.text();
+    if (!res.ok) {
+      this.logger.warn(`Paddle API GET ${path} failed: ${res.status} ${bodyText}`);
+      return { ok: false, status: res.status, bodyText };
+    }
+    try {
+      return { ok: true, status: res.status, bodyText, data: JSON.parse(bodyText) };
+    } catch {
+      return { ok: true, status: res.status, bodyText, data: bodyText };
+    }
+  }
+
+  /**
+   * All configured `(plan × cycle) → pri_…` slots from env. Empty price IDs omitted.
+   */
+  getConfiguredCatalogSlots(): Omit<
+    PaddleCatalogLiveSlot,
+    'amountMajor' | 'currencyCode' | 'httpStatus' | 'error'
+  >[] {
+    const out: Omit<
+      PaddleCatalogLiveSlot,
+      'amountMajor' | 'currencyCode' | 'httpStatus' | 'error'
+    >[] = [];
+    for (const planType of ['standard', 'pro', 'ultimate'] as PlanType[]) {
+      const ids = this.getCatalogPriceIdsForPlan(planType);
+      if (ids.monthly?.trim())
+        out.push({
+          planType,
+          billingCycle: 'monthly',
+          priceId: ids.monthly.trim(),
+        });
+      if (ids.yearly?.trim())
+        out.push({
+          planType,
+          billingCycle: 'yearly',
+          priceId: ids.yearly.trim(),
+        });
+    }
+    return out;
+  }
+
+  /**
+   * Reads live `unit_price` from Paddle Billing for each env catalog price ID.
+   */
+  async fetchCatalogLiveSnapshot(): Promise<{
+    fetchedAt: string;
+    apiKeyConfigured: boolean;
+    items: PaddleCatalogLiveSlot[];
+  }> {
+    const apiKey = this.configService.get<string>('paddle.apiKey') || '';
+    const fetchedAt = new Date().toISOString();
+    const slots = this.getConfiguredCatalogSlots();
+
+    if (!apiKey) {
+      return {
+        fetchedAt,
+        apiKeyConfigured: false,
+        items: slots.map((s) => ({
+          ...s,
+          amountMajor: null,
+          currencyCode: null,
+          error: 'PADDLE_API_KEY is not set',
+        })),
+      };
+    }
+
+    const itemsParallel = await Promise.all(
+      slots.map(async (slot) => {
+        const res = await this.paddleGetDetailed(
+          `/prices/${encodeURIComponent(slot.priceId)}`,
+        );
+        if (!res.ok) {
+          return {
+            ...slot,
+            amountMajor: null,
+            currencyCode: null,
+            httpStatus: res.status,
+            error: res.bodyText.slice(0, 280),
+          } satisfies PaddleCatalogLiveSlot;
+        }
+        const wrapper = res.data as
+          | {
+              data?: {
+                unit_price?: { amount?: unknown; currency_code?: unknown };
+              };
+            }
+          | undefined;
+        const unitPrice = wrapper?.data?.unit_price;
+        const currencyRaw = unitPrice?.currency_code;
+        const currencyCode =
+          typeof currencyRaw === 'string' && currencyRaw.trim()
+            ? currencyRaw.trim().toUpperCase()
+            : null;
+        if (!currencyCode) {
+          return {
+            ...slot,
+            amountMajor: null,
+            currencyCode: null,
+            httpStatus: res.status,
+            error: 'Missing unit_price.currency_code on price entity',
+          } satisfies PaddleCatalogLiveSlot;
+        }
+        const amountMajor = paddleAmountStringToMajor(
+          unitPrice?.amount,
+          currencyCode,
+        );
+        return {
+          ...slot,
+          amountMajor,
+          currencyCode,
+          httpStatus: res.status,
+        } satisfies PaddleCatalogLiveSlot;
+      }),
+    );
+
+    const items = [...itemsParallel].sort((a, b) => {
+      const planOrder = (p: PlanType) =>
+        ({ standard: 0, pro: 1, ultimate: 2 }[p]);
+      const cyc = (c: BillingCycle) => (c === 'monthly' ? 0 : 1);
+      const d = planOrder(a.planType) - planOrder(b.planType);
+      if (d !== 0) return d;
+      return cyc(a.billingCycle) - cyc(b.billingCycle);
+    });
+
+    return { fetchedAt, apiKeyConfigured: true, items };
+  }
+
   private async paddlePatch<T>(
     path: string,
     payload: Record<string, any>,
@@ -98,6 +269,239 @@ export class PaddleService {
     }
 
     return (await res.json()) as T;
+  }
+
+  /**
+   * PATCH with full error surface for catalog operations (returns Paddle body text on failure).
+   */
+  private async paddlePatchDetailed(
+    path: string,
+    payload: Record<string, unknown>,
+  ): Promise<
+    | { ok: true; data: unknown }
+    | { ok: false; status: number; bodyText: string }
+  > {
+    const apiKey = this.configService.get<string>('paddle.apiKey') || '';
+    if (!apiKey) {
+      return {
+        ok: false,
+        status: 401,
+        bodyText: '{"error":"PADDLE_API_KEY is not configured"}',
+      };
+    }
+
+    const res = await fetch(`${this.getApiBaseUrl()}${path}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    const bodyText = await res.text();
+    if (!res.ok) {
+      this.logger.error(
+        `Paddle API PATCH ${path} failed: ${res.status} ${bodyText}`,
+      );
+      return { ok: false, status: res.status, bodyText };
+    }
+    try {
+      return { ok: true, data: JSON.parse(bodyText) as unknown };
+    } catch {
+      return { ok: true, data: bodyText };
+    }
+  }
+
+  /**
+   * Whether admin saves should PATCH Paddle catalog prices. Requires `PADDLE_API_KEY`; callers
+   * should still check the key to emit a dedicated "skipped" warning when appropriate.
+   */
+  shouldSyncCatalogOnAdminSave(): boolean {
+    const apiKey = this.configService.get<string>('paddle.apiKey') || '';
+    if (!apiKey) return false;
+
+    const master = this.configService.get<string | undefined>(
+      'paddle.enableCatalogSync',
+    );
+    if (master === 'false' || master === '0') return false;
+    if (master === 'true' || master === '1') return true;
+
+    const explicit = this.configService.get<string | undefined>(
+      'paddle.syncPricesOnAdminSave',
+    );
+    if (explicit === 'false' || explicit === '0') return false;
+    if (explicit === 'true' || explicit === '1') return true;
+
+    const nodeEnv = this.configService.get<string>('nodeEnv') || '';
+    return nodeEnv === 'production';
+  }
+
+  /**
+   * Updates a Paddle Billing catalog price: base `unit_price` plus optional regional overrides.
+   *
+   * **Important:** Sending `unit_price_overrides` replaces the entire overrides list for that
+   * price in Paddle. Omitted overrides ⇒ Paddle keeps existing overrides (base `unit_price` still updates).
+   */
+  async updateCatalogPrice(
+    priceId: string,
+    params: {
+      base: { amountMajor: number; currencyCode: string };
+      overrides?: Array<{
+        countryCodes: string[];
+        amountMajor: number;
+        currencyCode: string;
+      }>;
+    },
+  ): Promise<
+    | { ok: true; data: unknown }
+    | { ok: false; status: number; bodyText: string }
+  > {
+    if (!priceId?.trim()) {
+      return {
+        ok: false,
+        status: 400,
+        bodyText: '{"error":"priceId is required"}',
+      };
+    }
+
+    const unitPrice = {
+      amount: majorToMinorAmountString(
+        params.base.amountMajor,
+        params.base.currencyCode,
+      ),
+      currency_code: params.base.currencyCode.toUpperCase(),
+    };
+
+    const body: Record<string, unknown> = { unit_price: unitPrice };
+
+    if (params.overrides?.length) {
+      body.unit_price_overrides = params.overrides.map((o) => ({
+        country_codes: o.countryCodes,
+        unit_price: {
+          amount: majorToMinorAmountString(o.amountMajor, o.currencyCode),
+          currency_code: o.currencyCode.toUpperCase(),
+        },
+      }));
+    }
+
+    return this.paddlePatchDetailed(
+      `/prices/${encodeURIComponent(priceId)}`,
+      body,
+    );
+  }
+
+  private getCatalogPriceIdsForPlan(
+    planType: 'standard' | 'pro' | 'ultimate',
+  ): { monthly: string; yearly: string } {
+    const prices = this.configService.get<Record<string, string>>(
+      'paddle.prices',
+    ) || {};
+    const byPlan = {
+      standard: {
+        monthly: prices.standardMonthly || '',
+        yearly: prices.standardYearly || '',
+      },
+      pro: {
+        monthly: prices.proMonthly || '',
+        yearly: prices.proYearly || '',
+      },
+      ultimate: {
+        monthly: prices.ultimateMonthly || '',
+        yearly: prices.ultimateYearly || '',
+      },
+    } as const;
+    return byPlan[planType];
+  }
+
+  /**
+   * After admin updates `subscription_plans.display_pricing`, push amounts to Paddle for the
+   * fixed checkout price IDs for that plan.
+   *
+   * Policy (see subscription service): **database update commits first**, then Paddle PATCH.
+   * If Paddle fails, respond with an error so operators retry; DB may temporarily disagree with Paddle.
+   *
+   * @returns true if both PATCHes succeeded; false if sync was skipped (no pricing / flags / key).
+   */
+  async syncPaidPlanPricesFromDisplayPricing(
+    planType: 'standard' | 'pro' | 'ultimate',
+    displayPricing: Record<string, DisplayTierLike> | null,
+    defaultCurrency: string,
+  ): Promise<boolean> {
+    if (!displayPricing || !Object.keys(displayPricing).length) {
+      return false;
+    }
+
+    const apiKey = this.configService.get<string>('paddle.apiKey') || '';
+    if (!apiKey) {
+      this.logger.warn(
+        'Paddle catalog sync skipped: PADDLE_API_KEY is not set (display pricing saved to database only).',
+      );
+      return false;
+    }
+
+    if (!this.shouldSyncCatalogOnAdminSave()) {
+      return false;
+    }
+
+    const dc = defaultCurrency.toUpperCase();
+    const baseTier = displayPricing[dc];
+    if (!baseTier) {
+      throw new BadRequestException({
+        message: `Cannot sync to Paddle: missing display_pricing tier for default currency ${dc}.`,
+        hint: 'Add a complete row for the default currency in admin pricing.',
+      });
+    }
+
+    const ids = this.getCatalogPriceIdsForPlan(planType);
+    if (!ids.monthly?.trim() || !ids.yearly?.trim()) {
+      throw new BadGatewayException({
+        message: `Paddle catalog sync failed: price IDs are not configured for plan "${planType}".`,
+        hint: 'Set PADDLE_PRICE_* env vars to match checkout.',
+      });
+    }
+
+    const monthlyMajor = effectiveDisplayAmountMajor(baseTier, 'monthly');
+    const yearlyMajor = effectiveDisplayAmountMajor(baseTier, 'yearly');
+    const monthlyOverrides = buildRegionalOverridesForCycle(displayPricing, dc, 'monthly');
+    const yearlyOverrides = buildRegionalOverridesForCycle(displayPricing, dc, 'yearly');
+
+    const monthlyRes = await this.updateCatalogPrice(ids.monthly, {
+      base: { amountMajor: monthlyMajor, currencyCode: dc },
+      overrides: monthlyOverrides.length ? monthlyOverrides : undefined,
+    });
+    if (!monthlyRes.ok) {
+      throw new BadGatewayException({
+        message: 'Paddle rejected the monthly price update (catalog not fully updated).',
+        paddleStatus: monthlyRes.status,
+        paddleError: this.tryParseJsonBody(monthlyRes.bodyText),
+      });
+    }
+
+    const yearlyRes = await this.updateCatalogPrice(ids.yearly, {
+      base: { amountMajor: yearlyMajor, currencyCode: dc },
+      overrides: yearlyOverrides.length ? yearlyOverrides : undefined,
+    });
+    if (!yearlyRes.ok) {
+      throw new BadGatewayException({
+        message:
+          'Paddle rejected the yearly price update (monthly may already be updated — retry or fix in Paddle).',
+        paddleStatus: yearlyRes.status,
+        paddleError: this.tryParseJsonBody(yearlyRes.bodyText),
+      });
+    }
+
+    this.logger.log(
+      `Paddle catalog prices updated for ${planType} (${dc} monthly=${monthlyMajor} yearly=${yearlyMajor}).`,
+    );
+    return true;
+  }
+
+  private tryParseJsonBody(raw: string): unknown {
+    try {
+      return JSON.parse(raw) as unknown;
+    } catch {
+      return raw;
+    }
   }
 
   private async getTransactionDetails(
@@ -409,6 +813,16 @@ export class PaddleService {
   }
 
   async handleWebhook(event: PaddleWebhookEvent): Promise<void> {
+    if (event.event_type === 'price.updated') {
+      const data = event.data || {};
+      const priceId = data.id || data.price_id;
+      const unitPrice = data.unit_price;
+      this.logger.log(
+        `Paddle price.updated id=${priceId} amount=${unitPrice?.amount} currency=${unitPrice?.currency_code}`,
+      );
+      return;
+    }
+
     const entity = this.extractFromEvent(event);
     const resolvedUserId = await this.resolveUserId(event);
     const userId = entity?.userId || resolvedUserId;

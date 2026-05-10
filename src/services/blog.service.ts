@@ -63,6 +63,7 @@ export interface CreateBlogPostInput {
   robots?: string | null;
   structured_data?: Record<string, unknown> | null;
   locale?: string;
+  faq_json?: Array<{ question: string; answer: string }> | null;
 }
 
 export interface StaticPageSeoInput {
@@ -71,9 +72,12 @@ export interface StaticPageSeoInput {
   seo_description?: string | null;
   seo_keywords?: string | null;
   og_image_url?: string | null;
+  og_title?: string | null;
+  og_description?: string | null;
   canonical_url?: string | null;
   robots?: string | null;
   structured_data?: Record<string, unknown> | null;
+  h1_override?: string | null;
 }
 
 @Injectable()
@@ -294,6 +298,7 @@ export class BlogService {
       robots: input.robots ?? 'index,follow',
       structured_data: input.structured_data ?? null,
       locale: input.locale ?? 'en',
+      faq_json: input.faq_json ?? null,
       created_by: userId,
     };
 
@@ -426,9 +431,12 @@ export class BlogService {
       seo_description: input.seo_description?.trim() || null,
       seo_keywords: input.seo_keywords?.trim() || null,
       og_image_url: input.og_image_url?.trim() || null,
+      og_title: input.og_title?.trim() || null,
+      og_description: input.og_description?.trim() || null,
       canonical_url: input.canonical_url?.trim() || null,
       robots: input.robots ?? 'index,follow',
       structured_data: input.structured_data ?? null,
+      h1_override: input.h1_override?.trim() || null,
       updated_at: new Date().toISOString(),
     };
     const { data, error } = await client
