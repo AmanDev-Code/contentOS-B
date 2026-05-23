@@ -15,9 +15,9 @@
   - Auth: Not specified, but probably OAuth tokens stored per user.
 
 **Payments:**
-- **Paddle** - Used for handling subscriptions and payments.
-  - SDK/Client: No official SDK used. Integration is likely done via webhooks and direct API calls using `axios` in `src/services/paddle.service.ts`.
-  - Auth: API key stored in an env var.
+- **Polar** - Subscriptions and payments (checkout links + webhooks).
+  - SDK/Client: `@polar-sh/sdk` in `src/services/polar.service.ts`.
+  - Auth: `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, and related env vars.
 
 ## Data Storage
 
@@ -64,7 +64,7 @@
 - `SUPABASE_URL`, `SUPABASE_KEY`
 - `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`
 - `REDIS_HOST`, `REDIS_PORT`
-- Paddle-related keys
+- Polar-related keys (`POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, etc.)
 - n8n-related keys
 
 **Secrets location:**
@@ -74,7 +74,7 @@
 ## Webhooks & Callbacks
 
 **Incoming:**
-- `src/controllers/paddle.controller.ts`: Handles incoming webhooks from Paddle for subscription events.
+- `src/controllers/polar.controller.ts`: Handles incoming webhooks from Polar for subscription and order events.
 - `src/controllers/email-webhook.controller.ts`: Appears to handle webhooks related to email events.
 - `src/controllers/webhook.controller.ts`: A generic webhook controller, likely for n8n callbacks.
 

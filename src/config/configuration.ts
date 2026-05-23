@@ -88,26 +88,43 @@ export default () => ({
           process.env.FEATURE_LINKEDIN_ORG_PUBLISHING === '1',
   },
 
-  paddle: {
-    env: process.env.PADDLE_ENV || 'sandbox',
-    apiKey: process.env.PADDLE_API_KEY || '',
-    webhookSecret: process.env.PADDLE_WEBHOOK_SECRET || '',
-    webhookUrl: process.env.PADDLE_WEBHOOK_URL || '',
+  polar: {
+    provider: 'polar',
+    accessToken: process.env.POLAR_ACCESS_TOKEN || '',
+    webhookSecret: process.env.POLAR_WEBHOOK_SECRET || '',
+    organizationId: process.env.POLAR_ORGANIZATION_ID || '',
+    organizationSlug: process.env.POLAR_ORGANIZATION || '',
+    /** Polar mode: 'sandbox' | 'production'. Defaults to 'sandbox'. */
+    mode: process.env.POLAR_MODE || process.env.POLAR_ENV || 'sandbox',
     /**
-     * Push admin display pricing to Paddle catalog on `PUT /admin/subscription-plans/:plan`.
-     * If unset: enabled in production when `PADDLE_API_KEY` is set; disabled in non-production.
-     * Explicit `true`/`1` / `false`/`0` always wins (except when API key is missing — then sync is always skipped).
+     * Push admin display pricing to Polar when `PUT /admin/subscription-plans/:plan` saves.
+     * Mirrors legacy env toggles: unset defaults to on in production when `POLAR_ACCESS_TOKEN` is set.
      */
-    syncPricesOnAdminSave: process.env.PADDLE_SYNC_PRICES_ON_ADMIN_SAVE,
-    /** Optional master switch: `false` disables catalog sync regardless of other defaults. `true` forces sync when API key exists. */
-    enableCatalogSync: process.env.PADDLE_ENABLE_CATALOG_SYNC,
-    prices: {
-      standardMonthly: process.env.PADDLE_PRICE_STANDARD_MONTHLY || '',
-      standardYearly: process.env.PADDLE_PRICE_STANDARD_YEARLY || '',
-      proMonthly: process.env.PADDLE_PRICE_PRO_MONTHLY || '',
-      proYearly: process.env.PADDLE_PRICE_PRO_YEARLY || '',
-      ultimateMonthly: process.env.PADDLE_PRICE_ULTIMATE_MONTHLY || '',
-      ultimateYearly: process.env.PADDLE_PRICE_ULTIMATE_YEARLY || '',
+    syncPricesOnAdminSave: process.env.POLAR_SYNC_PRICES_ON_ADMIN_SAVE,
+    enableCatalogSync: process.env.POLAR_ENABLE_CATALOG_SYNC,
+    /** Product IDs - these are the actual Polar product IDs used for checkout */
+    products: {
+      standardMonthly: process.env.POLAR_PRODUCT_STANDARD_MONTHLY || '',
+      standardYearly: process.env.POLAR_PRODUCT_STANDARD_YEARLY || '',
+      proMonthly: process.env.POLAR_PRODUCT_PRO_MONTHLY || '',
+      proYearly: process.env.POLAR_PRODUCT_PRO_YEARLY || '',
+      ultimateMonthly: process.env.POLAR_PRODUCT_ULTIMATE_MONTHLY || '',
+      ultimateYearly: process.env.POLAR_PRODUCT_ULTIMATE_YEARLY || '',
     },
+    /** Price IDs - deprecated but kept for backwards compatibility */
+    prices: {
+      standardMonthly: process.env.POLAR_PRICE_STANDARD_MONTHLY || '',
+      standardYearly: process.env.POLAR_PRICE_STANDARD_YEARLY || '',
+      proMonthly: process.env.POLAR_PRICE_PRO_MONTHLY || '',
+      proYearly: process.env.POLAR_PRICE_PRO_YEARLY || '',
+      ultimateMonthly: process.env.POLAR_PRICE_ULTIMATE_MONTHLY || '',
+      ultimateYearly: process.env.POLAR_PRICE_ULTIMATE_YEARLY || '',
+    },
+  },
+
+  forex: {
+    apiKey: process.env.FOREX_API_KEY || '',
+    baseUrl:
+      process.env.FOREX_API_BASE_URL || 'https://forex-aws.silverlining.cloud',
   },
 });

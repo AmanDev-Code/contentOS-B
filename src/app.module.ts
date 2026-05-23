@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { ScheduleModule } from '@nestjs/schedule';
 import configuration from './config/configuration';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -26,7 +27,7 @@ import { AuthController } from './controllers/auth.controller';
 import { ProfileController } from './controllers/profile.controller';
 import { OnboardingController } from './controllers/onboarding.controller';
 import { AdminOnboardingController } from './controllers/admin-onboarding.controller';
-import { PaddleController } from './controllers/paddle.controller';
+import { PolarController } from './controllers/polar.controller';
 import { InternalController } from './controllers/internal.controller';
 import { CareersController } from './controllers/careers.controller';
 import { AdminCareersController } from './controllers/admin-careers.controller';
@@ -40,6 +41,14 @@ import { ReferralController, PublicReferralController } from './controllers/refe
 import { AdminReferralController } from './controllers/admin-referral.controller';
 import { AdminMediaController } from './controllers/admin-media.controller';
 import { AdminSubscriptionPlansController } from './controllers/admin-subscription-plans.controller';
+import { AdminDiscountCodesController } from './controllers/admin-discount-codes.controller';
+import { AdminCurrencyController } from './controllers/admin-currency.controller';
+import { AdminLaunchPricingController } from './controllers/admin-launch-pricing.controller';
+import { PublicLaunchPricingController } from './controllers/public-launch-pricing.controller';
+import { AdminPaymentGatewayController } from './controllers/admin-payment-gateway.controller';
+import { DiscountCodesService } from './services/discount-codes.service';
+import { CurrencyService } from './services/currency.service';
+import { LaunchPricingService } from './services/launch-pricing.service';
 import { FeedbackController } from './controllers/feedback.controller';
 import { UserFeedbackController } from './controllers/user-feedback.controller';
 import { PlatformAdminFeedbackController } from './controllers/platform-admin-feedback.controller';
@@ -54,6 +63,8 @@ import {
 } from './controllers/maintenance.controller';
 import { MaintenanceService } from './services/maintenance.service';
 import { AppSettingsService } from './services/app-settings.service';
+import { ExchangeRateService } from './services/exchange-rate.service';
+import { ExchangeRateCronService } from './cron/exchange-rate.cron';
 
 import { SupabaseService } from './services/supabase.service';
 import { GenerationService } from './services/generation.service';
@@ -71,7 +82,7 @@ import { NotificationService } from './services/notification.service';
 import { EmailService } from './services/email.service';
 import { AuthService } from './services/auth.service';
 import { OnboardingService } from './services/onboarding.service';
-import { PaddleService } from './services/paddle.service';
+import { PolarService } from './services/polar.service';
 import { IdempotencyService } from './services/idempotency.service';
 import { TrendingTagsService } from './services/trending-tags.service';
 import { TrendingHashtagEngineService } from './services/trending-hashtag-engine.service';
@@ -169,6 +180,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     BullModule.registerQueue({
       name: QUEUE_NAMES.MAINTENANCE,
     }),
+    ScheduleModule.forRoot(),
   ],
   controllers: [
     AppController,
@@ -193,7 +205,6 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     ProfileController,
     OnboardingController,
     AdminOnboardingController,
-    PaddleController,
     InternalController,
     CareersController,
     AdminCareersController,
@@ -215,9 +226,15 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     AdminMaintenanceController,
     ReferralController,
     PublicReferralController,
+    PublicLaunchPricingController,
     AdminReferralController,
     AdminMediaController,
     AdminSubscriptionPlansController,
+    AdminDiscountCodesController,
+    AdminLaunchPricingController,
+    AdminCurrencyController,
+    AdminPaymentGatewayController,
+    PolarController,
   ],
   providers: [
     AppService,
@@ -240,7 +257,9 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     EmailService,
     AuthService,
     OnboardingService,
-    PaddleService,
+    PolarService,
+    DiscountCodesService,
+    LaunchPricingService,
     IdempotencyService,
     TrendingTagsService,
     TrendingHashtagEngineService,
@@ -292,6 +311,9 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     OpenAIRateLimiterService,
     MaintenanceService,
     AppSettingsService,
+    CurrencyService,
+    ExchangeRateService,
+    ExchangeRateCronService,
   ],
 })
 export class AppModule implements NestModule {

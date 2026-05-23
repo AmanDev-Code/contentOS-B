@@ -217,13 +217,13 @@ export class PlatformUsersController {
   }
 
   @Get(':userId/billing')
-  @ApiOperation({ summary: 'Invoice rows persisted from Paddle webhooks (staff)' })
+  @ApiOperation({ summary: 'Invoice rows persisted from billing webhooks (staff)' })
   async userBilling(@Param('userId') userId: string) {
     const { data, error } = await this.supabaseService
       .getServiceClient()
       .from('billing_invoices')
       .select(
-        'id, paddle_transaction_id, invoice_number, status, amount, currency, invoice_url, issued_at',
+        'id, polar_order_id, invoice_number, status, amount, currency, invoice_url, issued_at',
       )
       .eq('user_id', userId)
       .order('issued_at', { ascending: false, nullsFirst: false })
@@ -331,7 +331,7 @@ export class PlatformUsersController {
   @UseGuards(AdminGuard)
   @ApiOperation({
     summary:
-      'Set plan in DB (super-admin). Does not call Paddle — use for support overrides.',
+      'Set plan in DB (super-admin). Does not call Polar checkout — use for support overrides.',
   })
   async setPlan(
     @Param('userId') userId: string,
@@ -467,7 +467,7 @@ export class PlatformUsersController {
     const { data: subscription } = await client
       .from('user_subscriptions')
       .select(
-        'id, user_id, plan_type, billing_cycle, credits_limit, is_active, subscription_start_date, subscription_end_date, paddle_subscription_id, paddle_customer_id',
+        'id, user_id, plan_type, billing_cycle, credits_limit, is_active, subscription_start_date, subscription_end_date, polar_subscription_id, polar_customer_id',
       )
       .eq('user_id', userId)
       .maybeSingle();

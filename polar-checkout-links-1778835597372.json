@@ -1,0 +1,63 @@
+{
+  "timestamp": "2026-05-15T08:59:57.372Z",
+  "mode": "sandbox",
+  "organization": "trndinn",
+  "orgId": "60bec27b-8101-43b0-90e8-7b838ec4e11b",
+  "results": [
+    {
+      "key": "STANDARD_MONTHLY",
+      "checkoutLinkId": "",
+      "checkoutUrl": "",
+      "label": "",
+      "productId": "efd24fdb-7ec0-43dc-8441-7a4289bdfd8a",
+      "success": false,
+      "error": "API Error 404: {\"detail\":\"Not Found\"}"
+    },
+    {
+      "key": "STANDARD_YEARLY",
+      "checkoutLinkId": "",
+      "checkoutUrl": "",
+      "label": "",
+      "productId": "fde54f63-7e20-4d11-8060-cb4a74f97dfb",
+      "success": false,
+      "error": "API Error 404: {\"detail\":\"Not Found\"}"
+    },
+    {
+      "key": "PRO_MONTHLY",
+      "checkoutLinkId": "",
+      "checkoutUrl": "",
+      "label": "",
+      "productId": "87743dd5-40d1-41d7-9873-a1d2982cd246",
+      "success": false,
+      "error": "API Error 404: {\"detail\":\"Not Found\"}"
+    },
+    {
+      "key": "PRO_YEARLY",
+      "checkoutLinkId": "",
+      "checkoutUrl": "",
+      "label": "",
+      "productId": "1e13434d-7ffd-4134-8950-6e25c9ee6850",
+      "success": false,
+      "error": "API Error 404: {\"detail\":\"Not Found\"}"
+    },
+    {
+      "key": "ULTIMATE_MONTHLY",
+      "checkoutLinkId": "",
+      "checkoutUrl": "",
+      "label": "",
+      "productId": "9e32abe0-d7e5-43f8-b958-6d2c112897fa",
+      "success": false,
+      "error": "API Error 404: {\"detail\":\"Not Found\"}"
+    },
+    {
+      "key": "ULTIMATE_YEARLY",
+      "checkoutLinkId": "",
+      "checkoutUrl": "",
+      "label": "",
+      "productId": "27e433b1-5d9e-403f-969a-ba96384300cf",
+      "success": false,
+      "error": "API Error 404: {\"detail\":\"Not Found\"}"
+    }
+  ],
+  "env_frontend": "# Polar Checkout Links - Generated 2026-05-15T08:59:57.372Z\n# These are persistent Checkout Links visible in Polar Dashboard\n# Organization: trndinn (SANDBOX)\n\n"
+}

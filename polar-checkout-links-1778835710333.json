@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-05-15T09:01:50.333Z",
+  "mode": "sandbox",
+  "organization": "trndinn",
+  "orgId": "60bec27b-8101-43b0-90e8-7b838ec4e11b",
+  "results": [
+    {
+      "key": "STANDARD_MONTHLY",
+      "checkoutLinkId": "0b0b9355-6ae8-4e3a-b192-740e172d9a90",
+      "checkoutUrl": "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_b7Jw1SHtN0StpLUrwOby9iVXb4585Kzb0wzIR16hlo6/redirect",
+      "label": "standard_monthly",
+      "productId": "efd24fdb-7ec0-43dc-8441-7a4289bdfd8a",
+      "success": true
+    },
+    {
+      "key": "STANDARD_YEARLY",
+      "checkoutLinkId": "faf1332e-df4b-4cfa-be12-8876305b6348",
+      "checkoutUrl": "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_1nnxVzAIoZ783UWW2begeQedHOQppy5MirhcG3aTQf8/redirect",
+      "label": "standard_yearly",
+      "productId": "fde54f63-7e20-4d11-8060-cb4a74f97dfb",
+      "success": true
+    },
+    {
+      "key": "PRO_MONTHLY",
+      "checkoutLinkId": "4689801c-41bb-4d54-9521-bb1831f512b3",
+      "checkoutUrl": "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_GRE2DkX0E7sGj7Uhuj6IULPuSjCVHf5Ke6TIB3SXSDb/redirect",
+      "label": "pro_monthly",
+      "productId": "87743dd5-40d1-41d7-9873-a1d2982cd246",
+      "success": true
+    },
+    {
+      "key": "PRO_YEARLY",
+      "checkoutLinkId": "0462487a-9dc7-4a6b-b841-d3a4c506428e",
+      "checkoutUrl": "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_HvLe48sb5ERdpHuPhEvNQoq4FmC9saYt02x8c0bok83/redirect",
+      "label": "pro_yearly",
+      "productId": "1e13434d-7ffd-4134-8950-6e25c9ee6850",
+      "success": true
+    },
+    {
+      "key": "ULTIMATE_MONTHLY",
+      "checkoutLinkId": "34077b2d-b2aa-43f0-a61d-36809c7facc6",
+      "checkoutUrl": "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_PEGgIsP0DZx5Yt0j5LFcyCMcvxm0N9Qgb6Png1poKAf/redirect",
+      "label": "ultimate_monthly",
+      "productId": "9e32abe0-d7e5-43f8-b958-6d2c112897fa",
+      "success": true
+    },
+    {
+      "key": "ULTIMATE_YEARLY",
+      "checkoutLinkId": "1a71024d-c9fd-4057-99bb-48dbe8e5b82a",
+      "checkoutUrl": "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_w0dovy67aM7nFiJBb0XC8lGda8fP9iAKkGoVc3hj4aj/redirect",
+      "label": "ultimate_yearly",
+      "productId": "27e433b1-5d9e-403f-969a-ba96384300cf",
+      "success": true
+    }
+  ],
+  "env_frontend": "# Polar Checkout Links - Generated 2026-05-15T09:01:50.333Z\n# These are persistent Checkout Links visible in Polar Dashboard\n# Organization: trndinn (SANDBOX)\n\nNEXT_PUBLIC_POLAR_CHECKOUT_STANDARD_MONTHLY=https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_b7Jw1SHtN0StpLUrwOby9iVXb4585Kzb0wzIR16hlo6/redirect\nNEXT_PUBLIC_POLAR_CHECKOUT_STANDARD_YEARLY=https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_1nnxVzAIoZ783UWW2begeQedHOQppy5MirhcG3aTQf8/redirect\nNEXT_PUBLIC_POLAR_CHECKOUT_PRO_MONTHLY=https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_GRE2DkX0E7sGj7Uhuj6IULPuSjCVHf5Ke6TIB3SXSDb/redirect\nNEXT_PUBLIC_POLAR_CHECKOUT_PRO_YEARLY=https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_HvLe48sb5ERdpHuPhEvNQoq4FmC9saYt02x8c0bok83/redirect\nNEXT_PUBLIC_POLAR_CHECKOUT_ULTIMATE_MONTHLY=https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_PEGgIsP0DZx5Yt0j5LFcyCMcvxm0N9Qgb6Png1poKAf/redirect\nNEXT_PUBLIC_POLAR_CHECKOUT_ULTIMATE_YEARLY=https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_w0dovy67aM7nFiJBb0XC8lGda8fP9iAKkGoVc3hj4aj/redirect\n"
+}

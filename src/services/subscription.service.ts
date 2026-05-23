@@ -1,6 +1,7 @@
 import {
   BadRequestException,
-  ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -12,9 +13,10 @@ import {
   getPlanConfig,
   PLAN_CONFIGURATIONS,
 } from '../config/plans.config';
-import { PaddleService } from './paddle.service';
+import { PolarService } from './polar.service';
+import { LaunchPricingService } from './launch-pricing.service';
 
-/** Display-only tiers per ISO 4217 code (marketing + app UI). Checkout stays on Paddle price IDs. */
+/** Display-only tiers per ISO 4217 code (marketing + app UI). Checkout uses Polar. */
 export interface PlanDisplayTier {
   symbol: string;
   listMonthly: number;
@@ -30,9 +32,13 @@ export interface PricingDisplaySettings {
   supportedCurrencies: string[];
 }
 
+export type BillingProviderKind = 'polar';
+
 export interface PublicPlansPayload {
   plans: SubscriptionPlan[];
   pricingDisplay: PricingDisplaySettings;
+  /** Active processor for checkout and webhooks (from `BILLING_PROVIDER`). */
+  billingProvider: BillingProviderKind;
 }
 
 export interface UserSubscription {
@@ -47,8 +53,9 @@ export interface UserSubscription {
   subscriptionStartDate: string;
   subscriptionEndDate: string | null;
   resetDate: string;
-  paddleSubscriptionId?: string;
-  paddleCustomerId?: string;
+  /** Polar subscription id (legacy Stripe columns may still hold older processor ids). */
+  polarSubscriptionId?: string;
+  polarCustomerId?: string;
   // Backward compatibility during rollout.
   stripeSubscriptionId?: string;
   stripeCustomerId?: string;
@@ -94,6 +101,7 @@ export interface BillingInfo {
       invoiceUrl?: string;
     }>;
   };
+  billingProvider: BillingProviderKind;
 }
 
 @Injectable()
@@ -101,9 +109,15 @@ export class SubscriptionService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly cacheService: CacheService,
-    private readonly paddleService: PaddleService,
+    private readonly polarService: PolarService,
     private readonly appSettingsService: AppSettingsService,
+    @Inject(forwardRef(() => LaunchPricingService))
+    private readonly launchPricingService: LaunchPricingService,
   ) {}
+
+  getActiveBillingProviderKind(): BillingProviderKind {
+    return 'polar';
+  }
 
   private sanitizeDisplayPricing(raw: unknown): PlanDisplayPricingMap | null {
     if (raw === null || raw === undefined) return null;
@@ -263,7 +277,7 @@ export class SubscriptionService {
       isActive: boolean;
       displayPricing: PlanDisplayPricingMap | null;
     }>,
-  ): Promise<{ paddleCatalogUpdated: boolean }> {
+  ): Promise<{ billingCatalogSynced: boolean }> {
     const allowed = ['free', 'standard', 'pro', 'ultimate'];
     if (!allowed.includes(planType)) {
       throw new NotFoundException('Invalid plan type');
@@ -301,11 +315,11 @@ export class SubscriptionService {
     await this.invalidateSubscriptionPlansCache();
 
     /**
-     * Paddle catalog sync runs **after** the DB commit (Supabase update completes above).
-     * If Paddle PATCH fails we throw `BadGatewayException`: operators should retry the same save;
-     * the database already reflects the new display pricing (may diverge from Paddle until retry succeeds).
+     * Polar catalog sync runs **after** the DB commit (Supabase update completes above).
+     * If Polar rejects the update we throw `BadGatewayException`: operators should retry the same save;
+     * the database already reflects the new display pricing until a retry succeeds.
      */
-    let paddleCatalogUpdated = false;
+    let billingCatalogSynced = false;
     if (planType !== 'free') {
       const { data: fresh, error: readErr } = await this.supabaseService
         .getServiceClient()
@@ -318,36 +332,37 @@ export class SubscriptionService {
       }
       const pricing = this.sanitizeDisplayPricing(fresh?.display_pricing);
       const meta = await this.getPricingDisplayMeta();
-      paddleCatalogUpdated =
-        await this.paddleService.syncPaidPlanPricesFromDisplayPricing(
-          planType as 'standard' | 'pro' | 'ultimate',
-          pricing,
-          meta.defaultCurrency,
-        );
+      if (this.polarService.syncPaidPlanPricesFromDisplayPricing) {
+        billingCatalogSynced =
+          await this.polarService.syncPaidPlanPricesFromDisplayPricing(
+            planType as 'standard' | 'pro' | 'ultimate',
+            pricing,
+            meta.defaultCurrency,
+          );
+      }
     }
 
-    return { paddleCatalogUpdated };
+    return { billingCatalogSynced };
   }
 
-  /** Live Paddle `unit_price` for each env-configured catalog price (read-only). */
-  async getPaddleCatalogLiveSnapshot() {
-    return this.paddleService.fetchCatalogLiveSnapshot();
+  /** Live billing provider catalog snapshot (read-only). */
+  async getBillingCatalogLiveSnapshot() {
+    return this.polarService.fetchCatalogLiveSnapshot();
   }
 
   /**
-   * Pull Paddle catalog amounts into Supabase `display_pricing` for the Paddle currency tier
-   * (list fields only; clears offers for that tier) and updates legacy `price_monthly` /
-   * `price_yearly` columns for each paid plan.
+   * Import display pricing from the Polar catalog into Supabase `display_pricing`
+   * and update legacy `price_monthly` / `price_yearly` columns.
    */
-  async importDisplayPricingFromPaddleCatalog(): Promise<{
+  async importDisplayPricingFromBillingCatalog(): Promise<{
     ok: true;
     updatedPlanTypes: Array<'standard' | 'pro' | 'ultimate'>;
     warnings: string[];
   }> {
-    const snap = await this.paddleService.fetchCatalogLiveSnapshot();
+    const snap = await this.polarService.fetchCatalogLiveSnapshot();
     if (!snap.apiKeyConfigured) {
       throw new BadRequestException(
-        'Configure PADDLE_API_KEY on the server to read the catalog.',
+        'Configure POLAR_ACCESS_TOKEN on the server to read the catalog.',
       );
     }
 
@@ -375,10 +390,10 @@ export class SubscriptionService {
       const m = b.monthly;
       const y = b.yearly;
       if (!m || m.error || m.amountMajor == null) {
-        fail.push(`${pt}: missing or failed monthly Paddle price read`);
+        fail.push(`${pt}: missing or failed monthly catalog price read`);
       }
       if (!y || y.error || y.amountMajor == null) {
-        fail.push(`${pt}: missing or failed yearly Paddle price read`);
+        fail.push(`${pt}: missing or failed yearly catalog price read`);
       }
       if (
         m?.currencyCode &&
@@ -393,7 +408,7 @@ export class SubscriptionService {
 
     if (fail.length) {
       throw new BadRequestException({
-        message: 'Cannot import: verify PADDLE_PRICE_* ids and Paddle API responses.',
+        message: 'Cannot import: verify POLAR_PRICE_* ids and Polar API responses.',
         errors: fail,
       });
     }
@@ -467,7 +482,11 @@ export class SubscriptionService {
       this.getSubscriptionPlans(),
       this.getPricingDisplayMeta(),
     ]);
-    return { plans, pricingDisplay };
+    return {
+      plans,
+      pricingDisplay,
+      billingProvider: this.getActiveBillingProviderKind(),
+    };
   }
 
   private formatBillingAmount(
@@ -529,9 +548,9 @@ export class SubscriptionService {
         subscriptionStartDate: data.subscription_start_date,
         subscriptionEndDate: data.subscription_end_date,
         resetDate: data.reset_date,
-        paddleSubscriptionId:
-          data.paddle_subscription_id || data.stripe_subscription_id,
-        paddleCustomerId: data.paddle_customer_id || data.stripe_customer_id,
+        polarSubscriptionId:
+          data.polar_subscription_id || data.stripe_subscription_id,
+        polarCustomerId: data.polar_customer_id || data.stripe_customer_id,
         stripeSubscriptionId: data.stripe_subscription_id,
         stripeCustomerId: data.stripe_customer_id,
         trialConsumed: data.trial_consumed ?? false,
@@ -670,7 +689,9 @@ export class SubscriptionService {
 
     const billing = {
       nextBillingDate:
-        subscription.subscriptionEndDate || subscription.resetDate,
+        subscription.subscriptionEndDate ||
+        subscription.resetDate ||
+        new Date().toISOString(),
       amount:
         subscription.billingCycle === 'yearly'
           ? subscription.priceYearly
@@ -698,7 +719,7 @@ export class SubscriptionService {
       .limit(20);
     if (storedInvoices?.length) {
       billing.history = storedInvoices.map((row) => ({
-        id: row.paddle_transaction_id,
+        id: row.polar_order_id || row.id,
         date: row.issued_at || row.created_at,
         description: `${plan.name} Plan - ${subscription.billingCycle}`,
         amount: this.formatBillingAmount(
@@ -712,10 +733,11 @@ export class SubscriptionService {
         invoice: row.invoice_number || undefined,
         invoiceUrl: row.minio_url || row.invoice_url || undefined,
       }));
-    } else if (subscription.paddleCustomerId) {
+    } else if (subscription.polarCustomerId) {
       // Fallback when webhook persistence is not available yet.
-      const txns = await this.paddleService.getCustomerTransactions(
-        subscription.paddleCustomerId,
+      const txns = await this.polarService.getCustomerTransactions(
+        subscription.polarCustomerId,
+        userId,
       );
       billing.history = txns.map((t) => ({
         id: t.id,
@@ -738,9 +760,10 @@ export class SubscriptionService {
     if (storedMethod?.card_last4) {
       billing.paymentMethod = `Card ending in ${storedMethod.card_last4}`;
     } else {
-      const paymentMethod = await this.paddleService.getPaymentMethodSummary(
-        subscription.paddleSubscriptionId,
-        subscription.paddleCustomerId,
+      const paymentMethod = await this.polarService.getPaymentMethodSummary(
+        subscription.polarSubscriptionId,
+        subscription.polarCustomerId,
+        userId,
       );
       if (paymentMethod) {
         billing.paymentMethod = paymentMethod;
@@ -752,6 +775,7 @@ export class SubscriptionService {
       plan,
       usage,
       billing,
+      billingProvider: this.getActiveBillingProviderKind(),
     };
   }
 
@@ -830,9 +854,9 @@ export class SubscriptionService {
         subscriptionStartDate: data.subscription_start_date,
         subscriptionEndDate: data.subscription_end_date,
         resetDate: data.reset_date,
-        paddleSubscriptionId:
-          data.paddle_subscription_id || data.stripe_subscription_id,
-        paddleCustomerId: data.paddle_customer_id || data.stripe_customer_id,
+        polarSubscriptionId:
+          data.polar_subscription_id || data.stripe_subscription_id,
+        polarCustomerId: data.polar_customer_id || data.stripe_customer_id,
         stripeSubscriptionId: data.stripe_subscription_id,
         stripeCustomerId: data.stripe_customer_id,
         trialConsumed: data.trial_consumed ?? false,
@@ -847,6 +871,14 @@ export class SubscriptionService {
 
   async cancelSubscription(userId: string): Promise<void> {
     try {
+      const current = await this.getUserSubscription(userId, {
+        bypassCache: true,
+      });
+      const polarSubscriptionId = current?.polarSubscriptionId;
+      if (polarSubscriptionId) {
+        await this.polarService.cancelSubscription(polarSubscriptionId);
+      }
+
       const { error } = await this.supabaseService
         .getServiceClient()
         .from('user_subscriptions')
@@ -861,7 +893,6 @@ export class SubscriptionService {
         throw new Error(`Failed to cancel subscription: ${error.message}`);
       }
 
-      // Invalidate cache
       await this.cacheService.delete(`subscription:${userId}`);
       await this.cacheService.delete(`quota:${userId}`);
     } catch (error) {
@@ -874,19 +905,187 @@ export class SubscriptionService {
     userId: string,
     planType: 'standard' | 'pro' | 'ultimate',
     billingCycle: 'monthly' | 'yearly',
-  ): Promise<void> {
-    const current = await this.getUserSubscription(userId);
-    if (!current?.paddleSubscriptionId) {
-      throw new Error('No active Paddle subscription found');
+  ): Promise<UserSubscription> {
+    const polarSubscriptionId = await this.resolvePolarSubscriptionId(userId);
+    if (!polarSubscriptionId) {
+      throw new BadRequestException(
+        'No active Polar subscription found. Use checkout to subscribe.',
+      );
     }
-    const ok = await this.paddleService.changeSubscriptionPlan(
-      current.paddleSubscriptionId,
+
+    // Step 1: Update the subscription on Polar
+    await this.polarService.changeSubscriptionPlan(
+      polarSubscriptionId,
       planType,
       billingCycle,
     );
-    if (!ok) {
-      throw new Error('Failed to update subscription on Paddle');
+
+    // Step 2: Immediately update our database with the new plan
+    // Get plan config for the target plan
+    const plan = getPlanConfig(planType);
+    if (!plan) {
+      throw new BadRequestException(`Invalid plan type: ${planType}`);
     }
+
+    const now = new Date();
+    const periodEnd = new Date(now);
+    if (billingCycle === 'yearly') {
+      periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+    } else {
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+    }
+
+    const basePayload: Record<string, unknown> = {
+      plan_type: planType,
+      billing_cycle: billingCycle,
+      credits_limit: plan.creditsLimit,
+      price_monthly: plan.priceMonthly,
+      price_yearly: plan.priceYearly,
+      is_active: true,
+      updated_at: now.toISOString(),
+      subscription_start_date: now.toISOString(),
+      subscription_end_date: periodEnd.toISOString(),
+    };
+
+    // Try with race-condition guard columns first; fall back without them if they don't exist yet
+    let updated: Record<string, unknown> | null = null;
+    const fullPayload = {
+      ...basePayload,
+      last_updated_by: 'api',
+      changed_at: now.toISOString(),
+    };
+
+    const { data: d1, error: e1 } = await this.supabaseService
+      .getServiceClient()
+      .from('user_subscriptions')
+      .update(fullPayload)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (!e1) {
+      updated = d1;
+    } else if (
+      e1.message?.includes('last_updated_by') ||
+      e1.message?.includes('changed_at') ||
+      e1.code === '42703' // undefined_column
+    ) {
+      // Columns don't exist yet — retry without them
+      console.warn(
+        'changePlanForExistingSubscription: last_updated_by/changed_at columns missing, retrying without race-condition guard',
+      );
+      const { data: d2, error: e2 } = await this.supabaseService
+        .getServiceClient()
+        .from('user_subscriptions')
+        .update(basePayload)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (e2) {
+        console.error('Error updating subscription in changePlanForExistingSubscription:', e2);
+        throw new Error(`Failed to update subscription in database: ${e2.message}`);
+      }
+      updated = d2;
+    } else {
+      console.error('Error updating subscription in changePlanForExistingSubscription:', e1);
+      throw new Error(`Failed to update subscription in database: ${e1.message}`);
+    }
+
+    // Clear cache so fresh data is returned
+    await this.cacheService.delete(`subscription:${userId}`);
+    await this.cacheService.delete(`quota:${userId}`);
+
+    // Step 3: Skip Polar sync after a successful plan change
+    // The database was already updated directly with the correct values above.
+    // Re-querying Polar here creates a race condition where Polar might return
+    // stale/cached data and overwrite our just-updated DB record.
+    // Polar's webhooks will eventually sync any discrepancies when they arrive.
+
+    // Return the updated subscription
+    const row = updated as Record<string, any>;
+    return {
+      id: row.id,
+      userId: row.user_id,
+      planType: row.plan_type,
+      billingCycle: row.billing_cycle,
+      creditsLimit: row.credits_limit,
+      priceMonthly: parseFloat(row.price_monthly || '0'),
+      priceYearly: parseFloat(row.price_yearly || '0'),
+      isActive: row.is_active,
+      subscriptionStartDate: row.subscription_start_date,
+      subscriptionEndDate: row.subscription_end_date,
+      resetDate: row.reset_date,
+      polarSubscriptionId: row.polar_subscription_id || row.stripe_subscription_id,
+      polarCustomerId: row.polar_customer_id || row.stripe_customer_id,
+      stripeSubscriptionId: row.stripe_subscription_id,
+      stripeCustomerId: row.stripe_customer_id,
+      trialConsumed: row.trial_consumed ?? false,
+    };
+  }
+
+  /**
+   * Pull the active Polar subscription into user_subscriptions (portal return / webhook delay).
+   *
+   * IMPORTANT: This method should NOT be called immediately after a plan change via
+   * changePlanForExistingSubscription because Polar may return stale data.
+   *
+   * This method is intended for:
+   * - User returning from Polar's customer portal (where they changed plan in Polar's UI)
+   * - Manual sync when user thinks their plan is out of sync
+   * - Periodic reconciliation (not immediate after API-driven changes)
+   */
+  async syncBillingFromPolar(userId: string): Promise<boolean> {
+    const polarSubscriptionId = await this.resolvePolarSubscriptionId(userId);
+    if (!polarSubscriptionId) {
+      return false;
+    }
+    return this.polarService.syncSubscriptionPlanFromPolar(
+      polarSubscriptionId,
+      userId,
+    );
+  }
+
+  private async resolvePolarSubscriptionId(userId: string): Promise<string | null> {
+    const current = await this.getUserSubscription(userId, {
+      bypassCache: true,
+    });
+    const stored =
+      current?.polarSubscriptionId?.trim() ||
+      current?.stripeSubscriptionId?.trim() ||
+      '';
+    if (stored) {
+      return stored;
+    }
+
+    const fromPolar =
+      await this.polarService.getActiveSubscriptionIdForUser(userId);
+    if (!fromPolar) {
+      return null;
+    }
+
+    await this.supabaseService
+      .getServiceClient()
+      .from('user_subscriptions')
+      .update({
+        polar_subscription_id: fromPolar,
+        stripe_subscription_id: fromPolar,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    await this.cacheService.delete(`subscription:${userId}`);
+    return fromPolar;
+  }
+
+  async getCustomerPortalUrl(
+    userId: string,
+    returnUrl: string,
+  ): Promise<string> {
+    const current = await this.getUserSubscription(userId, {
+      bypassCache: true,
+    });
+    return this.polarService.createCustomerPortalSession(userId, returnUrl);
   }
 
   async resolveInvoiceDownloadUrl(
@@ -898,15 +1097,14 @@ export class SubscriptionService {
       .from('billing_invoices')
       .select('*')
       .eq('user_id', userId)
-      .eq('paddle_transaction_id', transactionId)
+      .eq('polar_order_id', transactionId)
       .maybeSingle();
 
     if (!invoice) return null;
     if (invoice.minio_url) return invoice.minio_url;
     if (invoice.invoice_url) return invoice.invoice_url;
 
-    const fetchedUrl =
-      await this.paddleService.getTransactionInvoiceUrl(transactionId);
+    const fetchedUrl = await this.polarService.getTransactionInvoiceUrl(transactionId);
     if (!fetchedUrl) return null;
 
     await this.supabaseService
@@ -914,7 +1112,7 @@ export class SubscriptionService {
       .from('billing_invoices')
       .update({ invoice_url: fetchedUrl, updated_at: new Date().toISOString() })
       .eq('user_id', userId)
-      .eq('paddle_transaction_id', transactionId);
+      .eq('polar_order_id', transactionId);
 
     return fetchedUrl;
   }

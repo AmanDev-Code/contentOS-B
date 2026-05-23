@@ -5,6 +5,14 @@ import { SupabaseService } from './supabase.service';
 const SETTINGS_CACHE_PREFIX = 'app:settings:';
 const SETTINGS_CACHE_TTL = 3600; // 1 hour
 
+/** app_settings.updated_by is UUID FK to auth.users — non-UUID labels belong in value JSON only */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isAuthUserId(value: string | undefined): value is string {
+  return !!value && UUID_RE.test(value);
+}
+
 export interface AppSetting {
   key: string;
   value: unknown;
@@ -14,7 +22,7 @@ export interface AppSetting {
 
 export const APP_SETTING_KEYS = {
   FREE_CREDIT_LIMIT: 'free_credit_limit',
-  /** Default + supported currencies for marketing / billing UI (checkout still uses Paddle). */
+  /** Default + supported currencies for marketing / billing UI (checkout uses Polar). */
   PRICING_DISPLAY: 'pricing_display',
 } as const;
 
@@ -66,21 +74,34 @@ export class AppSettingsService {
     updatedBy?: string,
   ): Promise<boolean> {
     try {
+      const row: {
+        key: string;
+        value: T;
+        updated_at: string;
+        updated_by?: string;
+      } = {
+        key,
+        value,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (isAuthUserId(updatedBy)) {
+        row.updated_by = updatedBy;
+      } else if (updatedBy) {
+        this.logger.debug(
+          `app_settings.updated_by skipped for ${key}: "${updatedBy}" is not a user UUID`,
+        );
+      }
+
       const { error } = await this.supabaseService
         .getServiceClient()
         .from('app_settings')
-        .upsert(
-          {
-            key,
-            value,
-            updated_at: new Date().toISOString(),
-            updated_by: updatedBy,
-          },
-          { onConflict: 'key' },
-        );
+        .upsert(row, { onConflict: 'key' });
 
       if (error) {
-        this.logger.error(`Failed to set setting ${key}: ${error.message}`);
+        this.logger.error(
+          `Failed to set setting ${key}: ${error.message} (code=${error.code}, details=${error.details}, hint=${error.hint})`,
+        );
         return false;
       }
 

@@ -63,7 +63,7 @@ export class AdminUpdateSubscriptionPlanDto {
   isActive?: boolean;
 
   /**
-   * Per-currency display amounts (not Paddle). Keys: USD, INR, …
+   * Per-currency display amounts (marketing UI). Keys: USD, INR, …
    * Example: `{ "USD": { "symbol": "$", "listMonthly": 15, ... } }`
    */
   @IsOptional()
@@ -104,15 +104,15 @@ export class AdminSubscriptionPlansController {
     return this.subscriptionService.adminListAllPlans();
   }
 
-  @Get('paddle-catalog-live')
-  async paddleCatalogLive() {
-    return this.subscriptionService.getPaddleCatalogLiveSnapshot();
+  @Get('billing-catalog-live')
+  async billingCatalogLive() {
+    return this.subscriptionService.getBillingCatalogLiveSnapshot();
   }
 
-  /** Align Supabase display list prices with live Paddle catalog for paid plans (clears offers for Paddle-currency tier). */
-  @Post('import-from-paddle-catalog')
-  async importFromPaddleCatalog() {
-    return this.subscriptionService.importDisplayPricingFromPaddleCatalog();
+  /** Align Supabase display list prices with live Polar catalog for paid plans (clears offers for catalog-currency tier). */
+  @Post('import-from-billing-catalog')
+  async importFromBillingCatalog() {
+    return this.subscriptionService.importDisplayPricingFromBillingCatalog();
   }
 
   @Put(':planType')
@@ -139,6 +139,6 @@ export class AdminSubscriptionPlansController {
           dto.displayPricing === undefined ? undefined : dto.displayPricing,
       },
     );
-    return { ok: true as const, paddleCatalogUpdated: result.paddleCatalogUpdated };
+    return { ok: true as const, billingCatalogSynced: result.billingCatalogSynced };
   }
 }

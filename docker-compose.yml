@@ -125,6 +125,22 @@ services:
     environment:
       - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+      # Missing env vars
+      - LINKEDIN_API_VERSION=${LINKEDIN_API_VERSION}
+      - SMTP2GO_API_KEY=${SMTP2GO_API_KEY}
+      - SMTP2GO_BASE_URL=${SMTP2GO_BASE_URL:-https://api.smtp2go.com/v3}
+      - SMTP2GO_FROM_EMAIL=${SMTP2GO_FROM_EMAIL:-noreply@trndinn.com}
+      - SMTP2GO_FROM_NAME=${SMTP2GO_FROM_NAME:-Trndinn Team}
+      - ADMIN_USER_ID=${ADMIN_USER_ID}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - FEATURE_MEDIA_PIPELINE_V2=${FEATURE_MEDIA_PIPELINE_V2:-true}
+      - FEATURE_LINKEDIN_ORG_PUBLISHING=${FEATURE_LINKEDIN_ORG_PUBLISHING:-true}
+      - ADMIN_ACTION_SECRET=${ADMIN_ACTION_SECRET}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-us-central1}
+      - GOOGLE_OAUTH_CALLBACK_URL=${GOOGLE_OAUTH_CALLBACK_URL}
+
+
     volumes:
       - minio-data:/data
     command: server /data --console-address ":9001"

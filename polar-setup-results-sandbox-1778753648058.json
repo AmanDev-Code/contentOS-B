@@ -1,0 +1,66 @@
+{
+  "timestamp": "2026-05-14T10:14:08.062Z",
+  "mode": "sandbox",
+  "credentials": {
+    "orgSlug": "trndinn",
+    "orgId": "60bec27b-8101-43b0-90e8-7b838ec4e11b"
+  },
+  "results": {
+    "standard": {
+      "month": {
+        "productId": "efd24fdb-7ec0-43dc-8441-7a4289bdfd8a",
+        "priceId": "1a872740-b6ed-4624-ba6d-0f6d4597257e",
+        "checkoutUrl": "https://sandbox.polar.sh/checkout/polar_c_QDM59G7UcRk0x04adkuniQ01oz7vDKXVpr0Y71MXNti",
+        "basePlanId": "standard",
+        "interval": "month",
+        "displayPrice": 15
+      },
+      "year": {
+        "productId": "fde54f63-7e20-4d11-8060-cb4a74f97dfb",
+        "priceId": "2f5343ec-872c-4e40-b72c-2f9666639b80",
+        "checkoutUrl": "https://sandbox.polar.sh/checkout/polar_c_WRAvUgs0Uk1Jy9zpfCUOBqsNtMsP3XGKocUdz16bIKz",
+        "basePlanId": "standard",
+        "interval": "year",
+        "displayPrice": 150
+      }
+    },
+    "pro": {
+      "month": {
+        "productId": "87743dd5-40d1-41d7-9873-a1d2982cd246",
+        "priceId": "19fde135-18f0-4822-9014-d26d577b17ac",
+        "checkoutUrl": "https://sandbox.polar.sh/checkout/polar_c_eKlHVcf8FQijc9tTXqcFerPy3Kjnr4edySM6H2TNuhs",
+        "basePlanId": "pro",
+        "interval": "month",
+        "displayPrice": 29
+      },
+      "year": {
+        "productId": "1e13434d-7ffd-4134-8950-6e25c9ee6850",
+        "priceId": "d3679bd2-871f-4789-8613-4bec0706deda",
+        "checkoutUrl": "https://sandbox.polar.sh/checkout/polar_c_ziQhoG1Pyet5oOMmajTEa5Tw7UR3XX33KtxVR2IHkOd",
+        "basePlanId": "pro",
+        "interval": "year",
+        "displayPrice": 290
+      }
+    },
+    "ultimate": {
+      "month": {
+        "productId": "9e32abe0-d7e5-43f8-b958-6d2c112897fa",
+        "priceId": "b2b8401d-42ac-439b-afd1-caa4f31ae9de",
+        "checkoutUrl": "https://sandbox.polar.sh/checkout/polar_c_HwkGIpXmq4kjtXzVHgFpkD2SgurTISYgGvP8W03p9UH",
+        "basePlanId": "ultimate",
+        "interval": "month",
+        "displayPrice": 49
+      },
+      "year": {
+        "productId": "27e433b1-5d9e-403f-969a-ba96384300cf",
+        "priceId": "219b6baa-e991-4921-ab07-b25124c09d96",
+        "checkoutUrl": "https://sandbox.polar.sh/checkout/polar_c_ZAN7Um21zwqVgXVyjd3OtAEUWjX95JbHTRsN22XGW5Z",
+        "basePlanId": "ultimate",
+        "interval": "year",
+        "displayPrice": 490
+      }
+    }
+  },
+  "env_backend": "# Polar Payment Configuration\nPOLAR_ACCESS_TOKEN=polar_oat_8ltIWwxQvyYu1fDuEBdbYwK9AASefbZJry4o74WCqa0\nPOLAR_ENV=sandbox\nPOLAR_ORGANIZATION=trndinn\nPOLAR_WEBHOOK_SECRET=polar_whs_ced4mUZ4FUtZ1KdbFRiUwZ5SwkinsVNTP4zok3fUnjx\n\n# Product IDs\n\n# Price IDs\n",
+  "env_frontend": "# Polar Payment Configuration\nNEXT_PUBLIC_POLAR_MODE=sandbox\nNEXT_PUBLIC_POLAR_ORGANIZATION=trndinn\n\n# Price IDs (for SDK checkout)\n\n# Checkout URLs\n"
+}
