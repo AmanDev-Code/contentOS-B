@@ -869,27 +869,38 @@ export class SubscriptionService {
     }
   }
 
-  async cancelSubscription(userId: string): Promise<void> {
+  async cancelSubscription(userId: string): Promise<{
+    success: boolean;
+    cancelledViaPolar: boolean;
+    message?: string;
+  }> {
     try {
       const current = await this.getUserSubscription(userId, {
         bypassCache: true,
       });
       const polarSubscriptionId = current?.polarSubscriptionId;
+      let cancelledViaPolar = false;
+      let localOnlyCancellation = false;
+
       if (polarSubscriptionId) {
         // Check if the subscription exists in the current Polar environment
         const subscriptionExists = await this.polarService.checkSubscriptionExists(polarSubscriptionId);
         if (!subscriptionExists) {
           // Subscription was created in a different environment (e.g., sandbox vs production)
-          throw new BadRequestException({
-            message: 'Your subscription was created in a different billing environment and cannot be cancelled here.',
-            code: 'SUBSCRIPTION_ENVIRONMENT_MISMATCH',
-            action: 'cancel_and_resubscribe',
-            detail: 'Please cancel your current plan and subscribe fresh to continue.',
-          });
+          // Cancel locally only - the subscription doesn't exist in current Polar environment
+          localOnlyCancellation = true;
+          console.warn(
+            `Subscription ${polarSubscriptionId} for user ${userId} not found in current Polar environment. ` +
+            `Performing local-only cancellation. Subscription was likely created in a different environment (sandbox vs production).`
+          );
+        } else {
+          // Subscription exists in Polar - cancel via Polar API
+          await this.polarService.cancelSubscription(polarSubscriptionId);
+          cancelledViaPolar = true;
         }
-        await this.polarService.cancelSubscription(polarSubscriptionId);
       }
 
+      // Always update local database to mark subscription as cancelled
       const { error } = await this.supabaseService
         .getServiceClient()
         .from('user_subscriptions')
@@ -897,6 +908,9 @@ export class SubscriptionService {
           is_active: false,
           subscription_end_date: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          // Clear Polar IDs since the subscription is no longer active
+          polar_subscription_id: null,
+          polar_customer_id: null,
         })
         .eq('user_id', userId);
 
@@ -906,6 +920,14 @@ export class SubscriptionService {
 
       await this.cacheService.delete(`subscription:${userId}`);
       await this.cacheService.delete(`quota:${userId}`);
+
+      return {
+        success: true,
+        cancelledViaPolar,
+        ...(localOnlyCancellation && {
+          message: 'Your subscription has been cancelled. Note: This subscription was created in a different environment, so it was cancelled locally only. You can now subscribe to a new plan.',
+        }),
+      };
     } catch (error) {
       console.error('Error canceling subscription:', error);
       throw error;
