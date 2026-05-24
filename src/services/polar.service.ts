@@ -1648,6 +1648,33 @@ export class PolarService {
     return true;
   }
 
+  /**
+   * Check if a subscription exists in Polar (useful for detecting sandbox vs production IDs)
+   */
+  async checkSubscriptionExists(subscriptionId: string): Promise<boolean> {
+    if (!this.polar) {
+      return false;
+    }
+    try {
+      await this.withPolarTimeout(
+        this.polar.subscriptions.get({ id: subscriptionId }),
+        'check subscription exists',
+        10000,
+      );
+      return true;
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      // ResourceNotFound indicates the subscription doesn't exist in this environment
+      if (message.includes('ResourceNotFound') || message.includes('NotFound') || message.includes('not found')) {
+        this.logger.warn(`Subscription ${subscriptionId} not found in current Polar environment (likely sandbox/production mismatch)`);
+        return false;
+      }
+      // Other errors are treated as "exists but there's another problem"
+      this.logger.warn(`Error checking subscription ${subscriptionId}: ${message}`);
+      return true;
+    }
+  }
+
   async changeSubscriptionPlan(
     subscriptionId: string,
     planType: PlanType,

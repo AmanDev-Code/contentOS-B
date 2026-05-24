@@ -1,0 +1,107 @@
+{
+  "timestamp": "2026-05-23T19:15:45.853Z",
+  "mode": "production",
+  "organization": "trndinn",
+  "products": [
+    {
+      "key": "STANDARD_MONTHLY",
+      "productId": "5e440962-c914-4839-9bbc-75ab3f2a38f9",
+      "priceId": "d67cab2a-2b0a-456e-a7a8-fa878d65a346",
+      "basePlanId": "standard",
+      "interval": "month",
+      "displayPrice": "₹99"
+    },
+    {
+      "key": "STANDARD_YEARLY",
+      "productId": "0d11063a-667c-4d88-88be-8d3d2e294b76",
+      "priceId": "790aec25-8114-476e-9426-f2b254844eb5",
+      "basePlanId": "standard",
+      "interval": "year",
+      "displayPrice": "₹986"
+    },
+    {
+      "key": "PRO_MONTHLY",
+      "productId": "d39390a1-2fee-464b-8445-7a3e17552be2",
+      "priceId": "b9cae0f6-7880-43d7-9bf6-28ee02a9c876",
+      "basePlanId": "pro",
+      "interval": "month",
+      "displayPrice": "₹149"
+    },
+    {
+      "key": "PRO_YEARLY",
+      "productId": "cbb36014-e261-44ab-9489-c295958232ec",
+      "priceId": "323c4e76-75c9-4dcc-93c4-e3ea6a874809",
+      "basePlanId": "pro",
+      "interval": "year",
+      "displayPrice": "₹1484"
+    },
+    {
+      "key": "ULTIMATE_MONTHLY",
+      "productId": "66042e0e-1e8b-4dda-90b9-3f91864b4e14",
+      "priceId": "400e405b-1a56-4c63-8807-8f8bfa6bd80b",
+      "basePlanId": "ultimate",
+      "interval": "month",
+      "displayPrice": "₹199"
+    },
+    {
+      "key": "ULTIMATE_YEARLY",
+      "productId": "9c34b824-f253-441c-8ab2-4c69b99caf92",
+      "priceId": "6c2263c7-19cf-4b89-b919-7645f63bcdc0",
+      "basePlanId": "ultimate",
+      "interval": "year",
+      "displayPrice": "₹1982"
+    }
+  ],
+  "checkoutLinks": [
+    {
+      "key": "STANDARD_MONTHLY",
+      "checkoutLinkId": "0fe91482-edaa-4727-b008-7d36d3454966",
+      "checkoutUrl": "https://buy.polar.sh/polar_cl_DeQ6ROSgsNi2ij6ckgyHBX98HpxPRnyR7j2Il1uX5Ha",
+      "productId": "5e440962-c914-4839-9bbc-75ab3f2a38f9",
+      "label": "trndinn_standard_month",
+      "success": true
+    },
+    {
+      "key": "STANDARD_YEARLY",
+      "checkoutLinkId": "a96d7c3e-494d-47f8-869b-1f7975ee1e6b",
+      "checkoutUrl": "https://buy.polar.sh/polar_cl_s7nHZuNxh21LnC13nBwyP6Ke5W4bFeOm4AkuD0rEJVV",
+      "productId": "0d11063a-667c-4d88-88be-8d3d2e294b76",
+      "label": "trndinn_standard_year",
+      "success": true
+    },
+    {
+      "key": "PRO_MONTHLY",
+      "checkoutLinkId": "ce4fa7ec-0d69-4393-b46a-09f4eaec60b8",
+      "checkoutUrl": "https://buy.polar.sh/polar_cl_SNxg5ie5azejCw7Ql4z0a96vmbOTbf8ZkQYMa4Mo9eJ",
+      "productId": "d39390a1-2fee-464b-8445-7a3e17552be2",
+      "label": "trndinn_pro_month",
+      "success": true
+    },
+    {
+      "key": "PRO_YEARLY",
+      "checkoutLinkId": "ec84874e-2fba-44f8-b4d6-0552c2d56171",
+      "checkoutUrl": "https://buy.polar.sh/polar_cl_zUugCeQ4l2M3FgDJpCTxDizINGIeN6XUzwZqd40UV9D",
+      "productId": "cbb36014-e261-44ab-9489-c295958232ec",
+      "label": "trndinn_pro_year",
+      "success": true
+    },
+    {
+      "key": "ULTIMATE_MONTHLY",
+      "checkoutLinkId": "577bc5e2-e325-4fc6-9805-0771d70b415f",
+      "checkoutUrl": "https://buy.polar.sh/polar_cl_1EDUQBkBFCAlQPDzoR82upu3wRUmzs6B1cYCY2vzISH",
+      "productId": "66042e0e-1e8b-4dda-90b9-3f91864b4e14",
+      "label": "trndinn_ultimate_month",
+      "success": true
+    },
+    {
+      "key": "ULTIMATE_YEARLY",
+      "checkoutLinkId": "e0f00e68-b2c9-4821-bbd8-fca76861084d",
+      "checkoutUrl": "https://buy.polar.sh/polar_cl_e3MiirnqctmfwTeSjdAxKnuqVLGflsKok4yQy35HJem",
+      "productId": "9c34b824-f253-441c-8ab2-4c69b99caf92",
+      "label": "trndinn_ultimate_year",
+      "success": true
+    }
+  ],
+  "envBackend": "# ============================================\n# POLAR PRODUCTION CONFIGURATION\n# Generated: 2026-05-23T19:15:45.844Z\n# ============================================\n\nBILLING_PROVIDER=polar\nPOLAR_ENV=production\nPOLAR_ORGANIZATION=trndinn\n\n# Get your token from: https://polar.sh/settings\nPOLAR_ACCESS_TOKEN=polar_oat_2oKF6jrtqjcc9ZQKKnDFT8WOH8zpktSN9mauE3eQbUH\nPOLAR_WEBHOOK_SECRET=polar_whs_ced4mUZ4FUtZ1KdbFRiUwZ5SwkinsVNTP4zok3fUnjx\n\n# Product IDs (DO NOT MODIFY - tied to Polar production)\nPOLAR_PRODUCT_STANDARD_MONTHLY=5e440962-c914-4839-9bbc-75ab3f2a38f9\nPOLAR_PRODUCT_STANDARD_YEARLY=0d11063a-667c-4d88-88be-8d3d2e294b76\nPOLAR_PRODUCT_PRO_MONTHLY=d39390a1-2fee-464b-8445-7a3e17552be2\nPOLAR_PRODUCT_PRO_YEARLY=cbb36014-e261-44ab-9489-c295958232ec\nPOLAR_PRODUCT_ULTIMATE_MONTHLY=66042e0e-1e8b-4dda-90b9-3f91864b4e14\nPOLAR_PRODUCT_ULTIMATE_YEARLY=9c34b824-f253-441c-8ab2-4c69b99caf92\n\n# Price IDs (DO NOT MODIFY - tied to Polar production)\nPOLAR_PRICE_STANDARD_MONTHLY=d67cab2a-2b0a-456e-a7a8-fa878d65a346\nPOLAR_PRICE_STANDARD_YEARLY=790aec25-8114-476e-9426-f2b254844eb5\nPOLAR_PRICE_PRO_MONTHLY=b9cae0f6-7880-43d7-9bf6-28ee02a9c876\nPOLAR_PRICE_PRO_YEARLY=323c4e76-75c9-4dcc-93c4-e3ea6a874809\nPOLAR_PRICE_ULTIMATE_MONTHLY=400e405b-1a56-4c63-8807-8f8bfa6bd80b\nPOLAR_PRICE_ULTIMATE_YEARLY=6c2263c7-19cf-4b89-b919-7645f63bcdc0\n",
+  "envFrontend": "# ============================================\n# POLAR PRODUCTION CONFIGURATION\n# Generated: 2026-05-23T19:15:45.846Z\n# ============================================\n\nNEXT_PUBLIC_BILLING_PROVIDER=polar\nNEXT_PUBLIC_POLAR_MODE=production\nNEXT_PUBLIC_POLAR_ORGANIZATION=trndinn\n\n# Checkout Links (from Polar Dashboard)\nNEXT_PUBLIC_POLAR_CHECKOUT_STANDARD_MONTHLY=https://buy.polar.sh/polar_cl_DeQ6ROSgsNi2ij6ckgyHBX98HpxPRnyR7j2Il1uX5Ha\nNEXT_PUBLIC_POLAR_CHECKOUT_STANDARD_YEARLY=https://buy.polar.sh/polar_cl_s7nHZuNxh21LnC13nBwyP6Ke5W4bFeOm4AkuD0rEJVV\nNEXT_PUBLIC_POLAR_CHECKOUT_PRO_MONTHLY=https://buy.polar.sh/polar_cl_SNxg5ie5azejCw7Ql4z0a96vmbOTbf8ZkQYMa4Mo9eJ\nNEXT_PUBLIC_POLAR_CHECKOUT_PRO_YEARLY=https://buy.polar.sh/polar_cl_zUugCeQ4l2M3FgDJpCTxDizINGIeN6XUzwZqd40UV9D\nNEXT_PUBLIC_POLAR_CHECKOUT_ULTIMATE_MONTHLY=https://buy.polar.sh/polar_cl_1EDUQBkBFCAlQPDzoR82upu3wRUmzs6B1cYCY2vzISH\nNEXT_PUBLIC_POLAR_CHECKOUT_ULTIMATE_YEARLY=https://buy.polar.sh/polar_cl_e3MiirnqctmfwTeSjdAxKnuqVLGflsKok4yQy35HJem\n\n# Price IDs (for SDK checkout)\nNEXT_PUBLIC_POLAR_PRICE_STANDARD_MONTHLY=d67cab2a-2b0a-456e-a7a8-fa878d65a346\nNEXT_PUBLIC_POLAR_PRICE_STANDARD_YEARLY=790aec25-8114-476e-9426-f2b254844eb5\nNEXT_PUBLIC_POLAR_PRICE_PRO_MONTHLY=b9cae0f6-7880-43d7-9bf6-28ee02a9c876\nNEXT_PUBLIC_POLAR_PRICE_PRO_YEARLY=323c4e76-75c9-4dcc-93c4-e3ea6a874809\nNEXT_PUBLIC_POLAR_PRICE_ULTIMATE_MONTHLY=400e405b-1a56-4c63-8807-8f8bfa6bd80b\nNEXT_PUBLIC_POLAR_PRICE_ULTIMATE_YEARLY=6c2263c7-19cf-4b89-b919-7645f63bcdc0\n"
+}

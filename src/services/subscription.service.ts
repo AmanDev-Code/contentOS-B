@@ -913,6 +913,18 @@ export class SubscriptionService {
       );
     }
 
+    // Check if the subscription exists in the current Polar environment
+    const subscriptionExists = await this.polarService.checkSubscriptionExists(polarSubscriptionId);
+    if (!subscriptionExists) {
+      // Subscription was created in a different environment (e.g., sandbox vs production)
+      throw new BadRequestException({
+        message: 'Your subscription was created in a different billing environment and cannot be modified here.',
+        code: 'SUBSCRIPTION_ENVIRONMENT_MISMATCH',
+        action: 'cancel_and_resubscribe',
+        detail: 'Please cancel your current plan and subscribe fresh to continue.',
+      });
+    }
+
     // Step 1: Update the subscription on Polar
     await this.polarService.changeSubscriptionPlan(
       polarSubscriptionId,

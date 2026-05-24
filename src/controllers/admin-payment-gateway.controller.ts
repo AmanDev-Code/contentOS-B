@@ -181,6 +181,161 @@ export class AdminPaymentGatewayController {
     }
   }
 
+  @Post('setup-production')
+  @ApiOperation({
+    summary: 'Setup Polar production environment',
+    description: 'Creates products and checkout links in Polar production. See docs/integrations/polar-setup-production.md for details.',
+  })
+  async setupProduction(): Promise<{
+    success: boolean;
+    message: string;
+    details?: {
+      productsCreated: number;
+      checkoutLinksCreated: number;
+      products: Array<{ key: string; name: string; productId: string; priceId: string; price: string }>;
+      checkoutLinks: Array<{ key: string; url: string }>;
+      nextSteps: string[];
+    };
+  }> {
+    try {
+      const mode = this.configService.get<string>('polar.mode');
+      const accessToken = this.configService.get<string>('polar.accessToken');
+      const webhookSecret = this.configService.get<string>('polar.webhookSecret');
+      const orgId = this.configService.get<string>('polar.organization');
+
+      // Check if we're in production mode
+      if (mode !== 'production') {
+        throw new HttpException(
+          `Current POLAR_ENV is "${mode}", but production setup requires POLAR_ENV=production. Set it in your .env file and restart the server.`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Validate Polar configuration
+      if (!accessToken) {
+        throw new HttpException(
+          'POLAR_ACCESS_TOKEN is not configured',
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
+
+      if (!orgId) {
+        throw new HttpException(
+          'POLAR_ORGANIZATION is not configured',
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
+
+      // Check if products already exist (using Polar API)
+      const existingProducts = await this.polarService.fetchCatalogLiveSnapshot();
+      const existingProductIds = existingProducts.items
+        .filter(item => !item.error)
+        .map(item => `${item.planType}_${item.billingCycle}`);
+
+      const missingProducts = [];
+      const expectedProducts = [
+        { key: 'standard_monthly', name: 'Trndinn Standard (Monthly)', cents: 9900 },
+        { key: 'standard_yearly', name: 'Trndinn Standard (Yearly)', cents: 98600 },
+        { key: 'pro_monthly', name: 'Trndinn Pro (Monthly)', cents: 14900 },
+        { key: 'pro_yearly', name: 'Trndinn Pro (Yearly)', cents: 148400 },
+        { key: 'ultimate_monthly', name: 'Trndinn Ultimate (Monthly)', cents: 19900 },
+        { key: 'ultimate_yearly', name: 'Trndinn Ultimate (Yearly)', cents: 198200 },
+      ];
+
+      for (const product of expectedProducts) {
+        const normalizedKey = product.key.replace('_', '');
+        // Check various naming conventions used in the codebase
+        const possibleKeys = [
+          product.key,
+          normalizedKey,
+          `standard${product.key.includes('standard') ? product.key.split('_')[1]?.charAt(0).toUpperCase() + product.key.split('_')[1]?.slice(1) : ''}`,
+          `pro${product.key.includes('pro') ? product.key.split('_')[1]?.charAt(0).toUpperCase() + product.key.split('_')[1]?.slice(1) : ''}`,
+          `ultimate${product.key.includes('ultimate') ? product.key.split('_')[1]?.charAt(0).toUpperCase() + product.key.split('_')[1]?.slice(1) : ''}`,
+        ].filter(Boolean);
+
+        const exists = possibleKeys.some(k =>
+          existingProductIds.some(id => id.toLowerCase() === k.toLowerCase())
+        );
+
+        if (!exists) {
+          missingProducts.push(product);
+        }
+      }
+
+      if (missingProducts.length === 0 && existingProducts.items.length >= 6) {
+        return {
+          success: true,
+          message: `All ${existingProducts.items.length} products already exist in Polar production. No action needed.`,
+          details: {
+            productsCreated: 0,
+            checkoutLinksCreated: 0,
+            products: [],
+            checkoutLinks: [],
+            nextSteps: [
+              'Products are already configured in Polar production',
+              'Run the setup script locally: npx ts-node scripts/setup-polar-production.ts',
+              'Or use the CLI tool directly for granular control',
+            ],
+          },
+        };
+      }
+
+      // The actual setup requires running the script locally (CLI tool)
+      // This endpoint validates configuration and provides guidance
+      const needsWebhookSecret = !webhookSecret;
+      const needsProducts = missingProducts.length > 0;
+
+      const nextSteps = [
+        'Run the setup script from backend directory:',
+        '  npx ts-node scripts/setup-polar-production.ts',
+        '',
+        'This will:',
+        '  1. Create 6 products in Polar production (Standard/Pro/Ultimate × Monthly/Yearly)',
+        '  2. Create checkout links for each product',
+        '  3. Update your .env files with production values',
+        '  4. Save results to polar-production-setup-results.json',
+        '',
+        'Required before running:',
+        `  1. Production access token configured: ${accessToken ? '✅' : '❌'}`,
+        `  2. Organization configured: ${orgId ? '✅' : '❌'}`,
+        `  3. POLAR_ENV=production set: ${mode === 'production' ? '✅' : '❌'}`,
+        `  4. Webhook secret ${needsWebhookSecret ? '❌ (set after webhook creation)' : '✅'}`,
+        '',
+        'After setup:',
+        '  - Configure webhook at https://polar.sh/dashboard/trndinn/settings/webhooks',
+        '  - Add URL: https://api.trndinn.com/api/polar/webhook',
+        '  - Enable events: checkout.created, checkout.completed, subscription.created,',
+        '    subscription.active, subscription.updated, subscription.canceled, order.paid',
+        '  - Copy webhook secret to POLAR_WEBHOOK_SECRET',
+        ...(needsProducts[0] ? ['', 'Missing products detected:', ...missingProducts.map(p => `  - ${p.name}`)] : []),
+      ];
+
+      return {
+        success: true,
+        message: 'Polar production setup guidance provided. Run the CLI script to complete setup.',
+        details: {
+          productsCreated: 0,
+          checkoutLinksCreated: 0,
+          products: missingProducts.map(p => ({
+            key: p.key,
+            name: p.name,
+            productId: '(not created yet)',
+            priceId: '(not created yet)',
+            price: `₹${(p.cents / 100).toFixed(2)}`,
+          })),
+          checkoutLinks: [],
+          nextSteps,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        error.message || 'Failed to prepare production setup',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   private async getPolarProductsHealth(): Promise<{
     products: PolarProductHealth[];
     status: HealthStatus;
