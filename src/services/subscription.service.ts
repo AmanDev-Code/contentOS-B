@@ -876,6 +876,17 @@ export class SubscriptionService {
       });
       const polarSubscriptionId = current?.polarSubscriptionId;
       if (polarSubscriptionId) {
+        // Check if the subscription exists in the current Polar environment
+        const subscriptionExists = await this.polarService.checkSubscriptionExists(polarSubscriptionId);
+        if (!subscriptionExists) {
+          // Subscription was created in a different environment (e.g., sandbox vs production)
+          throw new BadRequestException({
+            message: 'Your subscription was created in a different billing environment and cannot be cancelled here.',
+            code: 'SUBSCRIPTION_ENVIRONMENT_MISMATCH',
+            action: 'cancel_and_resubscribe',
+            detail: 'Please cancel your current plan and subscribe fresh to continue.',
+          });
+        }
         await this.polarService.cancelSubscription(polarSubscriptionId);
       }
 

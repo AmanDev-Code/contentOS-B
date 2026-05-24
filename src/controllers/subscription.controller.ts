@@ -218,9 +218,34 @@ export class SubscriptionController {
       };
     } catch (error) {
       console.error('Error cancelling subscription:', error);
+      
+      // Check if error has a code (like from BadRequestException with object payload)
+      const errorCode = (error as { code?: string })?.code;
+      const errorMessage = error instanceof Error ? error.message : 'Failed to cancel subscription';
+      const statusCode = typeof (error as { getStatus?: () => number })?.getStatus === 'function'
+        ? (error as { getStatus: () => number }).getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
+      
+      // If it's a BAD_REQUEST with a code, preserve the structured error
+      if (statusCode === HttpStatus.BAD_REQUEST && errorCode) {
+        throw new HttpException(
+          {
+            statusCode,
+            errorCode,
+            message: errorMessage,
+            action: (error as { action?: string })?.action,
+            detail: (error as { detail?: string })?.detail,
+          },
+          statusCode,
+        );
+      }
+      
       throw new HttpException(
-        'Failed to cancel subscription',
-        HttpStatus.INTERNAL_SERVER_ERROR,
+        {
+          statusCode,
+          message: errorMessage,
+        },
+        statusCode,
       );
     }
   }
