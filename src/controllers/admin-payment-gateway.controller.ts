@@ -232,8 +232,8 @@ export class AdminPaymentGatewayController {
         .filter(item => !item.error)
         .map(item => `${item.planType}_${item.billingCycle}`);
 
-      const missingProducts = [];
-      const expectedProducts = [
+      const missingProducts: Array<{ key: string; name: string; cents: number }> = [];
+      const expectedProducts: Array<{ key: string; name: string; cents: number }> = [
         { key: 'standard_monthly', name: 'Trndinn Standard (Monthly)', cents: 9900 },
         { key: 'standard_yearly', name: 'Trndinn Standard (Yearly)', cents: 98600 },
         { key: 'pro_monthly', name: 'Trndinn Pro (Monthly)', cents: 14900 },
