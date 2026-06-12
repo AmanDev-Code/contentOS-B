@@ -2,8 +2,8 @@ FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 
@@ -22,8 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 RUN npx playwright install --with-deps chromium
 
 COPY --from=builder /app/dist ./dist
