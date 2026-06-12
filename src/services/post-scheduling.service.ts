@@ -1,15 +1,28 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
+  NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { QUEUE_NAMES } from '../common/constants';
 import { SupabaseService } from './supabase.service';
 import { MediaGenerationService } from './media-generation.service';
 import { LinkedinService } from './linkedin.service';
 import { CacheService } from './cache.service';
-import { buildLinkedInCommentary } from '../common/utils/linkedin-publish-text';
+import { UserPublishedPostRepository } from '../repositories/user-published-post.repository';
+import {
+  assertLinkedInCommentaryWithinLimit,
+  buildLinkedInCommentary,
+} from '../common/utils/linkedin-publish-text';
+import {
+  LinkedInPublishBridgeService,
+  type LinkedInPublishMediaType,
+} from '../integrations/social/providers/linkedin/linkedin-publish-bridge.service';
 
 export interface SchedulePostRequest {
   contentId: string;
@@ -18,6 +31,19 @@ export interface SchedulePostRequest {
   platform: 'linkedin';
   actorType?: 'member' | 'organization';
   organizationUrn?: string;
+}
+
+export interface ReschedulePostRequest {
+  /** The `scheduled_posts.id` of the row to move. */
+  scheduledPostId: string;
+  userId: string;
+  newScheduledFor: Date;
+}
+
+export interface ReschedulePostResult {
+  jobId: string;
+  contentId: string;
+  scheduledFor: string;
 }
 
 export interface PublishPostRequest {
@@ -48,12 +74,77 @@ export class PostSchedulingService {
   private readonly logger = new Logger(PostSchedulingService.name);
 
   constructor(
-    @InjectQueue('post-publishing') private readonly publishQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.SOCIAL_PUBLISH) private readonly publishQueue: Queue,
     private readonly supabaseService: SupabaseService,
     private readonly mediaGenerationService: MediaGenerationService,
     private readonly linkedinService: LinkedinService,
     private readonly cacheService: CacheService,
+    // Sprint 1.6: captures the published caption into the per-user style corpus
+    // (task #1132) so generation can learn from what the user actually published.
+    private readonly publishedPostRepo: UserPublishedPostRepository,
+    // Sprint 1.4 queue bridge. Optional + feature-flagged so scheduled/immediate
+    // publishing keeps using the legacy service until FEATURE_SOCIAL_PROVIDER_V2
+    // is on AND the user is connected under the new model.
+    @Optional()
+    private readonly configService?: ConfigService,
+    @Optional()
+    private readonly linkedInPublishBridge?: LinkedInPublishBridgeService,
   ) {}
+
+  private isSocialV2Enabled(): boolean {
+    return (
+      (this.configService?.get<string>('FEATURE_SOCIAL_PROVIDER_V2') ??
+        process.env.FEATURE_SOCIAL_PROVIDER_V2) === 'true'
+    );
+  }
+
+  /**
+   * Single publish seam shared by text/image/carousel. Routes to the new
+   * provider engine when enabled + the account is migrated; otherwise (and for
+   * organization actors, which the new model does not yet own) it uses the
+   * legacy linkedin.service.ts path. Any "not connected in v2" outcome falls
+   * back to legacy so a publish is never dropped during rollout.
+   */
+  private async dispatchPublish(args: {
+    userId: string;
+    text: string;
+    mediaType: LinkedInPublishMediaType;
+    mediaUrl?: string;
+    actorType?: 'member' | 'organization';
+    organizationUrn?: string;
+  }): Promise<{ postId: string }> {
+    if (
+      this.isSocialV2Enabled() &&
+      this.linkedInPublishBridge &&
+      args.actorType !== 'organization'
+    ) {
+      const v2 = await this.linkedInPublishBridge.publish({
+        userId: args.userId,
+        text: args.text,
+        mediaType: args.mediaType,
+        mediaUrl: args.mediaUrl,
+      });
+      if (v2.status === 'published') {
+        this.logger.log(
+          `Published via social provider v2 for user ${args.userId}: ${v2.postId}`,
+        );
+        return { postId: v2.postId };
+      }
+      this.logger.log(
+        `User ${args.userId} not migrated to social provider v2; using legacy publish.`,
+      );
+    }
+
+    const result = await this.linkedinService.publishPost({
+      userId: args.userId,
+      text: args.text,
+      mediaType: args.mediaType,
+      mediaUrl: args.mediaUrl,
+      actorType: args.actorType,
+      organizationUrn: args.organizationUrn,
+    });
+    return { postId: result.postId };
+  }
 
   async schedulePost(request: SchedulePostRequest): Promise<string> {
     try {
@@ -80,12 +171,22 @@ export class PostSchedulingService {
       // Get content details
       const content = await this.getContentById(request.contentId);
       if (!content) {
-        throw new Error('Content not found');
+        throw new NotFoundException('Content not found');
       }
 
-      // Only block if content was genuinely published with a LinkedIn post ID
-      if (content.linkedin_post_id && content.publish_status === 'published') {
-        throw new Error('This content has already been published to LinkedIn');
+      this.validateLinkedInPostContent(content);
+
+      // `linkedin_post_id` is the DURABLE "already live on LinkedIn" marker.
+      // publish_status is mutable (cleanup/cancel flows reset it to ready/draft),
+      // so we must NOT rely on it for duplicate prevention — guard on the post ID
+      // alone. Once content has been published to LinkedIn it cannot be scheduled
+      // again (prevents duplicate posts on the user's LinkedIn).
+      if (content.linkedin_post_id) {
+        throw new ConflictException({
+          message:
+            'This post has already been published to LinkedIn and cannot be scheduled again.',
+          code: 'post_already_published',
+        });
       }
 
       // Cancel any existing active scheduled posts for this content (allow rescheduling)
@@ -177,6 +278,11 @@ export class PostSchedulingService {
           scheduled_for: request.scheduledFor.toISOString(),
           platform: request.platform,
           status: 'scheduled',
+          // Persist the publishing actor so the DB is the source of truth
+          // (reschedule + missed-post sweeper recover it from here, not from
+          // the BullMQ job which may be evicted from Redis).
+          actor_type: request.actorType ?? null,
+          organization_urn: request.organizationUrn ?? null,
         })
         .select()
         .single();
@@ -205,6 +311,187 @@ export class PostSchedulingService {
     }
   }
 
+  /**
+   * Moves an already-scheduled post to a new time WITHOUT charging credits.
+   *
+   * Unlike `schedulePost` (which the POST /posts/schedule controller wraps with
+   * up-front credit deduction), reschedule is a pure time-shift of an existing
+   * `scheduled_posts` row: it updates the row in place (preserving its id so the
+   * calendar's optimistic move stays valid), swaps the delayed BullMQ job, and
+   * re-validates the LinkedIn character limit. No credits are consumed here, and
+   * the controller route does not deduct any either — this is the dedicated
+   * no-charge path for drag-and-drop calendar rescheduling.
+   *
+   * actorType/organizationUrn are recovered from the existing delayed BullMQ job
+   * (they are not persisted on `scheduled_posts`), so org-scheduled posts keep
+   * their actor through a reschedule without needing a schema change.
+   */
+  async reschedulePost(
+    request: ReschedulePostRequest,
+  ): Promise<ReschedulePostResult> {
+    const { scheduledPostId, userId, newScheduledFor } = request;
+
+    this.logger.log(
+      `Rescheduling scheduled_post ${scheduledPostId} to ${newScheduledFor.toISOString()} (no charge)`,
+    );
+
+    // 1. Load + ownership check on the scheduled_posts row.
+    const { data: scheduledPost, error: fetchError } = await this.supabaseService
+      .getServiceClient()
+      .from('scheduled_posts')
+      .select(
+        'id, content_id, job_id, status, scheduled_for, platform, actor_type, organization_urn',
+      )
+      .eq('id', scheduledPostId)
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchError || !scheduledPost) {
+      throw new NotFoundException('Scheduled post not found');
+    }
+
+    // 2. Only an active (not-yet-published, not-mid-publish) entry can move.
+    // 'processing' means a worker has picked it up; 'published'/'cancelled'/
+    // 'failed' are terminal. Reschedule is for 'scheduled'/'pending' only.
+    if (!['scheduled', 'pending'].includes(scheduledPost.status as string)) {
+      throw new BadRequestException(
+        `This post can no longer be rescheduled (current status: ${scheduledPost.status}).`,
+      );
+    }
+
+    // 3. Durable "already live on LinkedIn" guard — never reschedule a published
+    // post. linkedin_post_id is the immutable marker; publish_status is mutable.
+    const content = await this.getContentById(scheduledPost.content_id);
+    if (!content) {
+      throw new NotFoundException('Content not found');
+    }
+    if (content.linkedin_post_id || content.publish_status === 'published') {
+      throw new ConflictException({
+        message:
+          'This post has already been published to LinkedIn and cannot be rescheduled.',
+        code: 'post_already_published',
+      });
+    }
+
+    // 4. Re-validate the LinkedIn 3000-char commentary limit (caption + tags).
+    this.validateLinkedInPostContent(content);
+
+    // 5. Resolve actor info. The scheduled_posts row is the SOURCE OF TRUTH
+    // (persisted at schedule time). We only fall back to the old delayed BullMQ
+    // job's data for rows created before the actor columns existed (NULL row
+    // values) — and that fallback is unreliable since Redis may have evicted the
+    // job, in which case an org post would otherwise silently degrade to member.
+    let actorType: 'member' | 'organization' | undefined =
+      (scheduledPost.actor_type as 'member' | 'organization' | null) ??
+      undefined;
+    let organizationUrn: string | undefined =
+      (scheduledPost.organization_urn as string | null) ?? undefined;
+
+    // Remove the old delayed job; recover actor from it only as a back-compat
+    // fallback when the row did not carry actor info.
+    if (scheduledPost.job_id) {
+      try {
+        const oldJob = await this.publishQueue.getJob(scheduledPost.job_id);
+        if (oldJob) {
+          const jobData = (oldJob.data ?? {}) as {
+            actorType?: 'member' | 'organization';
+            organizationUrn?: string;
+          };
+          if (actorType === undefined) {
+            actorType = jobData.actorType;
+          }
+          if (organizationUrn === undefined) {
+            organizationUrn = jobData.organizationUrn;
+          }
+          await oldJob.remove();
+          this.logger.log(
+            `Removed old queue job ${scheduledPost.job_id} for reschedule`,
+          );
+        }
+      } catch (e) {
+        this.logger.warn(
+          `Could not remove old job ${scheduledPost.job_id}: ${(e as Error).message}`,
+        );
+      }
+    }
+
+    // 6. Enqueue a fresh delayed job at the new time.
+    const platform = (scheduledPost.platform as 'linkedin') || 'linkedin';
+    const job = await this.publishQueue.add(
+      'publish-scheduled-post',
+      {
+        contentId: scheduledPost.content_id,
+        userId,
+        platform,
+        actorType,
+        organizationUrn,
+        scheduledFor: newScheduledFor.toISOString(),
+        contentPreview: content.content?.substring(0, 100) || '',
+      },
+      {
+        delay: newScheduledFor.getTime() - Date.now(),
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000,
+        },
+        removeOnComplete: 10,
+        removeOnFail: 10,
+        jobId: `post-${scheduledPost.content_id}-${Date.now()}`,
+      },
+    );
+
+    const newJobId = job.id?.toString() || 'unknown';
+
+    // 7. Update the existing scheduled_posts row in place (no new row, no charge).
+    const { error: updateError } = await this.supabaseService
+      .getServiceClient()
+      .from('scheduled_posts')
+      .update({
+        scheduled_for: newScheduledFor.toISOString(),
+        job_id: newJobId,
+        status: 'scheduled',
+        // Re-persist the resolved actor so the row stays the source of truth
+        // (back-fills rows that originally had NULL actor columns).
+        actor_type: actorType ?? null,
+        organization_urn: organizationUrn ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', scheduledPostId)
+      .eq('user_id', userId);
+
+    if (updateError) {
+      this.logger.error(
+        'Failed to update scheduled_posts row on reschedule:',
+        updateError,
+      );
+      throw new Error('Failed to reschedule post');
+    }
+
+    // 8. Keep generated_content in sync (mirrors schedulePost).
+    await this.supabaseService
+      .getServiceClient()
+      .from('generated_content')
+      .update({
+        is_scheduled: true,
+        scheduled_for: newScheduledFor.toISOString(),
+        publish_status: 'scheduled',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', scheduledPost.content_id)
+      .eq('user_id', userId);
+
+    this.logger.log(
+      `Rescheduled scheduled_post ${scheduledPostId} -> job ${newJobId}`,
+    );
+
+    return {
+      jobId: newJobId,
+      contentId: scheduledPost.content_id,
+      scheduledFor: newScheduledFor.toISOString(),
+    };
+  }
+
   async publishPostNow(request: PublishPostRequest): Promise<string> {
     try {
       this.logger.log(`Publishing post ${request.contentId} immediately`);
@@ -225,9 +512,17 @@ export class PostSchedulingService {
         throw new Error('Content not found');
       }
 
-      // Check if content is already published
-      if (content.publish_status === 'published' && content.linkedin_post_id) {
-        throw new Error('This content has already been published to LinkedIn');
+      this.validateLinkedInPostContent(content);
+
+      // Durable duplicate guard: if this content already has a LinkedIn post ID
+      // it is live on LinkedIn — never publish it again, regardless of the
+      // (mutable) publish_status. This is the last line of defense and also
+      // catches scheduled jobs that were enqueued before the content published.
+      if (content.linkedin_post_id) {
+        throw new ConflictException({
+          message: 'This post has already been published to LinkedIn.',
+          code: 'post_already_published',
+        });
       }
 
       // Publish based on content type with smart fallback
@@ -277,6 +572,24 @@ export class PostSchedulingService {
         })
         .eq('id', request.contentId);
 
+      // Sprint 1.6 (task #1132): persist the exact caption the user published
+      // into their style corpus so the next generation can learn their voice.
+      // Best-effort — a learning-sample failure must never affect publishing.
+      try {
+        await this.publishedPostRepo.record({
+          userId: content.user_id,
+          contentId: content.id,
+          platform: request.platform,
+          caption: content.content,
+          visualType: content.visual_type ?? null,
+          linkedinPostId: publishResult.postId ?? null,
+        });
+      } catch (sampleError) {
+        this.logger.warn(
+          `Failed to record published-post style sample: ${(sampleError as Error).message}`,
+        );
+      }
+
       this.logger.log(`Post published successfully: ${publishResult.postId}`);
       return publishResult.postId;
     } catch (error) {
@@ -302,15 +615,13 @@ export class PostSchedulingService {
   ): Promise<{ postId: string }> {
     const text = this.formatPostText(content);
 
-    const result = await this.linkedinService.publishPost({
+    return this.dispatchPublish({
       userId: content.user_id,
       text,
       mediaType: 'text',
       actorType,
       organizationUrn,
     });
-
-    return { postId: result.postId };
   }
 
   private async publishImagePost(
@@ -329,7 +640,7 @@ export class PostSchedulingService {
 
     const text = this.formatPostText(content);
 
-    const result = await this.linkedinService.publishPost({
+    return this.dispatchPublish({
       userId: content.user_id,
       text,
       mediaType: 'image',
@@ -337,8 +648,6 @@ export class PostSchedulingService {
       actorType,
       organizationUrn,
     });
-
-    return { postId: result.postId };
   }
 
   private async publishCarouselPost(
@@ -350,7 +659,7 @@ export class PostSchedulingService {
 
     const text = this.formatPostText(withPdf);
 
-    const result = await this.linkedinService.publishPost({
+    return this.dispatchPublish({
       userId: withPdf.user_id,
       text,
       mediaType: 'document',
@@ -358,8 +667,6 @@ export class PostSchedulingService {
       actorType,
       organizationUrn,
     });
-
-    return { postId: result.postId };
   }
 
   /**
@@ -441,8 +748,46 @@ export class PostSchedulingService {
     return { ...content, pdf_url: pdfUrl };
   }
 
+  /**
+   * Validates caption + hashtags as LinkedIn will receive them (after
+   * `buildLinkedInCommentary`). Call before charging credits or enqueueing jobs.
+   */
+  async validateLinkedInPostForPublish(
+    userId: string,
+    contentId: string,
+    overrides?: { content?: string; hashtags?: string[] },
+  ): Promise<void> {
+    const { data, error } = await this.supabaseService
+      .getServiceClient()
+      .from('generated_content')
+      .select('content, hashtags')
+      .eq('id', contentId)
+      .eq('user_id', userId)
+      .single();
+
+    if (error || !data) {
+      throw new NotFoundException('Content not found');
+    }
+
+    this.validateLinkedInPostContent({
+      content: overrides?.content ?? data.content ?? '',
+      hashtags: overrides?.hashtags ?? data.hashtags ?? [],
+    });
+  }
+
+  validateLinkedInPostContent(
+    content: Pick<PostContent, 'content' | 'hashtags'>,
+  ): void {
+    try {
+      assertLinkedInCommentaryWithinLimit(content.content, content.hashtags);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new BadRequestException(message);
+    }
+  }
+
   private formatPostText(content: PostContent): string {
-    const formattedText = buildLinkedInCommentary(
+    const formattedText = assertLinkedInCommentaryWithinLimit(
       content.content,
       content.hashtags,
     );
@@ -517,7 +862,11 @@ export class PostSchedulingService {
             .eq('id', post.id);
         }
 
-        // Reset content status
+        // Reset content status — but NEVER downgrade content that is already
+        // live on LinkedIn. Guarding on `linkedin_post_id IS NULL` prevents the
+        // bug where an expired/failed stale schedule reset a published post back
+        // to 'ready', which previously let it be scheduled + published again
+        // (duplicate post on LinkedIn).
         await this.supabaseService
           .getServiceClient()
           .from('generated_content')
@@ -525,7 +874,8 @@ export class PostSchedulingService {
             is_scheduled: false,
             publish_status: 'ready',
           })
-          .eq('id', contentId);
+          .eq('id', contentId)
+          .is('linkedin_post_id', null);
 
         this.logger.log(
           `Cleaned up ${expiredPosts.length} expired scheduled posts for content ${contentId}`,

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { SupabaseService } from './supabase.service';
 import { CacheService } from './cache.service';
 import { AppSettingsService } from './app-settings.service';
+import { CreditBucketService } from './credit-bucket.service';
 
 export interface UserQuota {
   userId: string;
@@ -34,7 +35,38 @@ export class QuotaService {
     private readonly supabaseService: SupabaseService,
     private readonly cacheService: CacheService,
     private readonly appSettingsService: AppSettingsService,
+    private readonly creditBucketService: CreditBucketService,
   ) {}
+
+  /**
+   * Sprint 1.9b: overlay the authoritative multi-bucket balance onto a legacy
+   * quota object so `remainingCredits` everywhere reflects trial+plan+reward.
+   * Resilient: any failure leaves the legacy (user_quota_view) numbers intact.
+   */
+  private async overlayBucketBalance(
+    userId: string,
+    base: UserQuota,
+  ): Promise<UserQuota> {
+    try {
+      const balance = await this.creditBucketService.getBalance(userId);
+      const remaining = balance.total;
+      const total = Math.max(base.totalCredits, remaining);
+      const used = Math.max(0, total - remaining);
+      const percentageUsed =
+        total > 0 ? Math.round((used / total) * 100 * 100) / 100 : 0;
+      return {
+        ...base,
+        totalCredits: total,
+        usedCredits: used,
+        remainingCredits: remaining,
+        percentageUsed,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`overlayBucketBalance failed for ${userId}: ${msg}`);
+      return base;
+    }
+  }
 
   private async getFreeCreditLimit(): Promise<number> {
     return this.appSettingsService.getFreeCreditLimit();
@@ -99,9 +131,9 @@ export class QuotaService {
 
       if (quotaError) {
         if (quotaError.code === 'PGRST116') {
-          // No subscription found, return free plan defaults
+          // No subscription found, return free plan defaults (overlaid with buckets).
           console.log('No subscription found, using free plan defaults');
-          return {
+          return this.overlayBucketBalance(userId, {
             userId,
             totalCredits: freeCreditLimit,
             usedCredits: 0,
@@ -109,7 +141,7 @@ export class QuotaService {
             percentageUsed: 0,
             planType: 'free',
             resetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          };
+          });
         }
         throw new Error(`Failed to get quota: ${quotaError.message}`);
       }
@@ -121,7 +153,7 @@ export class QuotaService {
       const remainingCredits = totalCredits - usedCredits;
       const percentageUsed = totalCredits > 0 ? Math.round((usedCredits / totalCredits) * 100 * 100) / 100 : 0;
 
-      const quota = this.coerceUserQuota(
+      const legacyQuota = this.coerceUserQuota(
         {
           userId: quotaData.user_id,
           totalCredits,
@@ -133,6 +165,9 @@ export class QuotaService {
         },
         userId,
       );
+
+      // Sprint 1.9b: authoritative balance comes from the multi-bucket model.
+      const quota = await this.overlayBucketBalance(userId, legacyQuota);
 
       // Cache for 5 minutes
       await this.cacheService.set(cacheKey, JSON.stringify(quota), 300);
@@ -154,13 +189,23 @@ export class QuotaService {
     }
   }
 
-  // Default generation cost: 1.5 credits per successful job
+  // Default generation cost: 1.5 credits per successful job.
+  // Sprint 1.9b: the gate reads the authoritative multi-bucket balance.
   async checkQuotaAvailable(
     userId: string,
     creditsNeeded: number = 1.5,
   ): Promise<boolean> {
-    const quota = await this.getUserQuota(userId);
-    return quota.remainingCredits >= creditsNeeded;
+    try {
+      const balance = await this.creditBucketService.getBalance(userId);
+      return balance.total >= creditsNeeded;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `checkQuotaAvailable bucket read failed for ${userId}, falling back to legacy quota: ${msg}`,
+      );
+      const quota = await this.getUserQuota(userId);
+      return quota.remainingCredits >= creditsNeeded;
+    }
   }
 
   async consumeCredits(
@@ -176,24 +221,20 @@ export class QuotaService {
     const amount = Math.abs(creditsUsed);
 
     try {
-      const { error } = await this.supabaseService
-        .getServiceClient()
-        .rpc('log_credit_transaction', {
-          p_user_id: userId,
-          p_content_id: contentId || null,
-          p_transaction_type: txType,
-          p_amount: amount,
-          p_description: description,
-          p_operation_type: operationType,
-          p_content_type: contentType || null,
-          p_metadata: metadata,
-        });
-      if (error) {
-        this.logger.error(
-          `log_credit_transaction failed for user=${userId} type=${txType} amount=${amount}: ${error.message}`,
-        );
-        throw new Error(`Credit ledger update failed: ${error.message}`);
-      }
+      // Sprint 1.9b: route through the bucket-aware charge. This deducts across
+      // trial -> plan -> reward (debit) or refunds back (refund) AND writes the
+      // audit rows into credit_transactions, so the legacy user_quota_view stays
+      // consistent (recorded amounts always sum to the charged amount).
+      await this.creditBucketService.applyCharge({
+        userId,
+        transactionType: txType,
+        amount,
+        description,
+        operationType,
+        contentType: contentType || null,
+        contentId: contentId || null,
+        metadata,
+      });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(`consumeCredits error user=${userId}: ${msg}`);
@@ -210,6 +251,48 @@ export class QuotaService {
     // TODO: Handle low credits notification in controllers instead of here to avoid circular dependency
 
     return updatedQuota;
+  }
+
+  /**
+   * Sprint 1.9b — grant reward credits (referral / bonus / admin promo).
+   *
+   * Routes through the bucket-aware `credit` charge so the grant lands in the
+   * never-expiring REWARD bucket (per the multi-bucket model) AND writes an
+   * audit row into credit_transactions (keeping user_quota_view consistent).
+   * Use this for awards/grants; use `consumeCredits` for debits/refunds.
+   */
+  async grantCredits(
+    userId: string,
+    amount: number,
+    description: string,
+    operationType: string = 'reward',
+    metadata: Record<string, unknown> = {},
+  ): Promise<UserQuota> {
+    const grant = Math.abs(amount);
+    if (grant <= 0) {
+      return this.getUserQuota(userId);
+    }
+
+    try {
+      await this.creditBucketService.applyCharge({
+        userId,
+        transactionType: 'credit',
+        amount: grant,
+        description,
+        operationType,
+        // A reward grant is not "content" — leave content_type null.
+        contentType: null,
+        contentId: null,
+        metadata,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`grantCredits error user=${userId}: ${msg}`);
+      throw error instanceof Error ? error : new Error(msg);
+    }
+
+    await this.cacheService.delete(`quota:${userId}`);
+    return this.getUserQuota(userId);
   }
 
   async logTransaction(

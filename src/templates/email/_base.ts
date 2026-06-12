@@ -43,7 +43,7 @@ export function wrapEmail(content: string, title: string): string {
     </div>
     <div class="footer">
       <p style="margin:0 0 8px;">© 2026 Trndinn. All rights reserved.</p>
-      <p style="margin:0;"><a href="mailto:support@trndinn.com">support@trndinn.com</a></p>
+      <p style="margin:0;"><a href="mailto:hello@trndinn.com">hello@trndinn.com</a></p>
     </div>
   </div>
 </body>

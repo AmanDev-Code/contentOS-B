@@ -127,7 +127,7 @@ export class MediaController {
         const isFreePlan = quotaInfo.planType === 'free';
 
         // Generate image
-        const imageBuffer =
+        const { buffer: imageBuffer } =
           await this.mediaGenerationService.generateSingleImage({
             prompt,
             size: '1024x1024',

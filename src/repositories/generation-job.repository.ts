@@ -144,6 +144,27 @@ export class GenerationJobRepository {
     return this.mapDatabaseToInterface(data);
   }
 
+  /** Persist queue payload on the job row so failed jobs can be retried. */
+  async stashJobPayload(
+    jobId: string,
+    patch: Record<string, unknown>,
+  ): Promise<void> {
+    const job = await this.findById(jobId);
+    const existing =
+      job?.response && typeof job.response === 'object' && !Array.isArray(job.response)
+        ? (job.response as Record<string, unknown>)
+        : {};
+    const { error } = await this.supabaseService
+      .getServiceClient()
+      .from('generation_jobs')
+      .update({
+        response: { ...existing, ...patch },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', jobId);
+    if (error) throw error;
+  }
+
   async updateError(
     jobId: string,
     error: string,

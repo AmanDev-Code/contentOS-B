@@ -2,6 +2,9 @@
  * Plain-text shaping for LinkedIn REST `commentary` (no markdown, no `hashtag#` tokens).
  */
 
+/** LinkedIn Marketing API `commentary` character cap (platform-enforced). */
+export const LINKEDIN_MAX_TEXT_LENGTH = 3000;
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -135,4 +138,27 @@ export function buildLinkedInCommentary(
   if (bodyAlreadyEndsWithHashtagSuffix(trimmed, suffix)) return trimmed;
 
   return `${trimmed}\n\n${suffix}`.trim();
+}
+
+export function linkedInCommentaryLength(
+  body: unknown,
+  hashtagsRaw: unknown,
+): number {
+  return buildLinkedInCommentary(body, hashtagsRaw).length;
+}
+
+export function formatLinkedInLengthError(length: number): string {
+  return `Post exceeds LinkedIn's ${LINKEDIN_MAX_TEXT_LENGTH}-character limit (${length}). Shorten the caption or remove hashtags.`;
+}
+
+/** Returns final commentary or throws if over LinkedIn's limit. */
+export function assertLinkedInCommentaryWithinLimit(
+  body: unknown,
+  hashtagsRaw: unknown,
+): string {
+  const text = buildLinkedInCommentary(body, hashtagsRaw);
+  if (text.length > LINKEDIN_MAX_TEXT_LENGTH) {
+    throw new Error(formatLinkedInLengthError(text.length));
+  }
+  return text;
 }

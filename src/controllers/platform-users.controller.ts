@@ -47,9 +47,9 @@ export class PlatformUsersController {
   /** Same semantics as QuotaService when `user_quota_view` has no row (no active subscription). */
   private freeQuotaFallback() {
     return {
-      remainingCredits: 50,
+      remainingCredits: 150,
       usedCredits: 0,
-      totalCredits: 50,
+      totalCredits: 150,
       percentageUsed: 0,
       planType: 'free' as const,
       resetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -245,6 +245,7 @@ export class PlatformUsersController {
   async adjustCredits(
     @Param('userId') userId: string,
     @Body() body: { delta?: number; reason?: string },
+    @Request() req: AuthReq,
   ) {
     const delta = Math.round(Number(body?.delta));
     if (!Number.isFinite(delta) || delta === 0) {
@@ -267,17 +268,32 @@ export class PlatformUsersController {
 
     const reason = (body?.reason || '').trim();
     const description = `Admin credit adjustment${reason ? `: ${reason}` : ''}`;
+    const adminId = req?.user?.id ?? null;
 
-    // Canonical balance lives in the monthly credit ledger (`credit_transactions` via `user_quota_view`).
-    await this.quotaService.logTransaction(
-      userId,
-      null,
-      delta > 0 ? 'credit' : 'debit',
-      Math.abs(delta),
-      description,
-      'generation',
-      'text',
-    );
+    // Sprint 1.9b: route admin adjustments through the bucket-aware paths so the
+    // change actually moves the authoritative multi-bucket balance (the legacy
+    // logTransaction call only wrote a credit_transactions audit row and did not
+    // touch any bucket, so it no longer affected the displayed balance).
+    if (delta > 0) {
+      // Positive grant -> never-expiring REWARD bucket (operation_type 'admin_grant').
+      await this.quotaService.grantCredits(userId, delta, description, 'admin_grant', {
+        source: 'admin',
+        admin_id: adminId,
+        reason: reason || undefined,
+      });
+    } else {
+      // Negative adjustment/correction -> bucket-aware debit (deducts trial -> plan
+      // -> reward), recorded as operation_type 'admin_adjustment'.
+      await this.quotaService.consumeCredits(
+        userId,
+        Math.abs(delta),
+        description,
+        'admin_adjustment',
+        undefined,
+        undefined,
+        { source: 'admin', admin_id: adminId, reason: reason || undefined },
+      );
+    }
 
     await this.cacheService.delete(`quota:${userId}`);
 

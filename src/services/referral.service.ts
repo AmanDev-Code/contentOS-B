@@ -272,14 +272,17 @@ export class ReferralService {
     const result = data[0];
 
     if (result.success && result.credits_awarded > 0 && result.referrer_id) {
-      // Award credits to referrer
+      // Award credits to referrer. Sprint 1.9b: referral rewards are a grant,
+      // so route through grantCredits -> the never-expiring REWARD bucket
+      // (operation_type='referral_bonus'). This replaces the old negative
+      // consumeCredits call, which recorded a refund into the plan bucket.
       try {
-        await this.quotaService.consumeCredits(
+        await this.quotaService.grantCredits(
           result.referrer_id,
-          -result.credits_awarded,
+          result.credits_awarded,
           `Referral bonus: User completed qualifying action`,
           'referral_bonus',
-          'referral',
+          { source: 'referral', referred_user_id: referredUserId },
         );
 
         // Send notification to referrer

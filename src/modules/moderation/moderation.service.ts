@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { SupabaseService } from '../../services/supabase.service';
 import { NotificationService } from '../../services/notification.service';
-import { containsCussWord, CUSS_WORDS } from './cuss-words';
+import {
+  containsCussWord,
+  containsOutputUnsafeWord,
+  CUSS_WORDS,
+} from './cuss-words';
 
 @Injectable()
 export class ModerationService {
@@ -36,12 +40,16 @@ export class ModerationService {
     return { blocked: result.hit, matchCount: result.matches.length };
   }
 
-  /** Run containsCussWord on LLM output. */
+  /**
+   * Run reduced safety check on LLM output.
+   * Uses the OUTPUT_SAFETY_WORDS list which allows proper names (Dick),
+   * mild expressions (damn, crap), and anatomical terms in context.
+   */
   checkOutputSafety(generatedCaption: string): {
     safe: boolean;
     matches: string[];
   } {
-    const result = containsCussWord(generatedCaption);
+    const result = containsOutputUnsafeWord(generatedCaption);
     return { safe: !result.hit, matches: result.matches };
   }
 

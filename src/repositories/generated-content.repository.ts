@@ -288,6 +288,71 @@ export class GeneratedContentRepository {
     return data;
   }
 
+  /**
+   * Append a newly regenerated image URL (and its source prompt) so each regen
+   * adds another pickable option instead of overwriting an existing slot.
+   */
+  async appendRegeneratedImage(
+    contentId: string,
+    newUrl: string,
+    sourceImageIndex: number,
+    sourcePrompt: string,
+  ): Promise<{ content: GeneratedContent; newImageIndex: number } | null> {
+    if (!Number.isInteger(sourceImageIndex) || sourceImageIndex < 0) {
+      throw new Error(
+        `appendRegeneratedImage: invalid sourceImageIndex=${sourceImageIndex}`,
+      );
+    }
+    const client = this.supabaseService.getServiceClient();
+    const { data: existing, error: fetchError } = await client
+      .from('generated_content')
+      .select('id,image_urls,performance_prediction')
+      .eq('id', contentId)
+      .is('deleted_at', null)
+      .single();
+    if (fetchError) throw fetchError;
+    if (!existing) return null;
+
+    const currentUrls: string[] = Array.isArray(existing.image_urls)
+      ? [...existing.image_urls]
+      : [];
+    const newImageIndex = currentUrls.length;
+    currentUrls.push(newUrl);
+
+    const pp = (existing.performance_prediction || {}) as Record<string, unknown>;
+    const customMeta = (pp.customTopicMeta || {}) as Record<string, unknown>;
+    const prompts = Array.isArray(customMeta.imagePrompts)
+      ? [...(customMeta.imagePrompts as string[])]
+      : [];
+    const promptToStore =
+      sourcePrompt.trim() ||
+      prompts[sourceImageIndex] ||
+      prompts[prompts.length - 1] ||
+      '';
+    prompts.push(promptToStore);
+
+    const performance_prediction = {
+      ...pp,
+      customTopicMeta: {
+        ...customMeta,
+        imagePrompts: prompts,
+      },
+    };
+
+    const { data, error } = await client
+      .from('generated_content')
+      .update({
+        image_urls: currentUrls,
+        performance_prediction,
+        updated_at: new Date(),
+      })
+      .eq('id', contentId)
+      .select()
+      .single();
+    if (error) throw error;
+    return { content: data, newImageIndex };
+  }
+
   async markAsPublished(
     contentId: string,
     linkedinPostUrl: string,

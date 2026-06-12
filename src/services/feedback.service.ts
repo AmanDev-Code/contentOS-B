@@ -276,17 +276,19 @@ export class FeedbackService {
       return false;
     }
 
-    await this.quotaService.logTransaction(
+    // Sprint 1.9b: feedback rewards are a grant, so route through
+    // grantCredits -> the never-expiring REWARD bucket (operation_type
+    // 'feedback_reward'). The old logTransaction call only wrote a
+    // credit_transactions audit row and was NOT bucket-aware, so the credits
+    // never landed in (or counted toward) the authoritative bucket balance.
+    await this.quotaService.grantCredits(
       row.user_id,
-      null,
-      'credit',
       100,
       'Product feedback bonus (100 credits)',
       'feedback_reward',
-      'bonus',
+      { source: 'feedback', feedback_id: feedbackId },
     );
 
-    await this.cacheService.delete(`quota:${row.user_id}`);
     return true;
   }
 

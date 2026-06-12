@@ -241,8 +241,9 @@ export class GenerationController {
   }
 
   /**
-   * Regenerate a single AI-generated image at a specific index inside an
-   * existing content's `image_urls` array. Costs `IMAGE_PER_UNIT_CREDITS`
+   * Regenerate a single AI-generated image using the prompt at `imageIndex`
+   * and append the result as a new pickable option in `image_urls`. Costs
+   * `IMAGE_PER_UNIT_CREDITS`
    * (currently 3) per call. Returns 402 with code `insufficient_credits` if
    * the user is short on balance — the FE turns that into a tooltip on the
    * disabled button.
@@ -257,6 +258,9 @@ export class GenerationController {
       imageIndex: number;
       originalPrompt?: string;
       userOverridePrompt?: string;
+      /** Current caption from the preview editor (falls back to stored content). */
+      caption?: string;
+      includeBrandKit?: boolean;
     },
   ) {
     const userId = req.user?.id;
@@ -276,7 +280,11 @@ export class GenerationController {
       userId,
       body.contentId,
       body.imageIndex,
-      body.userOverridePrompt,
+      {
+        userOverridePrompt: body.userOverridePrompt,
+        caption: body.caption,
+        includeBrandKit: body.includeBrandKit,
+      },
     );
   }
 
@@ -286,6 +294,34 @@ export class GenerationController {
    * count persisted on the original generation. Returns 402 with code
    * `insufficient_credits` if balance is short.
    */
+  @Post('regenerate/post')
+  @ApiOperation({
+    summary:
+      'Regenerate full custom-topic post (text + media) using stored topic and settings',
+  })
+  async regeneratePost(
+    @Request() req,
+    @Body()
+    body: {
+      contentId: string;
+      /** Override brand kit toggle from the original run (uses stored value when omitted). */
+      includeBrandKit?: boolean;
+    },
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    if (!body?.contentId) {
+      throw new HttpException('contentId is required', HttpStatus.BAD_REQUEST);
+    }
+    return this.generationService.regeneratePostFromContent(
+      userId,
+      body.contentId,
+      { includeBrandKit: body.includeBrandKit },
+    );
+  }
+
   @Post('regenerate/carousel')
   @ApiOperation({ summary: 'Regenerate every slide of an existing carousel' })
   async regenerateCarousel(
@@ -319,6 +355,10 @@ export class GenerationController {
       contentType: 'text' | 'image' | 'carousel' | 'post';
       tonality: string;
       wordLimit: { kind: 'short' | 'medium' | 'long' } | { kind: 'custom'; words: number };
+      /** When true, run a Tavily web search on the topic and feed it to the text LLM. */
+      onlineSearch?: boolean;
+      /** When false, skip full brand kit (name, tone, voice examples, colors, image analysis). Only do_use/do_not_use words + past posts are kept. */
+      includeBrandKit?: boolean;
       imageCount?: number;
       slideCount?: number;
       carouselVisualStyle?:

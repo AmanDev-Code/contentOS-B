@@ -4,6 +4,9 @@ import { ConfigService } from '@nestjs/config';
 import { MediaGenerationService } from './media-generation.service';
 import { MinioService } from './minio.service';
 import { CacheService } from './cache.service';
+import { OpenAIRateLimiterService } from './openai-rate-limiter.service';
+import { AiGatewayService } from './ai-gateway.service';
+import { WebResearchService } from './web-research.service';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -21,7 +24,23 @@ describe('MediaGenerationService — createCarouselPdfFromImageUrls', () => {
       get: jest.fn(),
       set: jest.fn(),
     } as unknown as CacheService;
-    service = new MediaGenerationService(config, minio, cache);
+    const rateLimiter = {
+      executeWithRetry: jest.fn((_u: string, fn: () => unknown) => fn()),
+    } as unknown as OpenAIRateLimiterService;
+    const gateway = {
+      hasImageModels: jest.fn().mockReturnValue(false),
+    } as unknown as AiGatewayService;
+    const webResearch = {
+      isEnabled: jest.fn().mockReturnValue(false),
+    } as unknown as WebResearchService;
+    service = new MediaGenerationService(
+      config,
+      minio,
+      cache,
+      rateLimiter,
+      gateway,
+      webResearch,
+    );
   });
 
   it('produces a PDF starting with %PDF for reachable slide URLs', async () => {

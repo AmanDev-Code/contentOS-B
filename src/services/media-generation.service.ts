@@ -10,6 +10,9 @@ import { PassThrough } from 'stream';
 import { MinioService } from './minio.service';
 import { CacheService } from './cache.service';
 import { OpenAIRateLimiterService } from './openai-rate-limiter.service';
+import { AiGatewayService } from './ai-gateway.service';
+import { WebResearchService } from './web-research.service';
+import { debugLogBrandVisualForImage } from '../utils/llm-generation-debug';
 import type { CarouselVisualStyle } from '../modules/post-ai/carousel-visual-style';
 import type {
   CarouselNoteDensityLevel,
@@ -29,6 +32,19 @@ import {
   type DocumentDeckMeta,
 } from '../modules/post-ai/document-deck-renderer';
 
+export interface BrandVisualContext {
+  name?: string;
+  primaryColor?: string | null;
+  secondaryColor?: string | null;
+  accentColor?: string | null;
+  logoUrl?: string | null;
+  referenceImageUrls?: string[];
+  /** Pre-analyzed brand visual description from vision model (logo + reference style) — injected directly into image prompt. */
+  visionPromptFragment?: string;
+  /** Free-form brand notes (additional_information) to carry into the image prompt. */
+  additionalInfo?: string;
+}
+
 export interface ImageGenerationRequest {
   prompt: string;
   size?: '1024x1024' | '1792x1024' | '1024x1792' | '1536x1024' | '1024x1536';
@@ -37,6 +53,10 @@ export interface ImageGenerationRequest {
   model?: 'dall-e-3' | 'gpt-image-1' | 'gpt-image-1-mini';
   /** When true, use `prompt` verbatim (carousel base prompt already finalized). */
   skipProductionPromptAugmentation?: boolean;
+  /** Brand visual context for color-aware image generation. */
+  brandVisual?: BrandVisualContext;
+  /** Skip Redis image cache (required for regen so each run produces a new image). */
+  skipCache?: boolean;
 }
 
 export interface CarouselSlide {
@@ -71,7 +91,6 @@ export interface CarouselGenerationBundle {
 @Injectable()
 export class MediaGenerationService {
   private readonly logger = new Logger(MediaGenerationService.name);
-  private readonly openaiApiKey: string;
 
   /** Current user ID for rate limiting (set per request context) */
   private currentUserId: string = 'anonymous';
@@ -81,9 +100,9 @@ export class MediaGenerationService {
     private readonly minioService: MinioService,
     private readonly cacheService: CacheService,
     private readonly openaiRateLimiter: OpenAIRateLimiterService,
-  ) {
-    this.openaiApiKey = this.configService.get<string>('OPENAI_API_KEY') || '';
-  }
+    private readonly aiGateway: AiGatewayService,
+    private readonly webResearch: WebResearchService,
+  ) {}
 
   /**
    * Set the current user ID for rate limiting context.
@@ -93,68 +112,90 @@ export class MediaGenerationService {
     this.currentUserId = userId || 'anonymous';
   }
 
-  async generateSingleImage(request: ImageGenerationRequest): Promise<Buffer> {
+  async generateSingleImage(
+    request: ImageGenerationRequest,
+  ): Promise<{ buffer: Buffer; model: string }> {
     const cacheKey = this.buildImageCacheKey(request);
-    const cached = await this.cacheService.get(cacheKey);
+    const cached = request.skipCache
+      ? null
+      : await this.cacheService.get(cacheKey);
     if (cached) {
       this.logger.log('Cache HIT for image prompt');
-      return Buffer.from(cached, 'base64');
+      const cachedBuffer = await this.stripAiPublishMetadata(
+        Buffer.from(cached, 'base64'),
+      );
+      return { buffer: cachedBuffer, model: 'cache' };
     }
 
-    const model =
-      request.model ||
-      this.configService.get<string>('MEDIA_IMAGE_MODEL') ||
-      'gpt-image-1-mini';
+    const quality = (request.quality as string) || 'medium';
 
+    // Image generation uses ONLY the LLM-provided image prompt + brand visual
+    // identity (logo/reference analysis, colors, notes). The post caption and
+    // topic are NOT sent here — the text LLM already baked the relevant scene
+    // into `imagePrompt`.
     const optimizedPrompt = request.skipProductionPromptAugmentation
       ? request.prompt
-      : this.buildProductionImagePrompt(request.prompt);
+      : this.buildProductionImagePrompt(request.prompt, request.brandVisual);
+
+    debugLogBrandVisualForImage({
+      brandVisual: request.brandVisual,
+      scenePrompt: request.prompt,
+      optimizedPrompt,
+      size: request.size,
+      quality: request.quality,
+    });
+
     this.logger.log(
-      `Queueing image generation [${model}]: ${optimizedPrompt.substring(0, 60)}... userId=${this.currentUserId}`,
+      `Queueing image generation [Images API]: ${optimizedPrompt.substring(0, 60)}... userId=${this.currentUserId}`,
     );
+    const { b64, model: usedModel } =
+      await this.openaiRateLimiter.executeWithRetry(
+        this.currentUserId,
+        () =>
+          this.aiGateway.generateImageB64({
+            prompt: optimizedPrompt,
+            size: request.size || '1024x1024',
+            quality,
+          }),
+        'image-generation:gateway',
+      );
+    this.logger.log(`Image generated via Images API model=${usedModel}`);
+    const rawBuffer = Buffer.from(b64, 'base64');
+    const buffer = await this.stripAiPublishMetadata(rawBuffer);
+    await this.cacheService.set(
+      cacheKey,
+      buffer.toString('base64'),
+      6 * 60 * 60,
+    );
+    return { buffer, model: usedModel };
+  }
 
-    const isGptImage = model.startsWith('gpt-image');
-
-    const body: Record<string, unknown> = {
-      model,
-      prompt: optimizedPrompt,
-      n: 1,
-      size: request.size || '1024x1024',
-    };
-
-    if (isGptImage) {
-      const qMap: Record<string, string> = { hd: 'high', standard: 'medium' };
-      body.quality =
-        qMap[request.quality as string] || request.quality || 'medium';
-      body.output_format = 'png';
-    } else {
-      body.quality = request.quality || 'hd';
-      body.style = request.style || 'natural';
-      body.response_format = 'b64_json';
+  /**
+   * Remove C2PA Content Credentials and other metadata that social platforms
+   * (LinkedIn CR badge, etc.) read from gateway-generated images.
+   * Re-encodes from decoded pixels so provider manifests are not carried through.
+   */
+  async stripAiPublishMetadata(imageBuffer: Buffer): Promise<Buffer> {
+    try {
+      const meta = await sharp(imageBuffer).metadata();
+      const format = meta.format;
+      if (format === 'jpeg' || format === 'jpg') {
+        return sharp(imageBuffer)
+          .rotate()
+          .jpeg({ quality: 92, mozjpeg: true, chromaSubsampling: '4:4:4' })
+          .toBuffer();
+      }
+      return sharp(imageBuffer)
+        .rotate()
+        .png({ compressionLevel: 6 })
+        .toBuffer();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `stripAiPublishMetadata failed, using original buffer: ${msg}`,
+      );
+      return imageBuffer;
     }
-
-    // Use rate limiter with automatic retry for rate limit errors
-    const base64Image = await this.openaiRateLimiter.executeWithRetry(
-      this.currentUserId,
-      async () => {
-        const response = await axios.post(
-          'https://api.openai.com/v1/images/generations',
-          body,
-          {
-            headers: {
-              Authorization: `Bearer ${this.openaiApiKey}`,
-              'Content-Type': 'application/json',
-            },
-            timeout: 90000,
-          },
-        );
-        return response.data.data[0].b64_json as string;
-      },
-      `image-generation:${model}`,
-    );
-
-    await this.cacheService.set(cacheKey, base64Image, 6 * 60 * 60);
-    return Buffer.from(base64Image, 'base64');
   }
 
   /**
@@ -212,7 +253,7 @@ export class MediaGenerationService {
       skipOverlay,
     );
 
-    const base = await this.generateSingleImage({
+    const { buffer: base } = await this.generateSingleImage({
       prompt: fullPrompt,
       skipProductionPromptAugmentation: true,
       size: opts.size ?? '1024x1024',
@@ -292,7 +333,7 @@ export class MediaGenerationService {
         const batch = request.slides.slice(i, i + maxConcurrency);
         const results = await Promise.all(
           batch.map(async (slide) => {
-            const raw = await this.generateSingleImage({
+            const { buffer: raw } = await this.generateSingleImage({
               prompt: slide.imagePrompt,
               size: '1024x1024',
               quality: carouselQuality as ImageGenerationRequest['quality'],
@@ -981,8 +1022,21 @@ ${defs}
     }
   }
 
-  private buildProductionImagePrompt(prompt: string): string {
-    const lower = prompt.toLowerCase();
+  /**
+   * Build the image-generation prompt from the LLM-provided scene prompt + the
+   * brand visual identity ONLY. Deliberately excludes the post caption, topic,
+   * and any web-research text — the text LLM already encoded the relevant scene
+   * into `imagePrompt`. Layers:
+   *   1. Scene direction — the LLM imagePrompt (what to draw).
+   *   2. Brand visual identity — logo + reference-image analysis (style & mood).
+   *   3. Brand colors — hex palette for backgrounds/accents.
+   *   4. Brand notes — any extra brand guidance (additional_information).
+   */
+  private buildProductionImagePrompt(
+    scenePrompt: string,
+    brand?: BrandVisualContext,
+  ): string {
+    const lower = scenePrompt.toLowerCase();
     const notebookStudyStyle =
       /handwritten|hand-writing|notebook|notepad|lecture notes|study notes|sketch notes|whiteboard|\bdsa\b|leetcode|interview prep/.test(
         lower,
@@ -997,12 +1051,52 @@ ${defs}
         ]
       : [
           'Create a high-quality, photorealistic LinkedIn visual.',
-          'CRITICAL: Do NOT include any text, letters, numbers, logos, or watermarks inside the generated image.',
           'Use clean composition, balanced lighting, and professional business aesthetics.',
           'Avoid distorted objects and avoid surreal artifacts.',
+          'If text is included, keep it minimal (1-3 words max) and ensure it is clean and legible.',
         ];
 
-    return [...preamble, `Scene brief: ${prompt}`].join(' ');
+    // Brand visual identity (logo + reference-image analysis) for style & mood.
+    const visionBlock: string[] = [];
+    if (brand?.visionPromptFragment) {
+      visionBlock.push(
+        '',
+        'BRAND VISUAL IDENTITY (match this style & mood):',
+        brand.visionPromptFragment,
+      );
+    }
+
+    // Brand hex palette for backgrounds, gradients, highlights, accents.
+    const brandColorBlock: string[] = [];
+    if (brand) {
+      const colors: string[] = [];
+      if (brand.primaryColor) colors.push(`primary ${brand.primaryColor}`);
+      if (brand.secondaryColor)
+        colors.push(`secondary ${brand.secondaryColor}`);
+      if (brand.accentColor) colors.push(`accent ${brand.accentColor}`);
+      if (colors.length > 0) {
+        brandColorBlock.push(
+          '',
+          `BRAND COLORS: ${colors.join(', ')}.`,
+          'Use these hex colors for backgrounds, gradients, highlights, and accents.',
+        );
+      }
+    }
+
+    // Any extra brand guidance the user provided.
+    const brandNotesBlock: string[] = [];
+    if (brand?.additionalInfo && brand.additionalInfo.trim()) {
+      brandNotesBlock.push('', `BRAND NOTES: ${brand.additionalInfo.trim()}`);
+    }
+
+    return [
+      ...preamble,
+      '',
+      `SCENE DIRECTION: ${scenePrompt}`,
+      ...visionBlock,
+      ...brandColorBlock,
+      ...brandNotesBlock,
+    ].join('\n');
   }
 
   private async buildPdfFromImages(images: Buffer[]): Promise<Buffer> {
@@ -1198,6 +1292,66 @@ ${defs}
     } catch (error) {
       this.logger.error('Watermark failed:', (error as Error).message);
       return this.optimizeImage(imageBuffer, maxWidth);
+    }
+  }
+
+  /**
+   * Overlay the user's brand logo on a generated image (bottom-right, semi-transparent).
+   * Fetches the logo from the provided URL (MinIO/CDN). Returns the original buffer
+   * unchanged if the logo fetch or composite fails.
+   */
+  async overlayBrandLogo(
+    imageBuffer: Buffer,
+    logoUrl: string,
+  ): Promise<Buffer> {
+    try {
+      let logoBuf: Buffer;
+      if (logoUrl.startsWith('/minio/') || logoUrl.includes('/minio/')) {
+        const match = logoUrl.match(/\/minio\/([^/]+)\/(.+)/);
+        if (match) {
+          const stream = await this.minioService.getFileStream(match[1], match[2]);
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+          logoBuf = Buffer.concat(chunks);
+        } else {
+          return imageBuffer;
+        }
+      } else {
+        const res = await fetch(logoUrl, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return imageBuffer;
+        logoBuf = Buffer.from(await res.arrayBuffer());
+      }
+
+      const imgMeta = await sharp(imageBuffer).metadata();
+      const width = imgMeta.width || 1024;
+      const height = imgMeta.height || 1024;
+
+      const targetW = Math.round(width * 0.12);
+      const logoResized = await sharp(logoBuf)
+        .resize({ width: Math.max(40, targetW), fit: 'inside', withoutEnlargement: true })
+        .ensureAlpha()
+        .modulate({ brightness: 1 })
+        .png()
+        .toBuffer();
+
+      const lMeta = await sharp(logoResized).metadata();
+      const lw = lMeta.width || 0;
+      const lh = lMeta.height || 0;
+      const margin = Math.round(width * 0.03);
+
+      return await sharp(imageBuffer)
+        .composite([
+          {
+            input: logoResized,
+            left: Math.max(0, width - lw - margin),
+            top: Math.max(0, height - lh - margin),
+          },
+        ])
+        .png()
+        .toBuffer();
+    } catch (e) {
+      this.logger.warn(`Brand logo overlay skipped: ${(e as Error).message}`);
+      return imageBuffer;
     }
   }
 

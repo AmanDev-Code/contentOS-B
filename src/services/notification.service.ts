@@ -437,8 +437,8 @@ export class NotificationService {
 
   /**
    * Emit single-image regeneration completion. Frontend listens for this on
-   * `trndinn:image-regenerated` to swap the image URL in place inside the
-   * post preview/schedule modal without requiring a full content reload.
+   * `trndinn:image-regenerated` to append the new URL as another pickable
+   * option in the post preview/schedule modal.
    */
   emitImageRegenerated(
     userId: string,
@@ -447,6 +447,8 @@ export class NotificationService {
       contentId: string;
       imageIndex: number;
       newImageUrl: string;
+      sourceImageIndex?: number;
+      appended?: boolean;
     },
   ): void {
     this.logger.log(
@@ -475,6 +477,33 @@ export class NotificationService {
       `emitCarouselRegenerated: user=${userId} job=${data.generationId} content=${data.contentId} slides=${data.newImageUrls.length}`,
     );
     this.pushToUser(userId, 'generation.carousel_regenerated', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Full custom-topic regeneration — replaces caption, hashtags, and media on
+   * the existing content row (same topic + stored generation settings).
+   */
+  emitPostRegenerated(
+    userId: string,
+    data: {
+      generationId: string;
+      contentId: string;
+      contentType: string;
+      caption: string;
+      hashtags: string[];
+      imageUrls?: string[];
+      carouselUrls?: string[];
+      visualUrl?: string;
+      pdfUrl?: string;
+    },
+  ): void {
+    this.logger.log(
+      `emitPostRegenerated: user=${userId} job=${data.generationId} content=${data.contentId}`,
+    );
+    this.pushToUser(userId, 'generation.post_regenerated', {
       ...data,
       timestamp: new Date().toISOString(),
     });

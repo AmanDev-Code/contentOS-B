@@ -11,29 +11,87 @@ interface TrendingHashtagRow {
 const LINKEDIN_LOW_SIGNAL_RE =
   /reel|fyp|tiktok|officereel|office\s*reel|instagood|photooftheday|explorepage/i;
 
-const PLATFORM_EVERGREEN: Record<string, string[]> = {
-  linkedin: [
-    '#professionaldevelopment',
-    '#learning',
-    '#skills',
-    '#careergrowth',
-    '#technology',
-  ],
-  instagram: ['#instagood', '#photooftheday', '#reels', '#explore', '#viral'],
-  x: ['#tech', '#ai', '#trending', '#news', '#thread'],
-};
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of',
+  'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+  'may', 'might', 'must', 'shall', 'can', 'this', 'that', 'these', 'those',
+  'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'which', 'who', 'when',
+  'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more', 'most',
+  'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so',
+  'than', 'too', 'very', 'just', 'about', 'into', 'through', 'during', 'before',
+  'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under',
+  'again', 'further', 'then', 'once', 'here', 'there', 'post', 'create', 'write',
+  'make', 'generate', 'build', 'linkedin', 'instagram', 'content', 'caption',
+]);
+
+function normalizeTag(raw: string): string {
+  const inner = raw.trim().replace(/^#+/, '').replace(/\s+/g, '');
+  if (!inner) return '';
+  return `#${inner.toLowerCase()}`;
+}
+
+/** Extract searchable tokens from the topic + LLM keywords for hashtag matching. */
+function buildSearchTerms(keywords: string[], topic?: string): string[] {
+  const terms = new Set<string>();
+
+  for (const kw of keywords) {
+    const k = kw.toLowerCase().trim();
+    if (k.length >= 3) terms.add(k);
+    for (const part of k.split(/[\s\-_/,]+/)) {
+      if (part.length >= 3 && !STOP_WORDS.has(part)) terms.add(part);
+    }
+  }
+
+  if (topic) {
+    const topicLower = topic.toLowerCase();
+    for (const part of topicLower.split(/[\s\-_/,]+/)) {
+      const clean = part.replace(/[^a-z0-9]/g, '');
+      if (clean.length >= 4 && !STOP_WORDS.has(clean)) terms.add(clean);
+    }
+    // Also keep meaningful multi-word phrases (2+ words, 8+ chars)
+    const phrases = topicLower.match(/[a-z0-9][a-z0-9\s\-]{6,}[a-z0-9]/g) || [];
+    for (const phrase of phrases) {
+      const compact = phrase.replace(/\s+/g, '');
+      if (compact.length >= 6) terms.add(compact);
+    }
+  }
+
+  return Array.from(terms);
+}
+
+function scoreTagAgainstTerms(tag: string, terms: string[]): number {
+  const normalized = tag.replace(/^#/, '').toLowerCase();
+  let matchScore = 0;
+  for (const term of terms) {
+    if (normalized === term) {
+      matchScore += 5;
+    } else if (normalized.includes(term) || term.includes(normalized)) {
+      matchScore += 3;
+    } else {
+      for (const part of term.split(/[\s\-_]+/)) {
+        if (part.length >= 4 && normalized.includes(part)) {
+          matchScore += 1;
+        }
+      }
+    }
+  }
+  return matchScore;
+}
 
 /**
  * Deterministic hashtag selector.
- * Picks from the trending pool + admin-curated tags — never invents hashtags.
+ * Picks from the trending pool + admin-curated tags based on topic/keyword
+ * relevance — never falls back to the same fixed evergreen set every time.
  */
 export async function selectHashtags(
   keywords: string[],
   platform: string,
   trendingHashtagService: TrendingHashtagEngineService,
   trendingTagsService: TrendingTagsService,
+  topic?: string,
 ): Promise<string[]> {
-  const normalizedKeywords = keywords.map((k) => k.toLowerCase().trim());
+  const searchTerms = buildSearchTerms(keywords, topic);
 
   const { items } = await trendingHashtagService.getTrendingPaged(
     undefined,
@@ -52,75 +110,69 @@ export async function selectHashtags(
   const highPriorityAdmin = adminTags
     .filter((t) => t.priority >= 5 && t.is_active)
     .map((t) => {
-      const tag = t.tag.startsWith('#') ? t.tag : `#${t.tag}`;
+      const tag = normalizeTag(t.tag.startsWith('#') ? t.tag : `#${t.tag}`);
       return { hashtag: tag, priority: t.priority };
     })
+    .filter((t) => t.hashtag)
     .sort((a, b) => b.priority - a.priority);
 
-  const scored: Array<{ hashtag: string; matchScore: number }> = [];
+  // Score every pool tag by keyword/topic relevance + trending score.
+  const scored: Array<{ hashtag: string; combined: number }> = [];
   for (const row of pool) {
-    if (platform === 'linkedin' && LINKEDIN_LOW_SIGNAL_RE.test(row.hashtag)) {
-      continue;
-    }
-    const tag = row.hashtag.replace(/^#/, '').toLowerCase();
-    let matchScore = 0;
-    for (const kw of normalizedKeywords) {
-      if (tag.includes(kw) || kw.includes(tag)) {
-        matchScore += 2;
-      } else {
-        const kwParts = kw.split(/[\s-_]+/);
-        for (const part of kwParts) {
-          if (part.length >= 3 && tag.includes(part)) {
-            matchScore += 1;
-          }
-        }
-      }
-    }
-    if (matchScore > 0) {
-      scored.push({ hashtag: row.hashtag, matchScore });
+    const tag = normalizeTag(row.hashtag);
+    if (!tag) continue;
+    const matchScore = scoreTagAgainstTerms(tag, searchTerms);
+    const trendingBoost = (row.score || 0) * 0.5;
+    const combined = matchScore + trendingBoost;
+    if (matchScore > 0 || trendingBoost > 0.3) {
+      scored.push({ hashtag: tag, combined });
     }
   }
-  scored.sort((a, b) => b.matchScore - a.matchScore);
+  scored.sort((a, b) => b.combined - a.combined);
 
   const selected = new Set<string>();
+  const result: string[] = [];
 
-  const topMatched = scored.slice(0, 5);
-  for (const item of topMatched) {
-    selected.add(item.hashtag);
+  const add = (tag: string) => {
+    const n = normalizeTag(tag);
+    if (!n || selected.has(n)) return;
+    selected.add(n);
+    result.push(n);
+  };
+
+  // 1. Top keyword/topic-matched tags from trending pool (primary source).
+  const matched = scored.filter((s) => scoreTagAgainstTerms(s.hashtag, searchTerms) > 0);
+  for (const item of matched.slice(0, 5)) {
+    add(item.hashtag);
   }
 
-  const adminSlots = Math.min(2, highPriorityAdmin.length);
-  for (let i = 0; i < adminSlots; i++) {
-    selected.add(highPriorityAdmin[i].hashtag);
-  }
-
-  const evergreen = PLATFORM_EVERGREEN[platform] || [];
-  let evergreenAdded = 0;
-  for (const tag of evergreen) {
-    if (evergreenAdded >= 2) break;
-    if (!selected.has(tag)) {
-      selected.add(tag);
-      evergreenAdded++;
+  // 2. Relevant admin tags that match the topic.
+  for (const admin of highPriorityAdmin) {
+    if (result.length >= 6) break;
+    if (scoreTagAgainstTerms(admin.hashtag, searchTerms) > 0) {
+      add(admin.hashtag);
     }
   }
 
-  const result = Array.from(selected).slice(0, 8);
+  // 3. If still short, fill with highest-trending pool tags (varies per refresh).
+  if (result.length < 4) {
+    const byTrending = [...pool]
+      .sort((a, b) => (b.score || 0) - (a.score || 0));
+    for (const row of byTrending) {
+      if (result.length >= 6) break;
+      add(row.hashtag);
+    }
+  }
 
-  if (result.length < 4 && pool.length > 0) {
-    for (const row of pool) {
-      if (result.length >= 4) break;
-      if (
-        platform === 'linkedin' &&
-        LINKEDIN_LOW_SIGNAL_RE.test(row.hashtag)
-      ) {
-        continue;
-      }
-      if (!selected.has(row.hashtag)) {
-        result.push(row.hashtag);
-        selected.add(row.hashtag);
+  // 4. Last resort: derive compact tags from search terms themselves.
+  if (result.length < 3 && searchTerms.length > 0) {
+    for (const term of searchTerms) {
+      if (result.length >= 5) break;
+      if (term.length >= 4 && term.length <= 30) {
+        add(`#${term.replace(/\s+/g, '')}`);
       }
     }
   }
 
-  return result;
+  return result.slice(0, 8);
 }

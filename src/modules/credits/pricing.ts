@@ -3,16 +3,22 @@
  *
  * All stored values use half-credit integers (multiply display credits × 2)
  * to eliminate floating-point drift on carousel 2.5-per-slide pricing.
+ *
+ * The per-unit credit values are derived from the single source of truth
+ * (`credit-costs.ts → CREDIT_COSTS.generate`). This wrapper preserves the
+ * existing `CUSTOM_TOPIC_PRICING` shape (incl. half-credit integers) that the
+ * generation worker + specs depend on, while eliminating duplicated numbers.
  */
+import { CREDIT_COSTS } from './credit-costs';
 
 export const CUSTOM_TOPIC_PRICING = {
-  TEXT_CREDITS: 2,
-  IMAGE_PER_UNIT_CREDITS: 3,
-  SLIDE_PER_UNIT_CREDITS: 2.5,
+  TEXT_CREDITS: CREDIT_COSTS.generate.textBase,
+  IMAGE_PER_UNIT_CREDITS: CREDIT_COSTS.generate.imagePerUnit,
+  SLIDE_PER_UNIT_CREDITS: CREDIT_COSTS.generate.slidePerUnit,
 
-  TEXT_HALF_CREDITS: 4,
-  IMAGE_PER_UNIT_HALF_CREDITS: 6,
-  SLIDE_PER_UNIT_HALF_CREDITS: 5,
+  TEXT_HALF_CREDITS: Math.round(CREDIT_COSTS.generate.textBase * 2),
+  IMAGE_PER_UNIT_HALF_CREDITS: Math.round(CREDIT_COSTS.generate.imagePerUnit * 2),
+  SLIDE_PER_UNIT_HALF_CREDITS: Math.round(CREDIT_COSTS.generate.slidePerUnit * 2),
 } as const;
 
 export interface CreditSlice {

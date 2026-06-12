@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Patch,
   Get,
   Delete,
   Body,
@@ -25,8 +26,10 @@ import { CacheService } from '../services/cache.service';
 import { IdempotencyService } from '../services/idempotency.service';
 import { ImmediatePostPublishService } from '../services/immediate-post-publish.service';
 import { FeedbackService } from '../services/feedback.service';
+import { WebhookDispatcherService } from '../services/webhook-dispatcher.service';
 import { ConfigService } from '@nestjs/config';
 import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
+import { scheduleCost } from '../modules/credits/credit-costs';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -48,6 +51,7 @@ export class PostsController {
     private readonly configService: ConfigService,
     private readonly immediatePostPublishService: ImmediatePostPublishService,
     private readonly feedbackService: FeedbackService,
+    private readonly webhookDispatcher: WebhookDispatcherService,
   ) {}
 
   @Post('publish')
@@ -180,17 +184,37 @@ export class PostsController {
         );
       }
 
-      // Determine credit cost based on content type (scheduling costs more)
-      let creditCost = 4; // Default for text post scheduling
+      await this.postSchedulingService.validateLinkedInPostForPublish(
+        userId,
+        contentId,
+        { content, hashtags },
+      );
 
       // Get content to determine type
       const contentData = await this.postSchedulingService['supabaseService']
         .getServiceClient()
         .from('generated_content')
-        .select('visual_type, visual_url, carousel_urls, media_urls')
+        .select(
+          'visual_type, visual_url, carousel_urls, media_urls, publish_status, linkedin_post_id',
+        )
         .eq('id', contentId)
         .eq('user_id', userId)
         .single();
+
+      // Guard early (before charging credits / touching status): a post that is
+      // already live on LinkedIn cannot be scheduled again. `linkedin_post_id`
+      // is the durable marker — publish_status is mutable and gets reset by
+      // cleanup/cancel flows, so it must NOT be part of this check.
+      if (contentData.data?.linkedin_post_id) {
+        throw new HttpException(
+          {
+            message:
+              'This post has already been published to LinkedIn and cannot be scheduled again.',
+            code: 'post_already_published',
+          },
+          HttpStatus.CONFLICT,
+        );
+      }
 
       const hasValidImage = Boolean(
         contentData.data?.visual_url?.startsWith('http') ||
@@ -203,19 +227,16 @@ export class PostsController {
         contentData.data.carousel_urls.length > 0,
       );
 
-      if (contentData.data) {
-        if (hasCarousel) {
-          creditCost = 15; // Carousel scheduling
-        } else if (hasValidImage) {
-          creditCost = 7.5; // Image scheduling
-        }
-        // Text post remains 4
-      }
-
-      // Add 12 credits for PDF attachment
-      if (pdfUrl) {
-        creditCost += 12;
-      }
+      // Single source of truth: credit-costs.ts. Schedule image/carousel costs
+      // are FLAT (do not scale by count); PDF adds a flat add-on.
+      const scheduleContentType = hasCarousel
+        ? 'carousel'
+        : hasValidImage
+          ? 'image'
+          : 'text';
+      const creditCost = scheduleCost(scheduleContentType, {
+        pdf: Boolean(pdfUrl),
+      });
 
       // Check quota (scheduling costs more than immediate posting)
       const hasQuota = await this.quotaService.checkQuotaAvailable(
@@ -230,11 +251,6 @@ export class PostsController {
       }
 
       // IMMEDIATE CREDIT DEDUCTION - Charge upfront for scheduling
-      const scheduleContentType = hasCarousel
-        ? 'carousel'
-        : hasValidImage
-          ? 'image'
-          : 'text';
       await this.quotaService.consumeCredits(
         userId,
         creditCost,
@@ -309,6 +325,17 @@ export class PostsController {
           effectiveTimezone,
         );
 
+        try {
+          await this.webhookDispatcher.emitPostScheduled({
+            userId,
+            contentId,
+            platform: platform || 'linkedin',
+            scheduledFor: scheduledDate.toISOString(),
+          });
+        } catch {
+          // best-effort
+        }
+
         const fb = await this.feedbackService.recordFirstAction(userId);
 
         return {
@@ -346,6 +373,9 @@ export class PostsController {
       }
     } catch (error) {
       this.logger.error('Failed to schedule post:', error.message);
+      if (error instanceof HttpException) {
+        throw error;
+      }
       throw new HttpException(
         error.message || 'Failed to schedule post',
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
@@ -696,6 +726,100 @@ export class PostsController {
     }
   }
 
+  @Patch('scheduled/:id/reschedule')
+  @ApiOperation({
+    summary:
+      'Move an already-scheduled post to a new time without charging credits',
+  })
+  async reschedulePost(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') scheduledPostId: string,
+    @Body()
+    body: {
+      scheduledFor: string;
+      scheduledForLocal?: string;
+      timezone?: string;
+    },
+    @Headers('x-user-timezone') userTimezoneHeader?: string,
+  ) {
+    try {
+      const userId = req.user.id;
+      const { scheduledFor, scheduledForLocal, timezone } = body;
+
+      // Validate the new scheduled time (mirrors POST /posts/schedule).
+      const scheduleSource = scheduledFor || scheduledForLocal;
+      const effectiveTimezone = timezone || userTimezoneHeader;
+      if (!scheduleSource) {
+        throw new HttpException('Invalid scheduled time', HttpStatus.BAD_REQUEST);
+      }
+      const scheduledDate = new Date(scheduleSource);
+      if (Number.isNaN(scheduledDate.getTime())) {
+        throw new HttpException('Invalid scheduled time', HttpStatus.BAD_REQUEST);
+      }
+      if (scheduledDate <= new Date()) {
+        throw new HttpException(
+          'Scheduled time must be in the future',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const maxFutureDate = new Date();
+      maxFutureDate.setFullYear(maxFutureDate.getFullYear() + 1);
+      if (scheduledDate > maxFutureDate) {
+        throw new HttpException(
+          'Scheduled time cannot be more than 1 year in the future',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // NO CREDIT CHARGE: reschedule is a pure time-shift of an existing job.
+      const result = await this.postSchedulingService.reschedulePost({
+        scheduledPostId,
+        userId,
+        newScheduledFor: scheduledDate,
+      });
+
+      // Refresh the scheduled/calendar caches so the move is reflected.
+      await this.cacheService.invalidateUser(userId);
+
+      // Best-effort reschedule notification (failure must not break the move).
+      try {
+        const contentData = await this.postSchedulingService['supabaseService']
+          .getServiceClient()
+          .from('generated_content')
+          .select('title')
+          .eq('id', result.contentId)
+          .single();
+        await this.notificationService.notifyPostScheduled(
+          userId,
+          result.contentId,
+          contentData.data?.title || 'Your post',
+          scheduledDate.toISOString(),
+          effectiveTimezone,
+        );
+      } catch (notifyError) {
+        this.logger.warn(
+          `Failed to send reschedule notification: ${notifyError.message}`,
+        );
+      }
+
+      return {
+        success: true,
+        jobId: result.jobId,
+        scheduledFor: result.scheduledFor,
+        message: 'Post rescheduled successfully',
+      };
+    } catch (error) {
+      this.logger.error('Failed to reschedule post:', error.message);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        error.message || 'Failed to reschedule post',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post('scheduled/:id/cancel')
   @ApiOperation({ summary: 'Cancel a scheduled post' })
   async cancelScheduledPost(
@@ -761,6 +885,16 @@ export class PostsController {
       }
 
       await this.cacheService.invalidateUser(userId);
+
+      try {
+        await this.webhookDispatcher.emitPostCancelled({
+          userId,
+          contentId: scheduledPost.content_id,
+          platform: scheduledPost.platform || 'linkedin',
+        });
+      } catch {
+        // best-effort
+      }
 
       return {
         success: true,

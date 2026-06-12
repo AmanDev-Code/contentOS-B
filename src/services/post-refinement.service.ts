@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { AiGatewayService } from './ai-gateway.service';
 import { MediaPostType, N8nGeneratedContentDto } from '../common/dto/media-intent.dto';
 import { stripMarkdownForLinkedIn } from '../common/utils/linkedin-publish-text';
 
@@ -28,7 +28,7 @@ export interface RefinedPostOutput {
 export class PostRefinementService {
   private readonly logger = new Logger(PostRefinementService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly aiGateway: AiGatewayService) {}
 
   async refine(input: RefineInput): Promise<RefinedPostOutput> {
     this.logger.log(
@@ -662,25 +662,7 @@ export class PostRefinementService {
     return cleaned;
   }
 
-  /** Primary model + optional AI_REFINEMENT_FALLBACK_MODELS only (no silent substitution). */
-  private buildLlmModelAttemptList(primary: string): string[] {
-    const extras = (process.env.AI_REFINEMENT_FALLBACK_MODELS || '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    return Array.from(new Set([primary, ...extras].filter(Boolean)));
-  }
-
-  private llmErrorWarrantsModelSwitch(status: number, body: string): boolean {
-    if (status === 404 || status === 503) return true;
-    const b = body.toLowerCase();
-    return (
-      b.includes('no allowed providers') ||
-      b.includes('model not found') ||
-      b.includes('invalid model') ||
-      b.includes('does not exist')
-    );
-  }
+  // Model chain + fallback are now handled by AiGatewayService.
 
   /** Parse JSON from strict mode, fenced blocks, or largest {...} slice (non–JSON-mode completions). */
   private tryParseJsonFromLlmPayload(text: string): any | null {
@@ -717,65 +699,9 @@ export class PostRefinementService {
   ): Promise<RefinedPostOutput | null> {
     const enabled = (process.env.AI_REFINEMENT_ENABLED || 'true') !== 'false';
     if (!enabled) {
-      this.logger.log(
-        JSON.stringify({
-          event: 'refinement.llm.skip',
-          reason: 'disabled',
-        }),
-      );
+      this.logger.log(JSON.stringify({ event: 'refinement.llm.skip', reason: 'disabled' }));
       return null;
     }
-
-    const baseUrl =
-      this.configService.get<string>('aiRefinement.baseUrl') ||
-      process.env.AI_REFINEMENT_BASE_URL ||
-      'https://openrouter.ai/api/v1';
-    const model =
-      this.configService.get<string>('aiRefinement.model') ||
-      process.env.AI_REFINEMENT_MODEL ||
-      (baseUrl.includes('openrouter.ai')
-        ? 'z-ai/glm-4.5-air:free'
-        : 'gpt-4.1-mini');
-    const apiKey =
-      this.configService.get<string>('aiRefinement.apiKey') ||
-      process.env.AI_REFINEMENT_API_KEY ||
-      process.env.OPENROUTER_API_KEY ||
-      (baseUrl.includes('openrouter.ai') ? '' : process.env.OPENAI_API_KEY || '');
-    if (!apiKey) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'refinement.llm.skip',
-          reason: baseUrl.includes('openrouter.ai')
-            ? 'missing_openrouter_api_key'
-            : 'missing_api_key',
-          baseUrl,
-        }),
-      );
-      return null;
-    }
-    const timeoutMs = Number(
-      this.configService.get<string>('aiRefinement.timeoutMs') ||
-        process.env.AI_REFINEMENT_TIMEOUT_MS ||
-        '12000',
-    );
-    const referer =
-      this.configService.get<string>('aiRefinement.referer') ||
-      process.env.AI_REFINEMENT_REFERER ||
-      '';
-    const appTitle =
-      this.configService.get<string>('aiRefinement.appTitle') ||
-      process.env.AI_REFINEMENT_APP_TITLE ||
-      'Trndinn';
-    const modelCandidates = this.buildLlmModelAttemptList(model);
-    this.logger.log(
-      JSON.stringify({
-        event: 'refinement.llm.start',
-        models: modelCandidates,
-        baseUrl,
-        timeoutMs,
-        hasApiKey: Boolean(apiKey),
-      }),
-    );
 
     const sourceUrl =
       input.sourceUrl ||
@@ -817,177 +743,57 @@ export class PostRefinementService {
       '{"title":"string","content":"string","hashtags":["#tag"],"tone":"string"}',
     ].join('\n');
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    };
-    if (baseUrl.includes('openrouter.ai')) {
-      if (referer) headers['HTTP-Referer'] = referer;
-      if (appTitle) {
-        headers['X-Title'] = appTitle;
-        headers['X-OpenRouter-Title'] = appTitle;
-      }
-    }
+    try {
+      this.logger.log(JSON.stringify({ event: 'refinement.llm.start' }));
 
-    const endpoint = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-
-    for (let i = 0; i < modelCandidates.length; i++) {
-      const m = modelCandidates[i];
-      this.logger.log(
-        JSON.stringify({
-          event: 'refinement.llm.attempt',
-          model: m,
-          index: i,
-          total: modelCandidates.length,
-        }),
-      );
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const chatPayload = (useJsonObjectMode: boolean) =>
-          JSON.stringify({
-            model: m,
-            temperature: 0.8,
-            ...(useJsonObjectMode
-              ? { response_format: { type: 'json_object' } }
-              : {}),
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt },
-            ],
-          });
-
-        let response = await fetch(endpoint, {
-          method: 'POST',
-          headers,
-          body: chatPayload(true),
-          signal: controller.signal,
+      const { content: text, model: usedModel } =
+        await this.aiGateway.chatCompletionRaw({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.8,
+          jsonObject: true,
         });
 
-        if (!response.ok) {
-          let errText = await response.text();
-          if (
-            response.status === 400 &&
-            /response_format|json_object|response format|json mode/i.test(
-              errText,
-            )
-          ) {
-            this.logger.warn(
-              JSON.stringify({
-                event: 'refinement.llm.retry_without_json_mode',
-                model: m,
-              }),
-            );
-            response = await fetch(endpoint, {
-              method: 'POST',
-              headers,
-              body: chatPayload(false),
-              signal: controller.signal,
-            });
-            if (!response.ok) {
-              errText = await response.text();
-            }
-          }
-
-          if (!response.ok) {
-            const canRetry =
-              this.llmErrorWarrantsModelSwitch(response.status, errText) &&
-              i < modelCandidates.length - 1;
-            this.logger.warn(
-              JSON.stringify({
-                event: 'refinement.llm.http_error',
-                model: m,
-                status: response.status,
-                body: errText.slice(0, 500),
-                willRetryFallback: canRetry,
-              }),
-            );
-            if (canRetry) continue;
-            return null;
-          }
-        }
-
-        const json = (await response.json()) as any;
-        const text = String(json?.choices?.[0]?.message?.content || '').trim();
-        if (!text) {
-          this.logger.warn(
-            JSON.stringify({
-              event: 'refinement.llm.empty_response',
-              model: m,
-            }),
-          );
-          return null;
-        }
-
-        const parsed = this.tryParseJsonFromLlmPayload(text);
-        if (!parsed) {
-          this.logger.warn(
-            JSON.stringify({
-              event: 'refinement.llm.invalid_json',
-              model: m,
-              sample: text.slice(0, 300),
-            }),
-          );
-          return null;
-        }
-
-        const title = String(parsed?.title || fallback.title || '').trim().slice(0, 180);
-        const content = this.injectSourceIntoPlaceholder(
-          String(parsed?.content || '').trim().slice(0, 5000),
-          sourceUrl,
-        );
-        const hashtags = this.normalizeHashtags(
-          Array.isArray(parsed?.hashtags) ? parsed.hashtags : seedHashtags,
-        );
-        if (!title || !content) return null;
-
-        const quality = this.assessQuality({
-          refinedContent: content,
-          hashtags,
-          sourceUrl,
-          keyPointCount: Math.max(2, this.toSentences(content).length),
-        });
-        if (!quality.passed || quality.score < 70) {
-          this.logger.warn(
-            JSON.stringify({
-              event: 'refinement.llm.rejected_quality',
-              model: m,
-              score: quality.score,
-              reasons: quality.reasons,
-            }),
-          );
-          return null;
-        }
-        this.logger.log(
-          JSON.stringify({
-            event: 'refinement.llm.success',
-            model: m,
-            qualityScore: quality.score,
-            outputLength: content.length,
-          }),
-        );
-
-        return { title, content, hashtags, quality };
-      } catch (error) {
-        const msg = (error as Error).message;
-        const canRetry = i < modelCandidates.length - 1;
-        this.logger.warn(
-          JSON.stringify({
-            event: 'refinement.llm.exception',
-            model: m,
-            message: msg,
-            willRetryFallback: canRetry,
-          }),
-        );
-        if (canRetry) continue;
+      if (!text) {
+        this.logger.warn(JSON.stringify({ event: 'refinement.llm.empty_response', model: usedModel }));
         return null;
-      } finally {
-        clearTimeout(timer);
       }
-    }
 
-    return null;
+      const parsed = this.tryParseJsonFromLlmPayload(text);
+      if (!parsed) {
+        this.logger.warn(JSON.stringify({ event: 'refinement.llm.invalid_json', model: usedModel, sample: text.slice(0, 300) }));
+        return null;
+      }
+
+      const title = String(parsed?.title || fallback.title || '').trim().slice(0, 180);
+      const content = this.injectSourceIntoPlaceholder(
+        String(parsed?.content || '').trim().slice(0, 5000),
+        sourceUrl,
+      );
+      const hashtags = this.normalizeHashtags(
+        Array.isArray(parsed?.hashtags) ? parsed.hashtags : seedHashtags,
+      );
+      if (!title || !content) return null;
+
+      const quality = this.assessQuality({
+        refinedContent: content,
+        hashtags,
+        sourceUrl,
+        keyPointCount: Math.max(2, this.toSentences(content).length),
+      });
+      if (!quality.passed || quality.score < 70) {
+        this.logger.warn(JSON.stringify({ event: 'refinement.llm.rejected_quality', model: usedModel, score: quality.score, reasons: quality.reasons }));
+        return null;
+      }
+      this.logger.log(JSON.stringify({ event: 'refinement.llm.success', model: usedModel, qualityScore: quality.score, outputLength: content.length }));
+
+      return { title, content, hashtags, quality };
+    } catch (error) {
+      this.logger.warn(JSON.stringify({ event: 'refinement.llm.exception', message: (error as Error).message }));
+      return null;
+    }
   }
 }
 

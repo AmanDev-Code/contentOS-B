@@ -9,28 +9,36 @@ import { PostSchedulingService } from '../services/post-scheduling.service';
 import { SupabaseService } from '../services/supabase.service';
 import { QuotaService } from '../services/quota.service';
 import { NotificationService } from '../services/notification.service';
+import { WebhookDispatcherService } from '../services/webhook-dispatcher.service';
+import { PlatformBadRequestError } from '../integrations/social/types';
+import { QUEUE_NAMES } from '../common/constants';
 
-interface PublishJobData {
+export interface SocialPublishJobData {
   contentId: string;
   userId: string;
   platform: string;
   actorType?: 'member' | 'organization';
   organizationUrn?: string;
+  scheduledFor?: string;
 }
 
 /**
- * Scheduled LinkedIn publish worker.
+ * Unified social publish worker (Sprint 1.4 consolidation).
+ *
+ * Consumes the single `social-publish` queue (replaces the old
+ * `post-publishing` + unused `linkedin-publish` queues). All providers
+ * dispatch through this processor; the `platform` field in the job payload
+ * determines which provider handles the publish call.
  *
  * Idempotency / refunds:
- * - Duplicate BullMQ attempts after a failure used to call `consumeCredits` (refund) every time.
- *   Refunds now go through `refundOnce` with a stable `operationId` per `contentId` so the same
- *   logical failure is not refunded multiple times.
- * - If `generated_content` is already published (e.g. LinkedIn succeeded but a later DB write
- *   failed), we complete the job without calling LinkedIn again.
- * - `BadRequestException` / `ForbiddenException` from publishing (token, URN, product config)
- *   are treated as non-retryable via `UnrecoverableError` so BullMQ does not burn all attempts.
+ * - Refunds go through `refundOnce` with a stable `operationId` per
+ *   `contentId` so the same logical failure is not refunded twice.
+ * - If `generated_content` is already published (e.g. LinkedIn succeeded but
+ *   a later DB write failed), the job completes without calling the platform.
+ * - `BadRequestException` / `ForbiddenException` / `PlatformBadRequestError`
+ *   are non-retryable via `UnrecoverableError`.
  */
-@Processor('post-publishing')
+@Processor(QUEUE_NAMES.SOCIAL_PUBLISH)
 export class PostPublishingProcessor extends WorkerHost {
   private readonly logger = new Logger(PostPublishingProcessor.name);
 
@@ -39,17 +47,18 @@ export class PostPublishingProcessor extends WorkerHost {
     private readonly supabaseService: SupabaseService,
     private readonly quotaService: QuotaService,
     private readonly notificationService: NotificationService,
+    private readonly webhookDispatcher: WebhookDispatcherService,
   ) {
     super();
   }
 
-  async process(job: Job<PublishJobData>) {
+  async process(job: Job<SocialPublishJobData>) {
     if (job.name !== 'publish-scheduled-post') return;
 
     return this.handleScheduledPost(job);
   }
 
-  async handleScheduledPost(job: Job<PublishJobData>) {
+  async handleScheduledPost(job: Job<SocialPublishJobData>) {
     this.logger.log(`Processing scheduled post job: ${job.id || 'unknown'}`);
 
     const { contentId, userId, platform, actorType, organizationUrn } = job.data;
@@ -140,6 +149,20 @@ export class PostPublishingProcessor extends WorkerHost {
         );
       }
 
+      // Fire post.published webhook for scheduled publishes (covers both
+      // UI-scheduled and API-created scheduled posts — the immediate-publish
+      // path emits its own webhook separately). Best-effort: never block.
+      try {
+        await this.webhookDispatcher.emitPostPublished({
+          userId,
+          contentId,
+          platform: platform || 'linkedin',
+          postId,
+        });
+      } catch {
+        // best-effort — webhook failure must never fail the job
+      }
+
       this.logger.log(`Scheduled post published successfully: ${postId}`);
       return { success: true, postId };
     } catch (error: unknown) {
@@ -166,6 +189,18 @@ export class PostPublishingProcessor extends WorkerHost {
           updated_at: new Date().toISOString(),
         })
         .eq('id', contentId);
+
+      // Fire post.failed webhook for scheduled publishes (best-effort).
+      try {
+        await this.webhookDispatcher.emitPostFailed({
+          userId,
+          contentId,
+          platform: platform || 'linkedin',
+          error: errMessage || 'Unknown error',
+        });
+      } catch {
+        // best-effort
+      }
 
       // REFUND CREDITS for failed scheduled post
       try {
@@ -254,7 +289,8 @@ export class PostPublishingProcessor extends WorkerHost {
       const msg = error instanceof Error ? error.message : String(error);
       if (
         error instanceof BadRequestException ||
-        error instanceof ForbiddenException
+        error instanceof ForbiddenException ||
+        error instanceof PlatformBadRequestError
       ) {
         throw new UnrecoverableError(msg);
       }

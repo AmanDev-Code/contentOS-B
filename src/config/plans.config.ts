@@ -18,11 +18,11 @@ export const PLAN_CONFIGURATIONS: PlanConfiguration[] = [
     planType: 'free',
     name: 'Free Trial',
     description: '14-day free trial for new users',
-    creditsLimit: 50,
+    creditsLimit: 150,
     priceMonthly: 0.0,
     priceYearly: 0.0,
     features: [
-      '50 AI credits per month',
+      '150 AI credits per month',
       'Basic content generation',
       'Community support',
       '14-day trial',

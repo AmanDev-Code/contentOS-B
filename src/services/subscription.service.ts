@@ -477,6 +477,132 @@ export class SubscriptionService {
     return { ok: true, updatedPlanTypes, warnings };
   }
 
+  /**
+   * Public, DYNAMIC pricing pulled live from Polar at runtime (cached ~5 min).
+   * Never hardcoded: paid-plan amounts come from the live Polar catalog snapshot;
+   * if Polar is not configured / a read fails, we fall back to the Supabase
+   * `subscription_plans` display pricing so the page still renders. The marketing
+   * pricing page reflects Polar (and admin-driven Polar changes) automatically.
+   */
+  async getPublicLivePricing(): Promise<{
+    source: 'polar' | 'fallback' | 'mixed';
+    currency: string;
+    fetchedAt: string;
+    plans: Array<{
+      planType: 'free' | 'standard' | 'pro' | 'ultimate';
+      monthly: number | null;
+      yearly: number | null;
+      currency: string;
+      source: 'polar' | 'fallback';
+    }>;
+  }> {
+    const cacheKey = 'public_live_pricing';
+    const cached = await this.cacheService.get(cacheKey);
+    if (cached) return cached;
+
+    const meta = await this.getPricingDisplayMeta();
+    const currency = meta.defaultCurrency || 'USD';
+
+    // DB fallback amounts (subscription_plans display_pricing / legacy columns).
+    const dbPlans = await this.getSubscriptionPlans();
+    const fallbackFor = (
+      planType: string,
+    ): { monthly: number | null; yearly: number | null } => {
+      const p = dbPlans.find((x) => x.planType === planType);
+      if (!p) return { monthly: null, yearly: null };
+      const tier =
+        p.displayPricing?.[currency] ?? p.displayPricing?.['USD'] ?? null;
+      if (tier) {
+        return {
+          monthly: tier.offerMonthly ?? tier.listMonthly,
+          yearly: tier.offerYearly ?? tier.listYearly,
+        };
+      }
+      return { monthly: p.priceMonthly, yearly: p.priceYearly };
+    };
+
+    const result = {
+      source: 'fallback' as 'polar' | 'fallback' | 'mixed',
+      currency,
+      fetchedAt: new Date().toISOString(),
+      plans: [] as Array<{
+        planType: 'free' | 'standard' | 'pro' | 'ultimate';
+        monthly: number | null;
+        yearly: number | null;
+        currency: string;
+        source: 'polar' | 'fallback';
+      }>,
+    };
+
+    // Free is always 0.
+    result.plans.push({
+      planType: 'free',
+      monthly: 0,
+      yearly: 0,
+      currency,
+      source: 'fallback',
+    });
+
+    let polarOk = 0;
+    let fellBack = 0;
+    try {
+      const snap = await this.polarService.fetchCatalogLiveSnapshot();
+      type PT = 'standard' | 'pro' | 'ultimate';
+      for (const pt of ['standard', 'pro', 'ultimate'] as PT[]) {
+        const monthly = snap.items.find(
+          (i) => i.planType === pt && i.billingCycle === 'monthly',
+        );
+        const yearly = snap.items.find(
+          (i) => i.planType === pt && i.billingCycle === 'yearly',
+        );
+        const livePresent =
+          snap.apiKeyConfigured &&
+          monthly?.amountMajor != null &&
+          yearly?.amountMajor != null;
+        if (livePresent) {
+          polarOk += 1;
+          result.plans.push({
+            planType: pt,
+            monthly: monthly!.amountMajor,
+            yearly: yearly!.amountMajor,
+            currency: (monthly!.currencyCode || currency).toUpperCase(),
+            source: 'polar',
+          });
+        } else {
+          fellBack += 1;
+          const fb = fallbackFor(pt);
+          result.plans.push({
+            planType: pt,
+            monthly: fb.monthly,
+            yearly: fb.yearly,
+            currency,
+            source: 'fallback',
+          });
+        }
+      }
+    } catch (e) {
+      console.warn(`getPublicLivePricing Polar read failed: ${String(e)}`);
+      for (const pt of ['standard', 'pro', 'ultimate'] as const) {
+        fellBack += 1;
+        const fb = fallbackFor(pt);
+        result.plans.push({
+          planType: pt,
+          monthly: fb.monthly,
+          yearly: fb.yearly,
+          currency,
+          source: 'fallback',
+        });
+      }
+    }
+
+    result.source =
+      polarOk > 0 && fellBack > 0 ? 'mixed' : polarOk > 0 ? 'polar' : 'fallback';
+
+    // Short cache so admin/Polar changes propagate quickly but we avoid hammering Polar.
+    await this.cacheService.set(cacheKey, result, 300);
+    return result;
+  }
+
   async getPublicPlansPayload(): Promise<PublicPlansPayload> {
     const [plans, pricingDisplay] = await Promise.all([
       this.getSubscriptionPlans(),

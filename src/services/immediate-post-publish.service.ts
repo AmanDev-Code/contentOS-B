@@ -1,4 +1,10 @@
-import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PostSchedulingService } from './post-scheduling.service';
 import { QuotaService } from './quota.service';
@@ -7,6 +13,8 @@ import { CacheService } from './cache.service';
 import { IdempotencyService } from './idempotency.service';
 import { ContentStatus } from '../common/types';
 import { FeedbackService } from './feedback.service';
+import { WebhookDispatcherService } from './webhook-dispatcher.service';
+import { postNowCost } from '../modules/credits/credit-costs';
 
 export interface ImmediatePublishParams {
   userId: string;
@@ -33,6 +41,7 @@ export class ImmediatePostPublishService {
     private readonly idempotencyService: IdempotencyService,
     private readonly configService: ConfigService,
     private readonly feedbackService: FeedbackService,
+    private readonly webhookDispatcher: WebhookDispatcherService,
   ) {}
 
   async publishImmediate(
@@ -92,15 +101,32 @@ export class ImmediatePostPublishService {
       }
     }
 
-    let creditCost = 2.5;
-
     const contentData = await this.postSchedulingService['supabaseService']
       .getServiceClient()
       .from('generated_content')
-      .select('visual_type, visual_url, carousel_urls, media_urls')
+      .select(
+        'visual_type, visual_url, carousel_urls, media_urls, linkedin_post_id',
+      )
       .eq('id', contentId)
       .eq('user_id', userId)
       .single();
+
+    // Durable duplicate guard (before charging credits / changing status): if the
+    // content already has a LinkedIn post ID it is live on LinkedIn — block here
+    // so we never charge+refund credits, downgrade publish_status to
+    // failed, or emit a false "Publishing Failed" notification.
+    if (contentData.data?.linkedin_post_id) {
+      throw new ConflictException({
+        message: 'This post has already been published to LinkedIn.',
+        code: 'post_already_published',
+      });
+    }
+
+    await this.postSchedulingService.validateLinkedInPostForPublish(
+      userId,
+      contentId,
+      { content, hashtags },
+    );
 
     const hasValidImage = Boolean(
       contentData.data?.visual_url?.startsWith('http') ||
@@ -113,18 +139,14 @@ export class ImmediatePostPublishService {
       contentData.data.carousel_urls.length > 0,
     );
 
-    if (contentData.data) {
-      if (hasCarousel) {
-        creditCost = 12;
-      } else if (hasValidImage) {
-        creditCost = 6;
-      }
-    }
-
-    // Add 12 credits for PDF attachment
-    if (pdfUrl) {
-      creditCost += 12;
-    }
+    // Single source of truth: credit-costs.ts. Post Now image/carousel costs
+    // are FLAT (do not scale by count); PDF adds a flat add-on.
+    const publishContentType = hasCarousel
+      ? 'carousel'
+      : hasValidImage
+        ? 'image'
+        : 'text';
+    const creditCost = postNowCost(publishContentType, { pdf: Boolean(pdfUrl) });
 
     const hasQuota = await this.quotaService.checkQuotaAvailable(
       userId,
@@ -137,11 +159,7 @@ export class ImmediatePostPublishService {
       );
     }
 
-    const contentType = hasCarousel
-      ? 'carousel'
-      : hasValidImage
-        ? 'image'
-        : 'text';
+    const contentType = publishContentType;
     const operationId = idempotencyKey || `publish:${contentId}:${Date.now()}`;
     await this.quotaService.debitOnce({
       userId,
@@ -233,6 +251,17 @@ export class ImmediatePostPublishService {
         postId,
       );
 
+      try {
+        await this.webhookDispatcher.emitPostPublished({
+          userId,
+          contentId,
+          platform,
+          postId,
+        });
+      } catch {
+        // best-effort — webhook failure must never block publish
+      }
+
       const fb = await this.feedbackService.recordFirstAction(userId);
 
       const result = {
@@ -288,6 +317,17 @@ export class ImmediatePostPublishService {
         (publishError as Error).message || 'Unknown error',
         creditCost,
       );
+
+      try {
+        await this.webhookDispatcher.emitPostFailed({
+          userId,
+          contentId,
+          platform,
+          error: (publishError as Error).message || 'Unknown error',
+        });
+      } catch {
+        // best-effort
+      }
 
       throw publishError;
     }

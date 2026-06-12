@@ -2,9 +2,8 @@ import {
   BadRequestException,
   Injectable,
   Logger,
-  ServiceUnavailableException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { AiGatewayService } from './ai-gateway.service';
 
 export type JobCopyField =
   | 'summary'
@@ -41,26 +40,7 @@ const ALL_FIELDS: JobCopyField[] = [
 export class CareersJobCopyAiService {
   private readonly logger = new Logger(CareersJobCopyAiService.name);
 
-  constructor(private readonly configService: ConfigService) {}
-
-  private buildModelList(primary: string): string[] {
-    const extras = (process.env.AI_REFINEMENT_FALLBACK_MODELS || '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    return Array.from(new Set([primary, ...extras].filter(Boolean)));
-  }
-
-  private llmErrorWarrantsModelSwitch(status: number, body: string): boolean {
-    if (status === 404 || status === 503) return true;
-    const b = body.toLowerCase();
-    return (
-      b.includes('no allowed providers') ||
-      b.includes('model not found') ||
-      b.includes('invalid model') ||
-      b.includes('does not exist')
-    );
-  }
+  constructor(private readonly aiGateway: AiGatewayService) {}
 
   private tryParseJson(text: string): any | null {
     const trimmed = String(text || '').trim();
@@ -90,53 +70,6 @@ export class CareersJobCopyAiService {
     return null;
   }
 
-  private getClientConfig() {
-    const enabled =
-      this.configService.get<boolean>('aiRefinement.enabled') !== false &&
-      (process.env.AI_REFINEMENT_ENABLED || 'true') !== 'false';
-    const baseUrl =
-      this.configService.get<string>('aiRefinement.baseUrl') ||
-      process.env.AI_REFINEMENT_BASE_URL ||
-      'https://openrouter.ai/api/v1';
-    const model =
-      this.configService.get<string>('aiRefinement.model') ||
-      process.env.AI_REFINEMENT_MODEL ||
-      (String(baseUrl).includes('openrouter.ai')
-        ? 'z-ai/glm-4.5-air:free'
-        : 'gpt-4.1-mini');
-    const apiKey =
-      this.configService.get<string>('aiRefinement.apiKey') ||
-      process.env.AI_REFINEMENT_API_KEY ||
-      process.env.OPENROUTER_API_KEY ||
-      process.env.OPENAI_API_KEY ||
-      '';
-    const configured =
-      Number(
-        this.configService.get<number>('aiRefinement.timeoutMs') ||
-          process.env.AI_REFINEMENT_TIMEOUT_MS ||
-          '12000',
-      ) || 12000;
-    /** Careers copy can be long; never below 60s so the model has time to finish. */
-    const timeoutMs = Math.max(configured, 60000);
-    const referer =
-      this.configService.get<string>('aiRefinement.referer') ||
-      process.env.AI_REFINEMENT_REFERER ||
-      '';
-    const appTitle =
-      this.configService.get<string>('aiRefinement.appTitle') ||
-      process.env.AI_REFINEMENT_APP_TITLE ||
-      'Trndinn';
-    return {
-      enabled,
-      baseUrl,
-      model,
-      apiKey,
-      timeoutMs,
-      referer,
-      appTitle,
-    };
-  }
-
   private contextBlock(ctx: JobCopyContext): string {
     return [
       `Role title: ${ctx.title || '(untitled)'}`,
@@ -163,101 +96,15 @@ export class CareersJobCopyAiService {
     messages: { role: 'system' | 'user'; content: string }[],
     options: { jsonObject?: boolean; maxTokens?: number },
   ): Promise<string> {
-    const cfg = this.getClientConfig();
-    if (!cfg.enabled) {
-      throw new ServiceUnavailableException('AI copy generation is disabled');
-    }
-    if (!cfg.apiKey) {
-      throw new ServiceUnavailableException(
-        'Missing API key: set OPENROUTER_API_KEY or AI_REFINEMENT_API_KEY',
-      );
-    }
-    const endpoint = `${String(cfg.baseUrl).replace(/\/$/, '')}/chat/completions`;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${cfg.apiKey}`,
-    };
-    if (String(cfg.baseUrl).includes('openrouter.ai')) {
-      if (cfg.referer) headers['HTTP-Referer'] = cfg.referer;
-      if (cfg.appTitle) {
-        headers['X-Title'] = cfg.appTitle;
-        headers['X-OpenRouter-Title'] = cfg.appTitle;
-      }
-    }
-
-    const models = this.buildModelList(cfg.model);
-    const maxTokens = options.maxTokens ?? 2048;
-
-    for (let i = 0; i < models.length; i++) {
-      const m = models[i];
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
-      const bodyJson = (useJsonObject: boolean) =>
-        JSON.stringify({
-          model: m,
-          temperature: 0.65,
-          max_tokens: maxTokens,
-          ...(useJsonObject ? { response_format: { type: 'json_object' } } : {}),
-          messages,
-        });
-
-      try {
-        let response = await fetch(endpoint, {
-          method: 'POST',
-          headers,
-          body: bodyJson(Boolean(options.jsonObject)),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          let errText = await response.text();
-          if (
-            response.status === 400 &&
-            options.jsonObject &&
-            /response_format|json_object|response format|json mode/i.test(errText)
-          ) {
-            response = await fetch(endpoint, {
-              method: 'POST',
-              headers,
-              body: bodyJson(false),
-              signal: controller.signal,
-            });
-            if (!response.ok) errText = await response.text();
-          }
-          if (!response.ok) {
-            const canRetry =
-              this.llmErrorWarrantsModelSwitch(response.status, errText) &&
-              i < models.length - 1;
-            this.logger.warn(
-              `Careers AI HTTP ${response.status} model=${m} ${errText.slice(0, 400)}`,
-            );
-            if (canRetry) continue;
-            throw new BadRequestException(
-              `AI request failed: ${response.status} ${errText.slice(0, 200)}`,
-            );
-          }
-        }
-
-        const json = (await response.json()) as any;
-        const text = String(json?.choices?.[0]?.message?.content || '').trim();
-        if (!text) {
-          if (i < models.length - 1) continue;
-          throw new BadRequestException('Empty AI response');
-        }
-        return text;
-      } catch (e: any) {
-        if (e?.name === 'AbortError') {
-          if (i < models.length - 1) continue;
-          throw new BadRequestException('AI request timed out');
-        }
-        if (e instanceof BadRequestException) throw e;
-        if (i < models.length - 1) continue;
-        throw new BadRequestException(e?.message || 'AI request failed');
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    throw new BadRequestException('AI request failed after model fallbacks');
+    const { content } = await this.aiGateway.chatCompletionRaw({
+      messages,
+      temperature: 0.65,
+      maxTokens: options.maxTokens ?? 2048,
+      jsonObject: options.jsonObject,
+      timeoutMs: 60_000,
+    });
+    if (!content) throw new BadRequestException('Empty AI response');
+    return content;
   }
 
   async generateField(

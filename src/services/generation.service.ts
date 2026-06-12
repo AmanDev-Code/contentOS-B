@@ -19,10 +19,18 @@ import {
   CreditSlice,
   normalizeCustomTopicContentType,
   CUSTOM_TOPIC_PRICING,
+  buildCreditSlices,
+  calculateTotalCredits,
 } from '../modules/credits/pricing';
+import {
+  CREDIT_COSTS,
+  regenerateAllImagesCost,
+  regenerateCarouselCost,
+} from '../modules/credits/credit-costs';
 import type { PostGenerationInput } from '../modules/post-ai/custom-topic.schemas';
 import { QUEUE_NAMES, PLAN_LIMITS, ERROR_MESSAGES } from '../common/constants';
 import { PlanType, SubscriptionStatus, JobStatus } from '../common/types';
+import { AiGatewayService } from './ai-gateway.service';
 
 const MAX_IN_FLIGHT_PER_USER = 5;
 
@@ -40,6 +48,7 @@ export class GenerationService {
     private workerManager: GenerationWorkerManager,
     private quotaService: QuotaService,
     private customTopicCreditService: CustomTopicCreditService,
+    private aiGateway: AiGatewayService,
   ) {}
 
   /**
@@ -88,19 +97,21 @@ export class GenerationService {
       },
     };
 
-    // Check quota and consume credits immediately (no more test user exception)
-    const hasQuota = await this.quotaService.checkQuotaAvailable(userId, 1.5);
+    // Check quota and consume credits immediately (no more test user exception).
+    // Cost from the single source of truth (credit-costs.ts).
+    const legacyCost = CREDIT_COSTS.legacyGenerate;
+    const hasQuota = await this.quotaService.checkQuotaAvailable(userId, legacyCost);
     if (!hasQuota) {
       throw new BadRequestException(
-        'Insufficient credits. Content generation requires 1.5 credits. Please upgrade your plan.',
+        `Insufficient credits. Content generation requires ${legacyCost} credits. Please upgrade your plan.`,
       );
     }
 
     // IMMEDIATE CREDIT DEDUCTION for content generation
     await this.quotaService.consumeCredits(
       userId,
-      1.5,
-      'Content generation initiated (1.5 credits)',
+      legacyCost,
+      `Content generation initiated (${legacyCost} credits)`,
       'generation',
       'text', // Default to text, will be updated based on actual content type
     );
@@ -190,7 +201,22 @@ export class GenerationService {
       'Retrying...',
     );
 
-    // Add back to user's queue
+    const stashed =
+      job.response &&
+      typeof job.response === 'object' &&
+      !Array.isArray(job.response)
+        ? (job.response as Record<string, unknown>).preferences
+        : null;
+    if (
+      !stashed ||
+      typeof stashed !== 'object' ||
+      (stashed as Record<string, unknown>).jobType !== 'custom_topic'
+    ) {
+      throw new BadRequestException(
+        'Cannot retry this job — generation settings were not stored. Start a new generation instead.',
+      );
+    }
+
     const userQueue = this.getUserQueue(job.userId);
 
     await userQueue.add(
@@ -198,7 +224,7 @@ export class GenerationService {
       {
         jobId: job.id,
         userId: job.userId,
-        preferences: {},
+        preferences: stashed,
       },
       {
         jobId: job.id,
@@ -383,6 +409,8 @@ export class GenerationService {
       contentType: 'text' | 'image' | 'carousel' | 'post';
       tonality: string;
       wordLimit: { kind: string; words?: number };
+      onlineSearch?: boolean;
+      includeBrandKit?: boolean;
       imageCount?: number;
       slideCount?: number;
       carouselVisualStyle?: PostGenerationInput['carouselVisualStyle'];
@@ -421,29 +449,33 @@ export class GenerationService {
 
     const userQueue = this.getUserQueue(userId);
 
+    const preferences = {
+      jobType: 'custom_topic' as const,
+      contentType,
+      topic: input.topic,
+      platform: input.platform,
+      tonality: input.tonality,
+      wordLimit: input.wordLimit,
+      onlineSearch: input.onlineSearch,
+      includeBrandKit: input.includeBrandKit,
+      imageCount: input.imageCount,
+      slideCount: input.slideCount,
+      carouselVisualStyle: input.carouselVisualStyle,
+      carouselNoteDensity: input.carouselNoteDensity,
+      carouselSubjectMode: input.carouselSubjectMode,
+      carouselDocumentMode: input.carouselDocumentMode,
+      carouselDocumentAuthor: input.carouselDocumentAuthor,
+      trainingDataCaptureOptIn: input.trainingDataCaptureOptIn,
+      creditSlices,
+      totalCost,
+    };
+
     await userQueue.add(
       'generate-content',
       {
         jobId: job.id,
         userId,
-        preferences: {
-          jobType: 'custom_topic',
-          contentType,
-          topic: input.topic,
-          platform: input.platform,
-          tonality: input.tonality,
-          wordLimit: input.wordLimit,
-          imageCount: input.imageCount,
-          slideCount: input.slideCount,
-          carouselVisualStyle: input.carouselVisualStyle,
-          carouselNoteDensity: input.carouselNoteDensity,
-          carouselSubjectMode: input.carouselSubjectMode,
-          carouselDocumentMode: input.carouselDocumentMode,
-          carouselDocumentAuthor: input.carouselDocumentAuthor,
-          trainingDataCaptureOptIn: input.trainingDataCaptureOptIn,
-          creditSlices,
-          totalCost,
-        },
+        preferences,
       },
       {
         jobId: job.id,
@@ -452,6 +484,8 @@ export class GenerationService {
         removeOnFail: { count: 10 }, // Keep last 10 failed jobs
       },
     );
+
+    await this.generationJobRepository.stashJobPayload(job.id, { preferences });
 
     return {
       jobId: job.id,
@@ -618,7 +652,7 @@ export class GenerationService {
     try {
       await this.quotaService.consumeCredits(
         userId,
-        -1.5,
+        -CREDIT_COSTS.legacyGenerate,
         `Refund for failed generation job ${jobId} (${reason})`,
         'refund',
         'text',
@@ -663,6 +697,172 @@ export class GenerationService {
   }
 
   /**
+   * Re-run the full custom-topic pipeline for an existing post (text + media)
+   * using the original topic and generation settings persisted on the row.
+   * Updates the same content record in place when complete.
+   */
+  async regeneratePostFromContent(
+    userId: string,
+    contentId: string,
+    overrides?: { includeBrandKit?: boolean },
+  ): Promise<{ jobId: string; message: string; totalCost: number }> {
+    const content = await this.generatedContentRepository.findById(contentId);
+    if (!content) {
+      throw new BadRequestException('Content not found');
+    }
+    if ((content as any).user_id !== userId) {
+      throw new BadRequestException('Unauthorized');
+    }
+    const pp = (content as any).performance_prediction as
+      | Record<string, unknown>
+      | undefined;
+    const customMeta = (pp?.customTopicMeta ?? {}) as Record<string, unknown>;
+    const hasCustomMeta = Boolean(
+      customMeta.contentType ||
+        (Array.isArray(customMeta.imagePrompts) && customMeta.imagePrompts.length > 0) ||
+        (Array.isArray(customMeta.slides) && customMeta.slides.length > 0) ||
+        String(customMeta.topic ?? '').trim(),
+    );
+    if ((content as any).source !== 'custom' && !hasCustomMeta) {
+      throw new BadRequestException(
+        'Only AI-generated custom posts can be fully regenerated',
+      );
+    }
+
+    let topic = String(customMeta.topic ?? '').trim();
+    if (!topic) {
+      const body = String((content as any).content || '');
+      const withoutFooter = body.split(/\n\n— Generated by/)[0]?.trim() ?? body.trim();
+      topic =
+        withoutFooter.split(/(?<=[.!?])\s+/)[0]?.trim() ||
+        withoutFooter.slice(0, 300).trim();
+    }
+    if (!topic) {
+      topic = String((content as any).title || '').trim();
+    }
+    if (!topic) {
+      throw new BadRequestException(
+        'Original topic not found on this post. Generate a new post from the Agent instead.',
+      );
+    }
+
+    const contentType = normalizeCustomTopicContentType(customMeta.contentType);
+    const imagePrompts = customMeta.imagePrompts as string[] | undefined;
+    const slides = customMeta.slides as unknown[] | undefined;
+    const imageCount =
+      typeof customMeta.imageCount === 'number'
+        ? customMeta.imageCount
+        : imagePrompts?.length ?? 1;
+    const slideCount =
+      typeof customMeta.slideCount === 'number'
+        ? customMeta.slideCount
+        : slides?.length ?? 2;
+
+    const creditSlices = buildCreditSlices(contentType, imageCount, slideCount);
+    const totalCost = calculateTotalCredits(
+      contentType,
+      imageCount,
+      slideCount,
+    );
+
+    const hasQuota = await this.quotaService.checkQuotaAvailable(
+      userId,
+      totalCost,
+    );
+    if (!hasQuota) {
+      throw new BadRequestException(
+        `Insufficient credits. Regenerating this post requires ${totalCost} credits.`,
+      );
+    }
+
+    await this.enforceInFlightLimit(userId);
+    const job = await this.generationJobRepository.create(userId);
+
+    try {
+      await this.customTopicCreditService.reserveCredits(
+        userId,
+        job.id,
+        creditSlices,
+      );
+    } catch (err) {
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      await this.generationJobRepository.updateError(
+        job.id,
+        `Credit reservation failed: ${rawMsg}`,
+        0,
+      );
+      throw this.mapCustomTopicCreditReservationError(err);
+    }
+
+    const includeBrandKit =
+      overrides?.includeBrandKit !== undefined
+        ? overrides.includeBrandKit
+        : customMeta.includeBrandKit !== false;
+
+    const preferences = {
+      jobType: 'custom_topic' as const,
+      contentType,
+      topic,
+      platform: (customMeta.platform as 'linkedin' | 'instagram' | 'x') ?? 'linkedin',
+      tonality: String(customMeta.tonality ?? 'professional'),
+      wordLimit: (customMeta.wordLimit as { kind: string; words?: number }) ?? {
+        kind: 'medium',
+      },
+      onlineSearch: customMeta.onlineSearch === true,
+      includeBrandKit,
+      imageCount: contentType === 'image' ? imageCount : undefined,
+      slideCount: contentType === 'carousel' ? slideCount : undefined,
+      carouselVisualStyle: (customMeta.carouselVisualStyleRequested ??
+        customMeta.carouselVisualStyle) as
+        | PostGenerationInput['carouselVisualStyle']
+        | undefined,
+      carouselNoteDensity: customMeta.carouselNoteDensity as
+        | PostGenerationInput['carouselNoteDensity']
+        | undefined,
+      carouselSubjectMode: customMeta.carouselSubjectMode as
+        | PostGenerationInput['carouselSubjectMode']
+        | undefined,
+      carouselDocumentMode: (customMeta.carouselDocumentModeRequested ??
+        customMeta.carouselDocumentMode) as
+        | PostGenerationInput['carouselDocumentMode']
+        | undefined,
+      carouselDocumentAuthor: customMeta.carouselDocumentAuthor as
+        | string
+        | undefined,
+      trainingDataCaptureOptIn: customMeta.trainingDataCaptureOptIn === true,
+      replaceContentId: contentId,
+      creditSlices,
+      totalCost,
+    };
+
+    this.workerManager.ensureWorkerForUser(userId);
+    const userQueue = this.getUserQueue(userId);
+
+    await userQueue.add(
+      'generate-content',
+      {
+        jobId: job.id,
+        userId,
+        preferences,
+      },
+      {
+        jobId: job.id,
+        attempts: 1,
+        removeOnComplete: true,
+        removeOnFail: { count: 10 },
+      },
+    );
+
+    await this.generationJobRepository.stashJobPayload(job.id, { preferences });
+
+    return {
+      jobId: job.id,
+      message: `Post regeneration started. ${totalCost} credits reserved.`,
+      totalCost,
+    };
+  }
+
+  /**
    * Regenerate carousel slides or images for an existing content.
    * Only charges for the media credits (not text credits).
    */
@@ -689,7 +889,7 @@ export class GenerationService {
       }
 
       const slideCount = slides.length;
-      const creditsCost = 2.5 * slideCount;
+      const creditsCost = regenerateCarouselCost(slideCount);
 
       const hasQuota = await this.quotaService.checkQuotaAvailable(userId, creditsCost);
       if (!hasQuota) {
@@ -705,8 +905,8 @@ export class GenerationService {
       for (let i = 1; i <= slideCount; i++) {
         creditSlices.push({
           subtaskKey: `slide_${i}`,
-          credits: 2.5,
-          halfCredits: 5,
+          credits: CUSTOM_TOPIC_PRICING.SLIDE_PER_UNIT_CREDITS,
+          halfCredits: CUSTOM_TOPIC_PRICING.SLIDE_PER_UNIT_HALF_CREDITS,
         });
       }
 
@@ -757,7 +957,7 @@ export class GenerationService {
       }
 
       const imageCount = imagePrompts.length;
-      const creditsCost = 3 * imageCount;
+      const creditsCost = regenerateAllImagesCost(imageCount);
 
       const hasQuota = await this.quotaService.checkQuotaAvailable(userId, creditsCost);
       if (!hasQuota) {
@@ -773,8 +973,8 @@ export class GenerationService {
       for (let i = 1; i <= imageCount; i++) {
         creditSlices.push({
           subtaskKey: `image_${i}`,
-          credits: 3,
-          halfCredits: 6,
+          credits: CUSTOM_TOPIC_PRICING.IMAGE_PER_UNIT_CREDITS,
+          halfCredits: CUSTOM_TOPIC_PRICING.IMAGE_PER_UNIT_HALF_CREDITS,
         });
       }
 
@@ -831,7 +1031,11 @@ export class GenerationService {
     userId: string,
     contentId: string,
     imageIndex: number,
-    userOverridePrompt?: string,
+    opts?: {
+      userOverridePrompt?: string;
+      caption?: string;
+      includeBrandKit?: boolean;
+    },
   ): Promise<{ jobId: string; estimatedCost: number; message: string }> {
     if (!Number.isInteger(imageIndex) || imageIndex < 0) {
       throw new BadRequestException('imageIndex must be a non-negative integer');
@@ -850,18 +1054,48 @@ export class GenerationService {
       | undefined;
     const customMeta = pp?.customTopicMeta as Record<string, unknown> | undefined;
     const imagePrompts = (customMeta?.imagePrompts as string[] | undefined) ?? [];
-
-    // PDF-replaces-carousel and user-uploaded image cases are guarded on the
-    // FE; here we just verify regeneration is meaningful (we have a prompt).
-    const sourcePrompt =
-      (typeof userOverridePrompt === 'string' && userOverridePrompt.trim()) ||
-      imagePrompts[imageIndex] ||
-      undefined;
-    if (!sourcePrompt) {
+    const hasCustomMeta = Boolean(
+      customMeta?.contentType ||
+        imagePrompts.length > 0 ||
+        String(customMeta?.topic ?? '').trim(),
+    );
+    if ((content as any).source !== 'custom' && !hasCustomMeta) {
       throw new BadRequestException(
-        'No AI image prompt found at this index — only AI-generated images can be regenerated',
+        'Only AI-generated custom posts support image regeneration',
       );
     }
+
+    let topic = String(customMeta?.topic ?? '').trim();
+    if (!topic) {
+      const body = String((content as any).content || '');
+      const withoutFooter = body.split(/\n\n— Generated by/)[0]?.trim() ?? body.trim();
+      topic =
+        withoutFooter.split(/(?<=[.!?])\s+/)[0]?.trim() ||
+        withoutFooter.slice(0, 300).trim();
+    }
+    if (!topic) {
+      topic = String((content as any).title || '').trim();
+    }
+
+    const caption =
+      (typeof opts?.caption === 'string' && opts.caption.trim()) ||
+      String((content as any).content || '').trim();
+    if (!caption || caption.length < 20) {
+      throw new BadRequestException(
+        'Post caption is required to regenerate an image',
+      );
+    }
+    if (!topic || topic.length < 3) {
+      throw new BadRequestException(
+        'Original topic not found on this post — cannot regenerate image',
+      );
+    }
+
+    const platform = (customMeta?.platform as 'linkedin' | 'instagram' | 'x') ?? 'linkedin';
+    const includeBrandKit =
+      opts?.includeBrandKit !== undefined
+        ? opts.includeBrandKit
+        : customMeta?.includeBrandKit !== false;
 
     const creditsCost = CUSTOM_TOPIC_PRICING.IMAGE_PER_UNIT_CREDITS;
 
@@ -883,8 +1117,11 @@ export class GenerationService {
     await this.enforceInFlightLimit(userId);
     const job = await this.generationJobRepository.create(userId);
 
+    const existingUrlCount = Array.isArray((content as any).image_urls)
+      ? (content as any).image_urls.length
+      : 0;
     const slice: CreditSlice = {
-      subtaskKey: `image_regen_${imageIndex + 1}`,
+      subtaskKey: `image_regen_${existingUrlCount + 1}`,
       credits: CUSTOM_TOPIC_PRICING.IMAGE_PER_UNIT_CREDITS,
       halfCredits: CUSTOM_TOPIC_PRICING.IMAGE_PER_UNIT_HALF_CREDITS,
     };
@@ -916,9 +1153,16 @@ export class GenerationService {
         userId,
         originalContentId: contentId,
         imageIndex,
-        prompt: sourcePrompt,
         creditSlices,
         totalCost: creditsCost,
+        regenContext: {
+          topic,
+          caption,
+          platform,
+          includeBrandKit,
+          variationNonce: `${Date.now()}-${existingUrlCount}-${imageIndex}`,
+          userOverridePrompt: opts?.userOverridePrompt?.trim() || undefined,
+        },
       },
       {
         jobId: job.id,
@@ -1062,7 +1306,7 @@ export class GenerationService {
     userId: string,
     content: string,
   ): Promise<{ formattedContent: string; creditsCost: number }> {
-    const creditsCost = 0.5;
+    const creditsCost = CREDIT_COSTS.aiTextFormatting;
 
     // Check if user has enough credits
     const hasQuota = await this.quotaService.checkQuotaAvailable(userId, creditsCost);
@@ -1087,22 +1331,6 @@ export class GenerationService {
     );
 
     try {
-      const openaiApiKey = this.configService.get<string>('OPENAI_API_KEY');
-      if (!openaiApiKey) {
-        // Refund credits if OpenAI is not configured
-        await this.quotaService.consumeCredits(
-          userId,
-          -creditsCost,
-          'Refund: OpenAI not configured',
-          'refund',
-          'text',
-        );
-        throw new HttpException(
-          'AI formatting is not available at this time',
-          HttpStatus.SERVICE_UNAVAILABLE,
-        );
-      }
-
       const systemPrompt = `You are a text editor assistant. Your job is to LIGHTLY format and clean up the user's post.
 
 STRICT RULES:
@@ -1119,42 +1347,39 @@ STRICT RULES:
 
 Return ONLY the cleaned-up text, nothing else.`;
 
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
+      // Route through the Bifrost gateway text chain (admin-managed model +
+      // automatic fallback to the next text model on failure — never fail).
+      let formattedContent: string | undefined;
+      let usedModel = '';
+      try {
+        const result = await this.aiGateway.chatCompletionRaw({
+          category: 'text',
+          temperature: 0.3,
+          maxTokens: 2000,
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: content },
+            { role: 'user', content },
           ],
-          temperature: 0.3,
-          max_tokens: 2000,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.logger.error(`OpenAI API error: ${response.status} - ${errorText}`);
-        // Refund credits on API error
+        });
+        formattedContent = result.content?.trim();
+        usedModel = result.model;
+      } catch (gatewayError) {
+        this.logger.error(
+          `AI formatting gateway error: ${(gatewayError as Error).message}`,
+        );
+        // Refund credits when the whole text chain is unavailable.
         await this.quotaService.consumeCredits(
           userId,
           -creditsCost,
-          'Refund: AI formatting failed',
+          'Refund: AI formatting unavailable',
           'refund',
           'text',
         );
         throw new HttpException(
-          'Failed to format content. Please try again.',
-          HttpStatus.INTERNAL_SERVER_ERROR,
+          'AI formatting is not available at this time. Please try again later.',
+          HttpStatus.SERVICE_UNAVAILABLE,
         );
       }
-
-      const data = await response.json();
-      const formattedContent = data.choices?.[0]?.message?.content?.trim();
 
       if (!formattedContent) {
         // Refund credits if no content returned
@@ -1169,6 +1394,13 @@ Return ONLY the cleaned-up text, nothing else.`;
           'Failed to format content. Please try again.',
           HttpStatus.INTERNAL_SERVER_ERROR,
         );
+      }
+
+      // TEMPORARY (debug): tag which model formatted the content so the user can
+      // see which gateway model is working in the preview. Remove when asked —
+      // tracked in Recallium (search "Formatted by" debug marker).
+      if (usedModel) {
+        formattedContent = `${formattedContent}\n\n— Formatted by ${usedModel}`;
       }
 
       return {

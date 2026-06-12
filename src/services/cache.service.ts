@@ -102,6 +102,38 @@ export class CacheService implements OnModuleInit {
     return true;
   }
 
+  /**
+   * Atomically increment a counter and return the new value. On the first
+   * increment in a window the TTL is set so the counter self-expires. Backed by
+   * Redis INCR (atomic across processes); falls back to the in-memory map when
+   * Redis is unavailable (best-effort, single-process only).
+   *
+   * Used for API-key per-hour rate limiting (Sprint 1.8).
+   */
+  async incr(key: string, ttlSeconds: number): Promise<number> {
+    if (this.redis) {
+      try {
+        const fullKey = CACHE_PREFIX + key;
+        const count = await this.redis.incr(fullKey);
+        if (count === 1) {
+          await this.redis.expire(fullKey, ttlSeconds);
+        }
+        return count;
+      } catch (e) {
+        this.logger.warn(`Redis INCR failed for ${key}: ${e.message}`);
+      }
+    }
+
+    const now = Date.now();
+    const item = this.fallback.get(key);
+    if (!item || now > item.expires) {
+      this.fallback.set(key, { data: 1, expires: now + ttlSeconds * 1000 });
+      return 1;
+    }
+    item.data = (typeof item.data === 'number' ? item.data : 0) + 1;
+    return item.data;
+  }
+
   async delete(key: string): Promise<boolean> {
     if (this.redis) {
       try {

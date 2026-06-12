@@ -27,6 +27,8 @@ export const PLAN_LIMITS = {
 
 export const QUEUE_NAMES = {
   CONTENT_GENERATION: 'content-generation',
+  SOCIAL_PUBLISH: 'social-publish',
+  /** @deprecated Sprint 1.4 — use SOCIAL_PUBLISH instead. Kept for drain period. */
   LINKEDIN_PUBLISH: 'linkedin-publish',
   MEDIA_SINGLE: 'media-single',
   MEDIA_CAROUSEL: 'media-carousel',
@@ -34,6 +36,7 @@ export const QUEUE_NAMES = {
   FEEDBACK_REWARD: 'feedback-reward',
   FEEDBACK_REMINDER: 'feedback-reminder',
   MAINTENANCE: 'maintenance',
+  WEBHOOK_DELIVERY: 'webhook-delivery',
 };
 
 export const MAINTENANCE_JOB_NAMES = {

@@ -26,6 +26,13 @@ import type {
   CarouselSlideOutput,
   TocEntry,
 } from '../modules/post-ai/custom-topic.schemas';
+import { BrandProfilesService } from '../services/brand-profiles.service';
+import { BrandVisionAnalysisService } from '../services/brand-vision-analysis.service';
+import type { BrandVisualContext } from '../services/media-generation.service';
+import {
+  debugLogBrandKitSkipped,
+  debugLogWorkerBrandVisual,
+} from '../utils/llm-generation-debug';
 
 const CUSTOM_TOPIC_MEDIA_CONCURRENCY = 3;
 
@@ -76,6 +83,8 @@ export class GenerationWorker extends WorkerHost {
     private minioService: MinioService,
     private mediaGenerationService: MediaGenerationService,
     private carouselTrainingCaptureService: CarouselTrainingCaptureService,
+    private brandProfiles: BrandProfilesService,
+    private brandVision: BrandVisionAnalysisService,
   ) {
     super();
   }
@@ -369,6 +378,16 @@ export class GenerationWorker extends WorkerHost {
         percent,
         meta,
       });
+      // Persist active step to DB so API/Supabase polling can drive the modal
+      // even when SSE is lost (multi-instance backends, tab backgrounding).
+      if (status === 'running' && percent !== undefined) {
+        void this.generationJobRepository.updateStatus(
+          jobId,
+          JobStatus.GENERATING,
+          percent,
+          subtaskKey,
+        );
+      }
     };
 
     try {
@@ -381,10 +400,28 @@ export class GenerationWorker extends WorkerHost {
       await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 15, 'reserving_credits');
       emitProgress('reserving_credits', 'succeeded', 15);
 
-      emitProgress('generating_text', 'running', 20);
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 25, 'generating_text');
-      await job.updateProgress(25);
+      emitProgress('researching_web', 'running', 18);
+      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 18, 'researching_web');
+      await job.updateProgress(18);
 
+      let textGenerationStarted = false;
+      const startTextGenerationProgress = () => {
+        if (textGenerationStarted) return;
+        textGenerationStarted = true;
+        emitProgress('generating_text', 'running', 25);
+        void this.generationJobRepository.updateStatus(
+          jobId,
+          JobStatus.GENERATING,
+          25,
+          'generating_text',
+        );
+        void job.updateProgress(25);
+      };
+
+      // Track whether the lifecycle hooks have already advanced the modal so the
+      // post-generate() emits below are idempotent (some recovery paths fire
+      // onTextPrimaryReady but never onTextEnhancementComplete if a retry
+      // throws — we still need a clean fallback when control returns here).
       if (preferences.contentType === 'carousel' && preferences.trainingDataCaptureOptIn) {
         await this.carouselTrainingCaptureService.record({
           userId,
@@ -406,10 +443,6 @@ export class GenerationWorker extends WorkerHost {
       // Set user context for rate limiting on media generation
       this.mediaGenerationService.setCurrentUserId(userId);
 
-      // Track whether the lifecycle hooks have already advanced the modal so the
-      // post-generate() emits below are idempotent (some recovery paths fire
-      // onTextPrimaryReady but never onTextEnhancementComplete if a retry
-      // throws — we still need a clean fallback when control returns here).
       let textPrimaryEmitted = false;
       let textEnhancementEmitted = false;
 
@@ -420,6 +453,8 @@ export class GenerationWorker extends WorkerHost {
           topic: preferences.topic,
           tonality: preferences.tonality,
           wordLimit: preferences.wordLimit,
+          onlineSearch: preferences.onlineSearch,
+          includeBrandKit: preferences.includeBrandKit,
           imageCount: preferences.imageCount,
           slideCount: preferences.slideCount,
           carouselVisualStyle: preferences.carouselVisualStyle,
@@ -430,6 +465,19 @@ export class GenerationWorker extends WorkerHost {
           trainingDataCaptureOptIn: preferences.trainingDataCaptureOptIn,
         },
         {
+          onWebResearchStage: (stage, meta) => {
+            if (stage === 'running') {
+              emitProgress('researching_web', 'running', 18, meta);
+              return;
+            }
+            emitProgress(
+              'researching_web',
+              stage === 'succeeded' ? 'succeeded' : 'succeeded',
+              22,
+              { ...meta, skipped: stage === 'skipped' },
+            );
+            startTextGenerationProgress();
+          },
           onTextPrimaryReady: () => {
             if (textPrimaryEmitted) return;
             textPrimaryEmitted = true;
@@ -467,6 +515,10 @@ export class GenerationWorker extends WorkerHost {
         },
         userId, // Pass userId for rate limiting
       );
+
+      if (!textGenerationStarted) {
+        startTextGenerationProgress();
+      }
 
       // Defensive fallbacks: if the service returned without the lifecycle
       // hooks firing (legacy/text mode, or future code paths), still flush the
@@ -545,6 +597,46 @@ export class GenerationWorker extends WorkerHost {
 
       let mediaUrls: string[] = [];
       let documentDeckPdfUrl: string | undefined;
+      let usedImageModel: string | undefined;
+
+      // Load brand visual context + vision analysis for image generation
+      // When includeBrandKit is false, skip all brand visual context (colors,
+      // logo analysis, reference images, additional info) — images generate
+      // purely from the LLM-produced imagePrompt.
+      const includeBrandKit = preferences.includeBrandKit !== false;
+      let brandVisual: BrandVisualContext | undefined;
+      if (includeBrandKit) {
+        try {
+          const brand = await this.brandProfiles.getPrimaryForUser(userId);
+          if (brand) {
+            const refUrls = (brand.assets ?? [])
+              .filter((a) => a.url && (a.kind === 'reference' || a.kind === 'style' || !a.kind))
+              .map((a) => a.url);
+            let visionFragment: string | undefined;
+            try {
+              const analysis = await this.brandVision.getOrAnalyze(userId, brand);
+              visionFragment = analysis?.compositePromptFragment || undefined;
+            } catch { /* vision is best-effort */ }
+            brandVisual = {
+              name: brand.name,
+              primaryColor: brand.primary_color,
+              secondaryColor: brand.secondary_color,
+              accentColor: brand.accent_color,
+              logoUrl: brand.logo_url,
+              referenceImageUrls: refUrls.length > 0 ? refUrls : undefined,
+              visionPromptFragment: visionFragment,
+              additionalInfo: brand.additional_information || undefined,
+            };
+            debugLogWorkerBrandVisual(brandVisual, userId);
+          } else {
+            debugLogBrandKitSkipped('no primary brand profile (worker image phase)');
+          }
+        } catch {
+          /* brand kit optional — never block generation */
+        }
+      } else {
+        debugLogBrandKitSkipped('brand kit toggle OFF — skipping visual context');
+      }
 
       if (contentType === 'image' && 'imagePrompts' in result.output) {
         const imagePrompts = result.output.imagePrompts;
@@ -558,11 +650,13 @@ export class GenerationWorker extends WorkerHost {
           async (prompt, i) => {
             const subtaskKey = `image_${i + 1}`;
             emitProgress(subtaskKey, 'running', 50 + Math.round((i / imagePrompts.length) * 30));
-            const buffer = await this.mediaGenerationService.generateSingleImage({
+            const { buffer, model: imgModel } = await this.mediaGenerationService.generateSingleImage({
               prompt,
               size: '1024x1024',
               quality: 'medium',
+              brandVisual,
             });
+            if (!usedImageModel && imgModel !== 'cache') usedImageModel = imgModel;
             const url = await this.mediaGenerationService.uploadToMinio(
               buffer,
               `custom-image-${Date.now()}-${i + 1}.png`,
@@ -851,43 +945,110 @@ export class GenerationWorker extends WorkerHost {
       emitProgress('saving', 'running', 85);
       await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 85, 'saving');
 
-      const contentRecord = await this.generatedContentRepository.create(
-        userId,
-        result.output.caption.slice(0, 100),
-        result.output.caption,
-        {
-          jobId,
-          hashtags: result.output.hashtags,
-          visualType: contentType !== 'text' ? (contentType as any) : undefined,
-          visualUrl: contentType === 'image' && mediaUrls.length > 0 ? mediaUrls[0] : undefined,
-          carouselUrls: contentType === 'carousel' && mediaUrls.length > 0 ? mediaUrls : undefined,
-          imageUrls: contentType === 'image' && mediaUrls.length > 0 ? mediaUrls : undefined,
-          pdfUrl: contentType === 'carousel' ? documentDeckPdfUrl : undefined,
-          source: 'custom',
-          performancePrediction: {
-            customTopicMeta: {
-              platform: result.platform,
-              contentType: result.contentType,
-              tonality: preferences.tonality,
-              wordLimit: preferences.wordLimit,
-              carouselVisualStyleRequested: preferences.carouselVisualStyle,
-              carouselVisualStyleResolved: result.carouselGenerationMeta?.resolvedVisualStyle,
-              carouselStyleSource: result.carouselGenerationMeta?.styleSource,
-              carouselNoteDensity: result.carouselGenerationMeta?.noteDensity,
-              carouselProgrammingModeEffective:
-                result.carouselGenerationMeta?.programmingModeEffective,
-              carouselDocumentMode: result.carouselGenerationMeta?.documentMode,
-              carouselDocumentModeSource: result.carouselGenerationMeta?.documentModeSource,
-              carouselDocumentTheme: result.carouselGenerationMeta?.documentTheme,
-              trainingDataCaptureOptIn: preferences.trainingDataCaptureOptIn,
-              bullets: result.output.bullets,
-              cta: result.output.cta,
-              imagePrompts: 'imagePrompts' in result.output ? result.output.imagePrompts : undefined,
-              slides: 'slides' in result.output ? result.output.slides : undefined,
-            },
-          },
+      // Append image model to the "Generated by" debug marker when available
+      if (usedImageModel && result.output.caption.includes('— Generated by ')) {
+        result.output.caption = result.output.caption.replace(
+          /— Generated by (.+)$/,
+          `— Generated by $1 | image: ${usedImageModel}`,
+        );
+      } else if (usedImageModel) {
+        result.output.caption = `${result.output.caption}\n\n— Generated by ${result.generationMeta?.textModel || 'unknown'} | image: ${usedImageModel}`;
+      }
+
+      const generationMeta = {
+        ...result.generationMeta,
+        imageModel: usedImageModel,
+      };
+
+      const performancePrediction = {
+        postRefinement: { applied: true },
+        generationMeta,
+        customTopicMeta: {
+          topic: preferences.topic,
+          platform: result.platform,
+          contentType: result.contentType,
+          tonality: preferences.tonality,
+          wordLimit: preferences.wordLimit,
+          onlineSearch: preferences.onlineSearch === true,
+          includeBrandKit: preferences.includeBrandKit !== false,
+          imageCount: preferences.imageCount,
+          slideCount: preferences.slideCount,
+          carouselVisualStyleRequested: preferences.carouselVisualStyle,
+          carouselSubjectMode: preferences.carouselSubjectMode,
+          carouselDocumentModeRequested: preferences.carouselDocumentMode,
+          carouselDocumentAuthor: preferences.carouselDocumentAuthor,
+          carouselVisualStyleResolved: result.carouselGenerationMeta?.resolvedVisualStyle,
+          carouselStyleSource: result.carouselGenerationMeta?.styleSource,
+          carouselNoteDensity: result.carouselGenerationMeta?.noteDensity,
+          carouselProgrammingModeEffective:
+            result.carouselGenerationMeta?.programmingModeEffective,
+          carouselDocumentMode: result.carouselGenerationMeta?.documentMode,
+          carouselDocumentModeSource: result.carouselGenerationMeta?.documentModeSource,
+          carouselDocumentTheme: result.carouselGenerationMeta?.documentTheme,
+          trainingDataCaptureOptIn: preferences.trainingDataCaptureOptIn,
+          bullets: result.output.bullets,
+          cta: result.output.cta,
+          imagePrompts:
+            'imagePrompts' in result.output ? result.output.imagePrompts : undefined,
+          slides: 'slides' in result.output ? result.output.slides : undefined,
         },
-      );
+      };
+
+      const replaceContentId = preferences.replaceContentId as string | undefined;
+      let contentRecordId: string;
+
+      if (replaceContentId) {
+        const updated = await this.generatedContentRepository.updateContent(
+          replaceContentId,
+          {
+            title: result.output.caption.slice(0, 100),
+            content: result.output.caption,
+            hashtags: result.output.hashtags,
+            performance_prediction: performancePrediction,
+            carousel_urls:
+              contentType === 'carousel' && mediaUrls.length > 0
+                ? mediaUrls
+                : undefined,
+            image_urls:
+              contentType === 'image' && mediaUrls.length > 0
+                ? mediaUrls
+                : undefined,
+            visual_url:
+              contentType === 'image' && mediaUrls.length > 0
+                ? mediaUrls[0]
+                : undefined,
+            pdf_url: contentType === 'carousel' ? documentDeckPdfUrl : undefined,
+          },
+        );
+        contentRecordId = updated.id;
+      } else {
+        const contentRecord = await this.generatedContentRepository.create(
+          userId,
+          result.output.caption.slice(0, 100),
+          result.output.caption,
+          {
+            jobId,
+            hashtags: result.output.hashtags,
+            visualType: contentType !== 'text' ? (contentType as any) : undefined,
+            visualUrl:
+              contentType === 'image' && mediaUrls.length > 0
+                ? mediaUrls[0]
+                : undefined,
+            carouselUrls:
+              contentType === 'carousel' && mediaUrls.length > 0
+                ? mediaUrls
+                : undefined,
+            imageUrls:
+              contentType === 'image' && mediaUrls.length > 0
+                ? mediaUrls
+                : undefined,
+            pdfUrl: contentType === 'carousel' ? documentDeckPdfUrl : undefined,
+            source: 'custom',
+            performancePrediction,
+          },
+        );
+        contentRecordId = contentRecord.id;
+      }
 
       emitProgress('saving', 'succeeded', 95);
 
@@ -895,24 +1056,45 @@ export class GenerationWorker extends WorkerHost {
 
       await this.generationJobRepository.updateWithContent(
         jobId,
-        contentRecord.id,
+        contentRecordId,
         JobStatus.READY,
-        { message: 'Custom topic generation completed' },
+        {
+          message: replaceContentId
+            ? 'Custom topic post regenerated'
+            : 'Custom topic generation completed',
+        },
       );
 
       await job.updateProgress(100);
 
-      this.notificationService.emitGenerationCompleted(userId, {
-        generationId: jobId,
-        contentId: contentRecord.id,
-        contentType: result.contentType,
-      });
+      if (replaceContentId) {
+        this.notificationService.emitPostRegenerated(userId, {
+          generationId: jobId,
+          contentId: contentRecordId,
+          contentType: result.contentType,
+          caption: result.output.caption,
+          hashtags: result.output.hashtags,
+          imageUrls:
+            contentType === 'image' && mediaUrls.length > 0 ? mediaUrls : undefined,
+          carouselUrls:
+            contentType === 'carousel' && mediaUrls.length > 0 ? mediaUrls : undefined,
+          visualUrl:
+            contentType === 'image' && mediaUrls.length > 0 ? mediaUrls[0] : undefined,
+          pdfUrl: contentType === 'carousel' ? documentDeckPdfUrl : undefined,
+        });
+      } else {
+        this.notificationService.emitGenerationCompleted(userId, {
+          generationId: jobId,
+          contentId: contentRecordId,
+          contentType: result.contentType,
+        });
 
-      await       this.notificationService.notifyGenerationComplete(
-        userId,
-        contentRecord.id,
-        contentRecord.title || 'Custom topic post',
-      );
+        await this.notificationService.notifyGenerationComplete(
+          userId,
+          contentRecordId,
+          result.output.caption.slice(0, 100) || 'Custom topic post',
+        );
+      }
 
       // Process referral completion if this is the user's first generation
       try {
@@ -944,8 +1126,10 @@ export class GenerationWorker extends WorkerHost {
       return {
         success: true,
         jobId,
-        contentId: contentRecord.id,
-        message: 'Custom topic generation completed',
+        contentId: contentRecordId,
+        message: replaceContentId
+          ? 'Custom topic post regenerated'
+          : 'Custom topic generation completed',
       };
 
     } catch (error) {
@@ -1228,7 +1412,7 @@ export class GenerationWorker extends WorkerHost {
         async (prompt: string, i: number) => {
           const subtaskKey = `image_${i + 1}`;
           emitProgress(subtaskKey, 'running', 20 + Math.round((i / imagePrompts.length) * 60));
-          const buffer = await this.mediaGenerationService.generateSingleImage({
+          const { buffer } = await this.mediaGenerationService.generateSingleImage({
             prompt,
             size: '1024x1024',
             quality: 'medium',
@@ -1327,7 +1511,8 @@ export class GenerationWorker extends WorkerHost {
       userId,
       originalContentId,
       imageIndex,
-      prompt,
+      prompt: legacyPrompt,
+      regenContext,
       creditSlices,
       totalCost,
     } = job.data as {
@@ -1335,7 +1520,15 @@ export class GenerationWorker extends WorkerHost {
       userId: string;
       originalContentId: string;
       imageIndex: number;
-      prompt: string;
+      prompt?: string;
+      regenContext?: {
+        topic: string;
+        caption: string;
+        platform: 'linkedin' | 'instagram' | 'x';
+        includeBrandKit: boolean;
+        variationNonce: string;
+        userOverridePrompt?: string;
+      };
       creditSlices: CreditSlice[];
       totalCost: number;
     };
@@ -1369,12 +1562,36 @@ export class GenerationWorker extends WorkerHost {
         'Starting single-image regeneration',
       );
       await job.updateProgress(10);
-      emitProgress(subtaskKey, 'running', 25);
+      emitProgress(subtaskKey, 'running', 15);
 
-      const buffer = await this.mediaGenerationService.generateSingleImage({
-        prompt,
+      let scenePrompt: string;
+      if (regenContext) {
+        scenePrompt = await this.customTopicGenerationService.composeImageRegenerationPrompt(
+          {
+            userId,
+            platform: regenContext.platform,
+            topic: regenContext.topic,
+            caption: regenContext.caption,
+            variationNonce: regenContext.variationNonce,
+          },
+        );
+      } else if (typeof legacyPrompt === 'string' && legacyPrompt.trim()) {
+        scenePrompt = legacyPrompt.trim();
+      } else {
+        throw new Error('Missing image regeneration context');
+      }
+
+      if (regenContext?.userOverridePrompt?.trim()) {
+        scenePrompt = regenContext.userOverridePrompt.trim();
+      }
+
+      emitProgress(subtaskKey, 'running', 55);
+
+      const { buffer } = await this.mediaGenerationService.generateSingleImage({
+        prompt: scenePrompt,
         size: '1024x1024',
         quality: 'medium',
+        skipCache: true,
       });
       const newUrl = await this.mediaGenerationService.uploadToMinio(
         buffer,
@@ -1384,13 +1601,14 @@ export class GenerationWorker extends WorkerHost {
       );
       emitProgress(subtaskKey, 'succeeded', 80);
 
-      const updated =
-        await this.generatedContentRepository.replaceImageUrlAtIndex(
+      const appended =
+        await this.generatedContentRepository.appendRegeneratedImage(
           originalContentId,
-          imageIndex,
           newUrl,
+          imageIndex,
+          scenePrompt,
         );
-      if (!updated) {
+      if (!appended) {
         throw new Error('Content not found while persisting regenerated image');
       }
 
@@ -1405,7 +1623,9 @@ export class GenerationWorker extends WorkerHost {
       this.notificationService.emitImageRegenerated(userId, {
         generationId: jobId,
         contentId: originalContentId,
-        imageIndex,
+        imageIndex: appended.newImageIndex,
+        sourceImageIndex: imageIndex,
+        appended: true,
         newImageUrl: newUrl,
       });
       this.notificationService.emitGenerationCompleted(userId, {
@@ -1420,7 +1640,8 @@ export class GenerationWorker extends WorkerHost {
         success: true,
         jobId,
         contentId: originalContentId,
-        imageIndex,
+        imageIndex: appended.newImageIndex,
+        sourceImageIndex: imageIndex,
         newImageUrl: newUrl,
         message: 'Single image regeneration completed',
       };

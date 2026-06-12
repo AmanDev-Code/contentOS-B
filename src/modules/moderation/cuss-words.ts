@@ -88,6 +88,61 @@ export const CUSS_WORDS: readonly string[] = [
   'whore',
 ] as const;
 
+/**
+ * Reduced list for AI OUTPUT safety checks only.
+ * Excludes words that are common proper names (Dick, Homo-sapiens),
+ * mild expressions in professional writing (damn, crap, jerk, pissed),
+ * or anatomical terms the LLM may use in health/science contexts.
+ * The full CUSS_WORDS list is still used for user INPUT moderation.
+ */
+export const OUTPUT_SAFETY_WORDS: readonly string[] = [
+  'arsehole',
+  'asshole',
+  'asswipe',
+  'ballsack',
+  'blowjob',
+  'bollocks',
+  'buttplug',
+  'cock',
+  'cocksucker',
+  'coon',
+  'cunt',
+  'dickhead',
+  'dildo',
+  'dyke',
+  'fag',
+  'faggot',
+  'fellate',
+  'fellatio',
+  'fuck',
+  'fucked',
+  'fucker',
+  'fucking',
+  'fudgepacker',
+  'handjob',
+  'jizz',
+  'knobend',
+  'masturbate',
+  'motherfucker',
+  'negro',
+  'nigga',
+  'nigger',
+  'nonce',
+  'prick',
+  'pussy',
+  'retard',
+  'rimjob',
+  'shithead',
+  'slut',
+  'smegma',
+  'spunk',
+  'tosser',
+  'twat',
+  'wank',
+  'wanker',
+  'whore',
+] as const;
+
 const LEET_MAP: Record<string, string> = {
   '3': 'e',
   '0': 'o',
@@ -120,17 +175,15 @@ function normalise(raw: string): string {
   return text;
 }
 
-function buildWordSet(): Set<string> {
-  return new Set(CUSS_WORDS.map((w) => w.toLowerCase()));
-}
-
-const wordSet = buildWordSet();
-
 const WORD_BOUNDARY = String.raw`(?<![a-zA-Z0-9])`;
 const WORD_BOUNDARY_END = String.raw`(?![a-zA-Z0-9])`;
 
-function buildRegex(): RegExp {
-  const escaped = CUSS_WORDS.map((w) =>
+function buildWordSet(words: readonly string[]): Set<string> {
+  return new Set(words.map((w) => w.toLowerCase()));
+}
+
+function buildRegex(words: readonly string[]): RegExp {
+  const escaped = words.map((w) =>
     w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
   );
   const sorted = [...escaped].sort((a, b) => b.length - a.length);
@@ -138,27 +191,42 @@ function buildRegex(): RegExp {
   return new RegExp(pattern, 'gi');
 }
 
-const cussRegex = buildRegex();
+const wordSet = buildWordSet(CUSS_WORDS);
+const cussRegex = buildRegex(CUSS_WORDS);
 
+const outputWordSet = buildWordSet(OUTPUT_SAFETY_WORDS);
+const outputRegex = buildRegex(OUTPUT_SAFETY_WORDS);
+
+function matchWords(
+  input: string,
+  regex: RegExp,
+  set: Set<string>,
+): { hit: boolean; matches: string[] } {
+  const normalised = normalise(input);
+  regex.lastIndex = 0;
+  const found = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(normalised)) !== null) {
+    const word = match[0].toLowerCase();
+    if (set.has(word)) {
+      found.add(word);
+    }
+  }
+  return { hit: found.size > 0, matches: [...found] };
+}
+
+/** Full profanity check — used for user INPUT moderation. */
 export function containsCussWord(input: string): {
   hit: boolean;
   matches: string[];
 } {
-  const normalised = normalise(input);
+  return matchWords(input, cussRegex, wordSet);
+}
 
-  cussRegex.lastIndex = 0;
-
-  const found = new Set<string>();
-  let match: RegExpExecArray | null;
-  while ((match = cussRegex.exec(normalised)) !== null) {
-    const word = match[0].toLowerCase();
-    if (wordSet.has(word)) {
-      found.add(word);
-    }
-  }
-
-  return {
-    hit: found.size > 0,
-    matches: [...found],
-  };
+/** Reduced check for AI-generated OUTPUT — allows proper names & mild terms. */
+export function containsOutputUnsafeWord(input: string): {
+  hit: boolean;
+  matches: string[];
+} {
+  return matchWords(input, outputRegex, outputWordSet);
 }

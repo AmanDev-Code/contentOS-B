@@ -11,6 +11,9 @@ import {
 import type { CarouselIntentPlan } from './carousel-intent-plan';
 import { planDocumentDeckPages } from './carousel-document-mode';
 
+const LLM_JSON_STRICT_RULE =
+  'STRICT JSON ONLY: must pass JSON.parse. Never output undefined, NaN, or TypeScript union syntax — omit optional keys instead.';
+
 function buildJailbreakPretext(
   platform: string,
   tonality: string,
@@ -384,7 +387,9 @@ function buildOutputSchemaInstruction(
     case 'text':
       return [
         'Return a JSON object with exactly these fields:',
-        '{ "caption": string, "hashtags": string[], "bullets": string[] | undefined, "cta": string | undefined, "keywords": string[] }',
+        '{ "caption": string, "hashtags": string[], "cta": string, "keywords": string[] }',
+        'Optional: "bullets" (string array) only when the post needs a list; otherwise OMIT the "bullets" key entirely.',
+        LLM_JSON_STRICT_RULE,
         '"keywords" must be 3-8 words/phrases extracted from the topic that describe its core themes.',
         '"hashtags" should be empty — the system will select hashtags from a curated pool using your keywords.',
         '"bullets" should only be included if the content naturally benefits from a list format. Never force bullets onto flowing narrative.',
@@ -393,12 +398,14 @@ function buildOutputSchemaInstruction(
     case 'image':
       return [
         'Return a JSON object with exactly these fields:',
-        '{ "caption": string, "hashtags": string[], "bullets": string[] | undefined, "cta": string | undefined, "keywords": string[], "imagePrompts": string[] }',
+        '{ "caption": string, "hashtags": string[], "cta": string, "keywords": string[], "imagePrompts": string[] }',
+        'Optional: "bullets" (string array) only when useful; otherwise OMIT the "bullets" key.',
+        LLM_JSON_STRICT_RULE,
         '"keywords" must be 3-8 words/phrases extracted from the topic that describe its core themes.',
         '"hashtags" should be empty — the system will select hashtags from a curated pool using your keywords.',
         '"imagePrompts" must contain one detailed image-generation prompt per requested image.',
         'Each imagePrompt must be concrete, visually descriptive, and appropriate for the platform aesthetic.',
-        'Do NOT include text/words in the image descriptions — images must be text-free.',
+        'imagePrompts should focus primarily on visual composition, colors, mood, and lighting. Minimal text (1-3 words like a headline or stat) is acceptable if it strengthens the visual impact. Avoid long sentences or paragraphs in images.',
       ].join('\n');
 
     case 'carousel':
@@ -440,6 +447,7 @@ function buildCarouselOutputSchemaInstruction(params: {
 
   if (noteDensity === 'dense') {
     return [
+      LLM_JSON_STRICT_RULE,
       'Return a JSON object with exactly these fields:',
       '{ "caption": string, "hashtags": string[], "bullets": string[] | undefined, "cta": string | undefined, "keywords": string[], ',
       '"slides": [{ "title": string, "body": string, "bullets": string[],',
@@ -476,6 +484,7 @@ function buildCarouselOutputSchemaInstruction(params: {
 
   if (noteDensity === 'compact') {
     return [
+      LLM_JSON_STRICT_RULE,
       'Return a JSON object with exactly these fields:',
       '{ "caption": string, "hashtags": string[], "bullets": string[] | undefined, "cta": string | undefined, "keywords": string[], "slides": [{ "title": string, "body": string, "bullets": string[], "imagePrompt": string }] }',
       'COMPACT CAROUSEL:',
@@ -486,6 +495,7 @@ function buildCarouselOutputSchemaInstruction(params: {
   }
 
   return [
+    LLM_JSON_STRICT_RULE,
     'Return a JSON object with exactly these fields:',
     '{ "caption": string, "hashtags": string[], "bullets": string[] | undefined, "cta": string | undefined, "keywords": string[], ',
     '"slides": [{',
@@ -642,6 +652,19 @@ export function buildCustomTopicPrompt(
   systemParts.push(
     `Target ${wordLimit.target} words. HARD LIMIT: ${wordLimit.hardCap} words. Do NOT exceed.`,
   );
+
+  if (input.platform === 'linkedin') {
+    systemParts.push('');
+    systemParts.push('--- LINKEDIN FORMATTING ---');
+    systemParts.push(
+      'Use SINGLE newlines (\\n) between related sentences — NOT double newlines (\\n\\n) after every single line.',
+      'Double newlines only between distinct sections/paragraphs (max 3-4 sections per post).',
+      'Group 2-3 related sentences into one paragraph block before the next \\n\\n break.',
+      'WRONG: one sentence \\n\\n one sentence \\n\\n one sentence (too sparse, looks hollow).',
+      'RIGHT: 2-3 sentences forming a thought \\n\\n next paragraph of 2-3 sentences \\n\\n closing.',
+      'Keep it dense and readable — not a wall of text, not a list of one-liners either.',
+    );
+  }
 
   systemParts.push('');
   systemParts.push('--- OUTPUT FORMAT ---');

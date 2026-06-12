@@ -132,7 +132,20 @@ export type TipBox = z.infer<typeof TipBoxSchema>;
 export const PostGenerationInputSchema = z.object({
   platform: z.enum(['linkedin', 'instagram', 'x']),
   contentType: z.enum(['text', 'image', 'carousel']),
-  topic: z.string().trim().min(3).max(2000),
+  topic: z.string().trim().min(3).max(4000),
+  /**
+   * When true, run a live Tavily web search on the topic and feed the found
+   * facts + reference links into the TEXT generation prompt. When false/omitted,
+   * generation runs purely from the topic + brand voice (no web search).
+   */
+  onlineSearch: z.boolean().optional(),
+  /**
+   * When true (default), inject full brand kit context: name, tone, audience,
+   * voice examples, colors, logo/reference image analysis, additional info.
+   * When false, only inject words to use/avoid (minimal vocabulary rules) —
+   * past posts learning is ALWAYS injected regardless of this flag.
+   */
+  includeBrandKit: z.boolean().optional(),
   tonality: z.enum([
     'professional',
     'casual_friendly',

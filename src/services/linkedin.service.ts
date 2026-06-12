@@ -3,6 +3,8 @@ import {
   Logger,
   BadRequestException,
   ForbiddenException,
+  Inject,
+  Optional,
 } from '@nestjs/common';
 import sharp from 'sharp';
 import { ConfigService } from '@nestjs/config';
@@ -10,6 +12,7 @@ import { ProfileRepository } from '../repositories/profile.repository';
 import { GeneratedContentRepository } from '../repositories/generated-content.repository';
 import { ERROR_MESSAGES } from '../common/constants';
 import { ScraperCredentialsService } from './scrapers/scraper-credentials.service';
+import { SocialConnectionBridgeService } from '../integrations/social/social-connection-bridge.service';
 
 type InsightSource = 'linkedin_analytics' | 'organization_analytics' | 'published_posts';
 
@@ -75,6 +78,8 @@ export class LinkedinService {
     private profileRepository: ProfileRepository,
     private generatedContentRepository: GeneratedContentRepository,
     private scraperCredentialsService: ScraperCredentialsService,
+    @Optional() @Inject(SocialConnectionBridgeService)
+    private readonly socialBridge?: SocialConnectionBridgeService,
   ) {
     this.clientId = this.configService.get<string>('linkedin.clientId') || '';
     this.clientSecret =
@@ -554,8 +559,9 @@ export class LinkedinService {
       client_id: this.clientId,
       redirect_uri: this.redirectUri,
       state,
-      scope:
-        'openid profile email w_member_social w_organization_social r_basicprofile r_1st_connections_size r_organization_admin rw_organization_admin r_organization_social',
+      // Legacy fallback — prefer LinkedInAuthService scope sets from the controller.
+      // Personal connect only; excludes restricted `r_member_social` and org scopes.
+      scope: 'openid profile email w_member_social',
     });
 
     return `https://www.linkedin.com/oauth/v2/authorization?${params.toString()}`;
@@ -745,6 +751,7 @@ export class LinkedinService {
   async getConnectionStatus(userId: string): Promise<{
     connected: boolean;
     expiresAt: Date | null;
+    accessToken?: string;
   }> {
     this.logger.log(`Checking LinkedIn connection status for user: ${userId}`);
 
@@ -761,7 +768,11 @@ export class LinkedinService {
       `LinkedIn connection status for user ${userId}: connected=${connected}, expiresAt=${expiresAt}, hasToken=${!!profile.linkedin_access_token}`,
     );
 
-    return { connected, expiresAt };
+    return {
+      connected,
+      expiresAt,
+      accessToken: profile.linkedin_access_token ?? undefined,
+    };
   }
 
   async getProfileMetrics(userId: string): Promise<{
@@ -1016,6 +1027,115 @@ export class LinkedinService {
       if (error instanceof ForbiddenException) throw error;
       return [];
     }
+  }
+
+  /**
+   * Reads engagement (reactions + comments) for a member's OWN posts via the
+   * LinkedIn `socialActions` endpoint. This requires the restricted
+   * `r_member_social` scope (Sprint 1.6).
+   *
+   * Graceful degradation (founder decision): if the scope is not granted,
+   * LinkedIn returns 401/403. We do NOT throw — we mark the result as
+   * `available: false` and return an empty map so callers (the engagement-sync
+   * cron) silently fall back to recency-based ranking. No error toast, no failed
+   * job. Per-post 404s (e.g. a deleted post) are skipped without flipping
+   * availability.
+   *
+   * Org-page engagement is NOT handled here — use `getPostAnalytics` with
+   * actorType 'organization' (already works via r_organization_social).
+   */
+  async getMemberPostEngagement(
+    userId: string,
+    linkedinPostIds: string[],
+  ): Promise<{
+    available: boolean;
+    byPostId: Map<string, { reactions: number; comments: number }>;
+  }> {
+    const byPostId = new Map<string, { reactions: number; comments: number }>();
+
+    const uniqueIds = Array.from(
+      new Set(
+        (linkedinPostIds || [])
+          .map((id) => (typeof id === 'string' ? id.trim() : ''))
+          .filter((id) => id.length > 0),
+      ),
+    ).slice(0, 50);
+
+    if (uniqueIds.length === 0) {
+      return { available: true, byPostId };
+    }
+
+    const profile = await this.profileRepository.findById(userId);
+    if (!profile?.linkedin_access_token) {
+      // Treat "not connected" as unavailable rather than throwing — the cron
+      // must never fail because one user disconnected.
+      this.logger.warn(
+        `Member engagement skipped for user ${userId}: LinkedIn not connected.`,
+      );
+      return { available: false, byPostId };
+    }
+
+    const token = profile.linkedin_access_token;
+
+    for (const postId of uniqueIds) {
+      let response: Response;
+      try {
+        response = await fetch(
+          `https://api.linkedin.com/v2/socialActions/${encodeURIComponent(postId)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'X-Restli-Protocol-Version': '2.0.0',
+            },
+          },
+        );
+      } catch (err) {
+        // Network blip on one post: skip it, keep going. Don't kill the batch.
+        this.logger.warn(
+          `Member engagement fetch errored for post ${postId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        continue;
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        // Restricted scope not granted (yet). This is the expected state until
+        // LinkedIn approves r_member_social — degrade gracefully.
+        this.logger.log(
+          `Personal LinkedIn analytics not available yet for user ${userId} ` +
+            `(r_member_social not granted; HTTP ${response.status}). Falling back to recency ranking.`,
+        );
+        return { available: false, byPostId };
+      }
+
+      if (!response.ok) {
+        // 404 (deleted/unknown post) or transient error for THIS post only.
+        this.logger.debug(
+          `Member engagement unavailable for post ${postId} (HTTP ${response.status}); skipping.`,
+        );
+        continue;
+      }
+
+      const data = await response.json().catch(() => null);
+      if (!data) continue;
+
+      const reactions = Number(
+        data?.likesSummary?.totalLikes ??
+          data?.reactionSummaries?.LIKE?.count ??
+          0,
+      );
+      const comments = Number(
+        data?.commentsSummary?.aggregatedTotalComments ??
+          data?.commentsSummary?.count ??
+          0,
+      );
+
+      byPostId.set(this.normalizeLinkedinUrn(postId), {
+        reactions: Number.isFinite(reactions) ? reactions : 0,
+        comments: Number.isFinite(comments) ? comments : 0,
+      });
+    }
+
+    return { available: true, byPostId };
   }
 
   async disconnectLinkedIn(userId: string): Promise<void> {
@@ -1574,104 +1694,145 @@ export class LinkedinService {
       throw new BadRequestException('LinkedIn not connected');
     }
 
-    let linkedMemberId: string | null = null;
-    let memberAvatarUrl: string | undefined;
     const identities: LinkedInPostingIdentity[] = [];
 
-    try {
-      const userInfoResponse = await fetch('https://api.linkedin.com/v2/userinfo', {
-        headers: {
-          Authorization: `Bearer ${profile.linkedin_access_token}`,
-        },
-      });
-      if (userInfoResponse.ok) {
-        const userInfo = await userInfoResponse.json();
-        linkedMemberId = userInfo?.sub || null;
-        if (typeof userInfo?.picture === 'string' && userInfo.picture.startsWith('http')) {
-          memberAvatarUrl = userInfo.picture;
+    // Sprint 1.7 fix: Use social_accounts table instead of LinkedIn API.
+    // Only return accounts the user explicitly connected via PagePickerModal.
+    if (this.socialBridge) {
+      try {
+        const connectedAccounts = await this.socialBridge.getConnectedLinkedInAccounts(userId);
+        
+        for (const account of connectedAccounts) {
+          if (account.accountType === 'personal') {
+            identities.push({
+              id: `member:${account.platformAccountId}`,
+              actorType: 'member',
+              label: account.displayName || 'Personal profile',
+              avatarUrl: account.avatarUrl ?? undefined,
+            });
+          } else if (account.accountType === 'organization') {
+            const organizationUrn = account.platformAccountId.startsWith('urn:li:organization:')
+              ? account.platformAccountId
+              : `urn:li:organization:${account.platformAccountId}`;
+            identities.push({
+              id: `org:${organizationUrn}`,
+              actorType: 'organization',
+              label: account.displayName || organizationUrn,
+              organizationUrn,
+              organizationName: account.displayName ?? undefined,
+              avatarUrl: account.avatarUrl ?? undefined,
+            });
+          }
         }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch connected accounts from social_accounts: ${error}`);
       }
-    } catch (error) {
-      this.logger.warn('Unable to fetch LinkedIn userinfo for posting identities');
     }
 
-    const memberIdentityId = linkedMemberId
-      ? `member:${linkedMemberId}`
-      : 'member:self';
-    identities.push({
-      id: memberIdentityId,
-      actorType: 'member',
-      label: 'Personal profile',
-      avatarUrl: memberAvatarUrl,
-    });
+    // Fallback: if no accounts found in social_accounts or socialBridge unavailable,
+    // use legacy behavior (fetch from LinkedIn API) for backward compatibility.
+    // This ensures existing users who haven't re-connected still see their accounts.
+    if (identities.length === 0) {
+      this.logger.debug('No accounts in social_accounts, falling back to LinkedIn API');
+      
+      let linkedMemberId: string | null = null;
+      let memberAvatarUrl: string | undefined;
 
-    try {
-      const orgsResponse = await fetch(
-        'https://api.linkedin.com/v2/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&projection=(elements*(organization~(id,name,logoV2)))',
-        {
+      try {
+        const userInfoResponse = await fetch('https://api.linkedin.com/v2/userinfo', {
           headers: {
             Authorization: `Bearer ${profile.linkedin_access_token}`,
-            'X-Restli-Protocol-Version': '2.0.0',
           },
-        },
-      );
+        });
+        if (userInfoResponse.ok) {
+          const userInfo = await userInfoResponse.json();
+          linkedMemberId = userInfo?.sub || null;
+          if (typeof userInfo?.picture === 'string' && userInfo.picture.startsWith('http')) {
+            memberAvatarUrl = userInfo.picture;
+          }
+        }
+      } catch (error) {
+        this.logger.warn('Unable to fetch LinkedIn userinfo for posting identities');
+      }
 
-      if (orgsResponse.ok) {
-        const orgsData = await orgsResponse.json();
-        const elements = Array.isArray(orgsData?.elements) ? orgsData.elements : [];
-        for (const element of elements) {
-          const organizationUrn = element?.organization;
-          if (!organizationUrn) continue;
-          const organizationName = this.toLinkedinText(
-            element?.['organization~']?.name,
-            organizationUrn,
-          );
-          let avatarUrl =
-            this.findFirstIdentifierUrl(
-              element?.['organization~']?.logoV2,
-            ) || this.buildVectorImageUrl(element?.['organization~']?.logoV2);
+      const memberIdentityId = linkedMemberId
+        ? `member:${linkedMemberId}`
+        : 'member:self';
+      identities.push({
+        id: memberIdentityId,
+        actorType: 'member',
+        label: 'Personal profile',
+        avatarUrl: memberAvatarUrl,
+      });
 
-          // Some LinkedIn org ACL payloads omit resolved logo fields.
-          if (!avatarUrl) {
-            const organizationId = String(organizationUrn).split(':').pop();
-            if (organizationId) {
-              try {
-                const orgDetailResponse = await fetch(
-                  `https://api.linkedin.com/v2/organizations/${organizationId}?projection=(id,name,logoV2)`,
-                  {
-                    headers: {
-                      Authorization: `Bearer ${profile.linkedin_access_token}`,
-                      'X-Restli-Protocol-Version': '2.0.0',
+      try {
+        const orgsResponse = await fetch(
+          'https://api.linkedin.com/v2/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&projection=(elements*(organization~(id,name,logoV2)))',
+          {
+            headers: {
+              Authorization: `Bearer ${profile.linkedin_access_token}`,
+              'X-Restli-Protocol-Version': '2.0.0',
+            },
+          },
+        );
+
+        if (orgsResponse.ok) {
+          const orgsData = await orgsResponse.json();
+          const elements = Array.isArray(orgsData?.elements) ? orgsData.elements : [];
+          for (const element of elements) {
+            const organizationUrn = element?.organization;
+            if (!organizationUrn) continue;
+            const organizationName = this.toLinkedinText(
+              element?.['organization~']?.name,
+              organizationUrn,
+            );
+            let avatarUrl =
+              this.findFirstIdentifierUrl(
+                element?.['organization~']?.logoV2,
+              ) || this.buildVectorImageUrl(element?.['organization~']?.logoV2);
+
+            if (!avatarUrl) {
+              const organizationId = String(organizationUrn).split(':').pop();
+              if (organizationId) {
+                try {
+                  const orgDetailResponse = await fetch(
+                    `https://api.linkedin.com/v2/organizations/${organizationId}?projection=(id,name,logoV2)`,
+                    {
+                      headers: {
+                        Authorization: `Bearer ${profile.linkedin_access_token}`,
+                        'X-Restli-Protocol-Version': '2.0.0',
+                      },
                     },
-                  },
-                );
-                if (orgDetailResponse.ok) {
-                  const orgDetail = await orgDetailResponse.json();
-                  avatarUrl =
-                    this.findFirstIdentifierUrl(orgDetail?.logoV2) ||
-                    this.buildVectorImageUrl(orgDetail?.logoV2);
+                  );
+                  if (orgDetailResponse.ok) {
+                    const orgDetail = await orgDetailResponse.json();
+                    avatarUrl =
+                      this.findFirstIdentifierUrl(orgDetail?.logoV2) ||
+                      this.buildVectorImageUrl(orgDetail?.logoV2);
+                  }
+                } catch {
+                  // best effort only
                 }
-              } catch {
-                // best effort only
               }
             }
+            identities.push({
+              id: `org:${organizationUrn}`,
+              actorType: 'organization',
+              label: organizationName,
+              organizationUrn,
+              organizationName,
+              avatarUrl,
+            });
           }
-          identities.push({
-            id: `org:${organizationUrn}`,
-            actorType: 'organization',
-            label: organizationName,
-            organizationUrn,
-            organizationName,
-            avatarUrl,
-          });
         }
+      } catch (error) {
+        this.logger.warn('Unable to fetch LinkedIn organization identities');
       }
-    } catch (error) {
-      this.logger.warn('Unable to fetch LinkedIn organization identities');
     }
 
+    const defaultId = identities[0]?.id || 'member:self';
     return {
-      defaultIdentityId: identities[0]?.id || memberIdentityId,
+      defaultIdentityId: defaultId,
       identities,
     };
   }
