@@ -97,4 +97,11 @@ export class OnboardingController {
     await this.onboardingService.completeTour(user.id);
     return { success: true };
   }
+
+  @Post('activation-complete')
+  @UseGuards(AuthGuard, PaywallGuard)
+  async completeActivation(@GetUser() user: { id: string }) {
+    await this.onboardingService.completeActivation(user.id);
+    return { success: true };
+  }
 }

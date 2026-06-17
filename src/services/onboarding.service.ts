@@ -60,11 +60,14 @@ type OnboardingStatus = {
   required: boolean;
   enabled: boolean;
   completed: boolean;
+  activationCompleted: boolean;
+  activationFlowEnabled: boolean;
   tourCompleted: boolean;
   enabledAt: string | null;
   questionVersion: number;
   tourVersion: number;
   tourSteps: Record<string, boolean>;
+  linkedInConnected: boolean;
 };
 
 @Injectable()
@@ -79,6 +82,7 @@ export class OnboardingService {
     questionVersion: number;
     tourVersion: number;
     tourSteps: Record<string, boolean>;
+    activationFlowEnabled: boolean;
   }> {
     const client = this.supabaseService.getServiceClient();
     const { data } = await client
@@ -106,6 +110,8 @@ export class OnboardingService {
         settings: tourStepsRaw.settings !== false,
         notificationsBell: tourStepsRaw.notificationsBell !== false,
       },
+      // Default to true (activation flow is the default experience)
+      activationFlowEnabled: config.activationFlowEnabled !== false,
     };
   }
 
@@ -147,7 +153,7 @@ export class OnboardingService {
   }
 
   async getStatus(userId: string): Promise<OnboardingStatus> {
-    const [cfg, profileRes, userRes] = await Promise.all([
+    const [cfg, profileRes, userRes, linkedInRes] = await Promise.all([
       this.getConfig(),
       this.supabaseService
         .getServiceClient()
@@ -156,6 +162,13 @@ export class OnboardingService {
         .eq('id', userId)
         .maybeSingle(),
       this.supabaseService.getServiceClient().auth.admin.getUserById(userId),
+      this.supabaseService
+        .getServiceClient()
+        .from('social_accounts')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('provider', 'linkedin')
+        .maybeSingle(),
     ]);
 
     const preferences =
@@ -163,6 +176,7 @@ export class OnboardingService {
     const onboarding = (preferences.onboarding as Record<string, any>) || {};
 
     const completed = Boolean(onboarding.completed);
+    const activationCompleted = Boolean(onboarding.activationCompleted);
     const tourCompleted = Boolean(onboarding.tourCompleted);
     const userCreatedAt = userRes.data?.user?.created_at || null;
 
@@ -173,15 +187,22 @@ export class OnboardingService {
 
     const required = Boolean(cfg.enabled && isAfterEnablement && !completed);
 
+    // Activation flow is the default — the flag config can override
+    // to legacy questions mode via config.activationFlow = false
+    const activationFlowEnabled = cfg.activationFlowEnabled !== false;
+
     return {
       required,
       enabled: cfg.enabled,
       completed,
+      activationCompleted,
+      activationFlowEnabled,
       tourCompleted,
       enabledAt: cfg.enabledAt,
       questionVersion: cfg.questionVersion,
       tourVersion: cfg.tourVersion,
       tourSteps: cfg.tourSteps,
+      linkedInConnected: Boolean(linkedInRes.data),
     };
   }
 
@@ -237,6 +258,40 @@ export class OnboardingService {
         ...onboarding,
         tourCompleted: true,
         tourCompletedAt: new Date().toISOString(),
+      },
+    };
+
+    await client
+      .from('profiles')
+      .update({
+        preferences: nextPreferences,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    return { success: true };
+  }
+
+  async completeActivation(userId: string) {
+    const client = this.supabaseService.getServiceClient();
+    const { data: profile } = await client
+      .from('profiles')
+      .select('preferences')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const preferences = (profile?.preferences as Record<string, any>) || {};
+    const onboarding = (preferences.onboarding as Record<string, any>) || {};
+
+    const nextPreferences = {
+      ...preferences,
+      onboarding: {
+        ...onboarding,
+        activationCompleted: true,
+        activationCompletedAt: new Date().toISOString(),
+        // Also mark as "completed" so the wizard doesn't re-appear
+        completed: true,
+        completedAt: onboarding.completedAt || new Date().toISOString(),
       },
     };
 

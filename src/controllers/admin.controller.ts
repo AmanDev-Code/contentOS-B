@@ -33,6 +33,7 @@ import { SupabaseService } from '../services/supabase.service';
 import { CacheService } from '../services/cache.service';
 import { TrendingHashtagEngineService } from '../services/trending-hashtag-engine.service';
 import { AppSettingsService } from '../services/app-settings.service';
+import { GenerationService } from '../services/generation.service';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -89,6 +90,7 @@ export class AdminController {
     private readonly cacheService: CacheService,
     private readonly trendingHashtagEngine: TrendingHashtagEngineService,
     private readonly appSettingsService: AppSettingsService,
+    private readonly generationService: GenerationService,
   ) {}
 
   @Post('scraper/purge-inhouse')
@@ -795,11 +797,14 @@ export class AdminController {
       const maxAgeMs = Math.max(1, Math.min(body?.maxAgeMinutes ?? 5, 60)) * 60 * 1000;
       const client = this.supabaseService.getServiceClient();
       
-      // Build query for stale active jobs
+      // Build query for stale jobs - clean ALL non-terminal statuses
+      // Terminal statuses: ready, failed, cancelled (these are complete)
+      // Everything else should be cleaned if stuck
+      const terminalStatuses = ['ready', 'failed', 'cancelled'];
       let query = client
         .from('generation_jobs')
         .select('id, user_id, status, created_at, updated_at')
-        .in('status', ['generating', 'media_generating', 'publishing'])
+        .not('status', 'in', terminalStatuses)
         .lt('updated_at', new Date(Date.now() - maxAgeMs).toISOString())
         .order('updated_at', { ascending: true })
         .limit(100);
@@ -822,28 +827,73 @@ export class AdminController {
         };
       }
       
-      // Mark stale jobs as failed
-      const jobIds = staleJobs.map((j: any) => j.id);
-      const { error: updateError } = await client
-        .from('generation_jobs')
-        .update({
-          status: 'failed',
-          error: `Admin cleanup: job was stuck for more than ${Math.round(maxAgeMs / 60000)} minutes`,
-          updated_at: new Date().toISOString(),
-        })
-        .in('id', jobIds)
-        .in('status', ['generating', 'media_generating', 'publishing']);
-      
-      if (updateError) {
-        throw new HttpException(updateError.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      // Mark stale jobs as failed (individually to capture status in error message)
+      let updateSuccessCount = 0;
+      const updateErrors: string[] = [];
+      for (const job of staleJobs) {
+        try {
+          const { error: singleUpdateError } = await client
+            .from('generation_jobs')
+            .update({
+              status: 'failed',
+              error: `Admin cleanup: job was stuck for more than ${Math.round(maxAgeMs / 60000)} minutes (was in status: ${job.status})`,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', job.id)
+            .not('status', 'in', terminalStatuses);
+
+          if (singleUpdateError) {
+            throw new HttpException(singleUpdateError.message, HttpStatus.INTERNAL_SERVER_ERROR);
+          }
+          updateSuccessCount++;
+        } catch (err: any) {
+          const errorMsg = `Failed to update job ${job.id}: ${err?.message || String(err)}`;
+          console.error(errorMsg);
+          updateErrors.push(errorMsg);
+        }
       }
-      
+
+      if (updateErrors.length === staleJobs.length) {
+        // All updates failed
+        throw new HttpException(
+          'Failed to update any stale jobs',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      // Refund credits for each cleaned job
+      let refundedCount = 0;
+      const refundErrors: string[] = [];
+      for (const job of staleJobs) {
+        try {
+          await this.generationService.refundGenerationCredits(
+            job.user_id,
+            job.id,
+            `Admin cleanup: stale job (was ${job.status})`,
+          );
+          refundedCount++;
+        } catch (err: any) {
+          // Log but don't fail the cleanup if refund fails
+          const errorMsg = `Failed to refund credits for job ${job.id}: ${err?.message || String(err)}`;
+          console.error(errorMsg);
+          refundErrors.push(errorMsg);
+        }
+      }
+
+      if (refundErrors.length > 0) {
+        console.error(`Credit refund errors during admin cleanup:`, refundErrors);
+      }
+
+      const cleanedJobIds = staleJobs.map((j: any) => j.id);
       return {
         success: true,
-        message: `Cleaned up ${jobIds.length} stale generation jobs`,
+        message: `Cleaned up ${updateSuccessCount} stale generation jobs`,
         data: {
-          cleanedCount: jobIds.length,
-          cleanedJobIds: jobIds,
+          cleanedCount: updateSuccessCount,
+          refundedCount,
+          refundErrors: refundErrors.length > 0 ? refundErrors : undefined,
+          updateErrors: updateErrors.length > 0 ? updateErrors : undefined,
+          cleanedJobIds,
           maxAgeMinutes: Math.round(maxAgeMs / 60000),
           cleanedBy: req.user.id,
         },

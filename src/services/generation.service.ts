@@ -644,7 +644,7 @@ export class GenerationService {
     }
   }
 
-  private async refundGenerationCredits(
+  async refundGenerationCredits(
     userId: string,
     jobId: string,
     reason: string,
