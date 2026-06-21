@@ -547,7 +547,7 @@ Requirements:
     // Get the post content with slug for image naming
     const { data: post } = await client
       .from('blog_posts')
-      .select('title, excerpt, body, tags, slug, category')
+      .select('title, excerpt, body, tags, slug, content_category')
       .eq('id', postId)
       .single();
 
@@ -566,7 +566,7 @@ Requirements:
         const imageBuffer = await generatePlatformCoverImage({
           title: adaptedResult.platformTitle || post.title,
           platform,
-          category: post.category || (post.tags?.[0] ?? undefined),
+          category: post.content_category || (post.tags?.[0] ?? undefined),
           excerpt: post.excerpt ?? undefined,
           hashtags: adaptedResult.hashtags,
         });
@@ -655,7 +655,7 @@ Requirements:
       excerpt: string | null;
       body: string | null;
       tags: string[] | null;
-      category?: string | null;
+      content_category?: string | null;
     },
     platform: string,
   ): Promise<{
@@ -701,7 +701,7 @@ The seoScore should be 0-100 based on:
     const userPrompt = `Adapt this article for ${platform}:
 
 ORIGINAL TITLE: ${title}
-CATEGORY: ${post.category || 'General'}
+CATEGORY: ${post.content_category || 'General'}
 TAGS: ${tags.join(', ')}
 
 CONTENT:
