@@ -60,7 +60,11 @@ export const OPENAPI_V1_SPEC = {
             description:
               'Filter by status (scheduled, processing, published, failed, cancelled).',
           },
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          {
+            name: 'page',
+            in: 'query',
+            schema: { type: 'integer', default: 1 },
+          },
           {
             name: 'limit',
             in: 'query',
@@ -249,7 +253,8 @@ export const OPENAPI_V1_SPEC = {
                 properties: {
                   image: {
                     type: 'string',
-                    description: 'Base64 image bytes (data URI prefix optional).',
+                    description:
+                      'Base64 image bytes (data URI prefix optional).',
                   },
                   url: {
                     type: 'string',
@@ -316,7 +321,8 @@ export const OPENAPI_V1_SPEC = {
           mediaUrls: {
             type: 'array',
             items: { type: 'string', format: 'uri' },
-            description: 'Image URLs (first is primary). Use POST /media first.',
+            description:
+              'Image URLs (first is primary). Use POST /media first.',
           },
           carouselUrls: {
             type: 'array',

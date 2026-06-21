@@ -23,7 +23,10 @@ import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
 import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
 import { ModerationGuard } from '../guards/moderation.guard';
-import { CreditPreflightGuard, CreditPreflightData } from '../guards/credit-preflight.guard';
+import {
+  CreditPreflightGuard,
+  CreditPreflightData,
+} from '../guards/credit-preflight.guard';
 import { SocialChannelGuard } from '../guards/social-channel.guard';
 import { RequireSocialChannel } from '../decorators/require-social-channel.decorator';
 
@@ -86,10 +89,16 @@ export class GenerationController {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 20)); // Max 50 per page
     const offset = (pageNum - 1) * limitNum;
-    const sourceFilter = source === 'viral' || source === 'custom' ? source : undefined;
+    const sourceFilter =
+      source === 'viral' || source === 'custom' ? source : undefined;
 
     const [content, totalCount] = await Promise.all([
-      this.generatedContentRepository.findByUserId(userId, limitNum, offset, sourceFilter),
+      this.generatedContentRepository.findByUserId(
+        userId,
+        limitNum,
+        offset,
+        sourceFilter,
+      ),
       this.generatedContentRepository.countByUserId(userId, sourceFilter),
     ]);
     const refinedContent = await Promise.all(
@@ -135,7 +144,9 @@ export class GenerationController {
     }
     const rows = await this.generatedContentRepository.findByJobId(jobId);
     const ownedRows = rows.filter((row) => (row as any).user_id === userId);
-    return Promise.all(ownedRows.map((row) => this.ensureRefinedBeforeReturn(row as any)));
+    return Promise.all(
+      ownedRows.map((row) => this.ensureRefinedBeforeReturn(row as any)),
+    );
   }
 
   @Post('job/:jobId/retry')
@@ -199,7 +210,9 @@ export class GenerationController {
   }
 
   @Delete('job/:jobId/cancel')
-  @ApiOperation({ summary: 'Cancel a generation job and refund reserved credits' })
+  @ApiOperation({
+    summary: 'Cancel a generation job and refund reserved credits',
+  })
   async cancelJob(@Request() req, @Param('jobId') jobId: string) {
     const userId = req.user?.id;
     if (!userId) {
@@ -227,7 +240,9 @@ export class GenerationController {
   }
 
   @Post('content/:contentId/regenerate')
-  @ApiOperation({ summary: 'Regenerate carousel slides or images for existing content' })
+  @ApiOperation({
+    summary: 'Regenerate carousel slides or images for existing content',
+  })
   async regenerateMedia(
     @Request() req,
     @Param('contentId') contentId: string,
@@ -237,7 +252,11 @@ export class GenerationController {
     if (!userId) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
-    return this.generationService.regenerateMedia(userId, contentId, body.regenerationType);
+    return this.generationService.regenerateMedia(
+      userId,
+      contentId,
+      body.regenerationType,
+    );
   }
 
   /**
@@ -249,7 +268,9 @@ export class GenerationController {
    * disabled button.
    */
   @Post('regenerate/image')
-  @ApiOperation({ summary: 'Regenerate a single image inside existing content' })
+  @ApiOperation({
+    summary: 'Regenerate a single image inside existing content',
+  })
   async regenerateSingleImage(
     @Request() req,
     @Body()
@@ -345,7 +366,9 @@ export class GenerationController {
   @Post('custom-topic')
   @UseGuards(ModerationGuard, CreditPreflightGuard, SocialChannelGuard)
   @RequireSocialChannel('linkedin')
-  @ApiOperation({ summary: 'Start custom topic AI post generation (credit-gated)' })
+  @ApiOperation({
+    summary: 'Start custom topic AI post generation (credit-gated)',
+  })
   async startCustomTopicGeneration(
     @Request() req,
     @Body()
@@ -354,7 +377,9 @@ export class GenerationController {
       platform: 'linkedin' | 'instagram' | 'x';
       contentType: 'text' | 'image' | 'carousel' | 'post';
       tonality: string;
-      wordLimit: { kind: 'short' | 'medium' | 'long' } | { kind: 'custom'; words: number };
+      wordLimit:
+        | { kind: 'short' | 'medium' | 'long' }
+        | { kind: 'custom'; words: number };
       /** When true, run a Tavily web search on the topic and feed it to the text LLM. */
       onlineSearch?: boolean;
       /** When false, skip full brand kit (name, tone, voice examples, colors, image analysis). Only do_use/do_not_use words + past posts are kept. */
@@ -404,10 +429,7 @@ export class GenerationController {
    */
   @Post('format-content')
   @ApiOperation({ summary: 'Format and improve content using AI for LinkedIn' })
-  async formatContent(
-    @Request() req,
-    @Body() body: { content: string },
-  ) {
+  async formatContent(@Request() req, @Body() body: { content: string }) {
     const userId = req.user?.id;
     if (!userId) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
@@ -445,10 +467,7 @@ export class GenerationController {
     const { content, title, hashtags, mediaUrls, pdfUrl } = body;
 
     if (!content || content.trim().length === 0) {
-      throw new HttpException(
-        'Content is required',
-        HttpStatus.BAD_REQUEST,
-      );
+      throw new HttpException('Content is required', HttpStatus.BAD_REQUEST);
     }
 
     // Determine visual type based on what's provided
@@ -491,9 +510,12 @@ export class GenerationController {
     if (!title || !body) return item;
     if (isViralTopicsN8nPayload(title, body)) return item;
 
-    const pp = item?.performance_prediction as Record<string, unknown> | undefined;
+    const pp = item?.performance_prediction as
+      | Record<string, unknown>
+      | undefined;
     const refinementAlreadyApplied =
-      (pp?.postRefinement as { applied?: boolean } | undefined)?.applied === true;
+      (pp?.postRefinement as { applied?: boolean } | undefined)?.applied ===
+      true;
     if (refinementAlreadyApplied) return item;
 
     // n8n often ships **bold** and [text](url). Plain n8n prose (no markdown) still needs refinement
@@ -547,12 +569,16 @@ export class GenerationController {
         undefined,
     });
 
-    const updated = await this.generatedContentRepository.updateContent(item.id, {
-      title: refined.title,
-      content: refined.content,
-      hashtags: refined.hashtags,
-      performance_prediction: mergePerformancePredictionWithRefinementApplied(pp),
-    });
+    const updated = await this.generatedContentRepository.updateContent(
+      item.id,
+      {
+        title: refined.title,
+        content: refined.content,
+        hashtags: refined.hashtags,
+        performance_prediction:
+          mergePerformancePredictionWithRefinementApplied(pp),
+      },
+    );
     return updated;
   }
 }

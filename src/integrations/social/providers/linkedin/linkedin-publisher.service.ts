@@ -1,8 +1,14 @@
 import { Logger } from '@nestjs/common';
 import type { SocialHttpClient } from '../../social-http-client';
-import type { PlatformPublisher, MediaUploadResult } from '../../platform-publisher.interface';
+import type {
+  PlatformPublisher,
+  MediaUploadResult,
+} from '../../platform-publisher.interface';
 import { LinkedInMediaService } from './linkedin-media.service';
-import { escapeLinkedInText, LINKEDIN_MAX_TEXT_LENGTH } from './linkedin-capabilities';
+import {
+  escapeLinkedInText,
+  LINKEDIN_MAX_TEXT_LENGTH,
+} from './linkedin-capabilities';
 import {
   PlatformBadRequestError,
   type ConnectedAccount,
@@ -90,7 +96,9 @@ export class LinkedInPublisherService implements PlatformPublisher {
     });
 
     const platformPostId =
-      response.headers['x-restli-id'] ?? response.headers['x-linkedin-id'] ?? '';
+      response.headers['x-restli-id'] ??
+      response.headers['x-linkedin-id'] ??
+      '';
     if (!platformPostId) {
       throw new PlatformBadRequestError(
         'LinkedIn accepted the post but returned no post id header (x-restli-id).',
@@ -119,7 +127,9 @@ export class LinkedInPublisherService implements PlatformPublisher {
         headers: this.headers(tokens.accessToken, 'application/json'),
       });
     } catch (err) {
-      this.logger.warn(`LinkedIn deletePost failed for ${platformPostId}: ${String(err)}`);
+      this.logger.warn(
+        `LinkedIn deletePost failed for ${platformPostId}: ${String(err)}`,
+      );
       throw err;
     }
   }
@@ -135,7 +145,12 @@ export class LinkedInPublisherService implements PlatformPublisher {
       asset,
       tokens.accessToken,
     );
-    await this.media.waitForReady(assetUrn, tokens.accessToken, mediaType, isPersonal);
+    await this.media.waitForReady(
+      assetUrn,
+      tokens.accessToken,
+      mediaType,
+      isPersonal,
+    );
     return { platformAssetId: assetUrn };
   }
 
@@ -145,8 +160,17 @@ export class LinkedInPublisherService implements PlatformPublisher {
     accessToken: string,
     isPersonalToken: boolean,
   ): Promise<Record<string, unknown>> {
-    const { assetUrn, mediaType } = await this.media.upload(authorUrn, asset, accessToken);
-    await this.media.waitForReady(assetUrn, accessToken, mediaType, isPersonalToken);
+    const { assetUrn, mediaType } = await this.media.upload(
+      authorUrn,
+      asset,
+      accessToken,
+    );
+    await this.media.waitForReady(
+      assetUrn,
+      accessToken,
+      mediaType,
+      isPersonalToken,
+    );
     return {
       media: {
         id: assetUrn,
@@ -156,11 +180,15 @@ export class LinkedInPublisherService implements PlatformPublisher {
   }
 
   private authorUrn(account: ConnectedAccount): string {
-    const prefix = account.accountType === 'organization' ? 'organization' : 'person';
+    const prefix =
+      account.accountType === 'organization' ? 'organization' : 'person';
     return `urn:li:${prefix}:${account.platformAccountId}`;
   }
 
-  private headers(accessToken: string, contentType: string): Record<string, string> {
+  private headers(
+    accessToken: string,
+    contentType: string,
+  ): Record<string, string> {
     return {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': contentType,

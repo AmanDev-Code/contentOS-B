@@ -108,7 +108,7 @@ export class ApiV1PostsService {
       content,
       {
         visualType,
-        visualUrl: hasImage ? mediaUrls![0] : undefined,
+        visualUrl: hasImage ? mediaUrls[0] : undefined,
         carouselUrls: hasCarousel ? carouselUrls : undefined,
         hashtags,
         pdfUrl,

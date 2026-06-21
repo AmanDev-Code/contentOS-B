@@ -38,7 +38,12 @@ const POLAR_CUSTOMER_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Polar resource prefixes that must never be stored as polar_customer_id. */
-const POLAR_NON_CUSTOMER_ID_PREFIXES = ['cos_', 'sub_', 'ord_', 'chk_'] as const;
+const POLAR_NON_CUSTOMER_ID_PREFIXES = [
+  'cos_',
+  'sub_',
+  'ord_',
+  'chk_',
+] as const;
 
 @Injectable()
 export class PolarService {
@@ -80,9 +85,12 @@ export class PolarService {
   }
 
   private initializePolar(): void {
-    const accessToken = this.configService.get<string>('polar.accessToken') || '';
+    const accessToken =
+      this.configService.get<string>('polar.accessToken') || '';
     if (!accessToken) {
-      this.logger.warn('POLAR_ACCESS_TOKEN is not configured. Polar SDK will not be initialized.');
+      this.logger.warn(
+        'POLAR_ACCESS_TOKEN is not configured. Polar SDK will not be initialized.',
+      );
       return;
     }
 
@@ -222,10 +230,7 @@ export class PolarService {
     if (data?.customer_id) {
       candidates.push(String(data.customer_id));
     }
-    if (
-      data?.id &&
-      (data.type === 'individual' || data.type === 'team')
-    ) {
+    if (data?.id && (data.type === 'individual' || data.type === 'team')) {
       candidates.push(String(data.id));
     }
 
@@ -311,7 +316,9 @@ export class PolarService {
   }
 
   /** Invoice URL for a Polar order (transaction id in unified billing flows). */
-  async getTransactionInvoiceUrl(transactionId: string): Promise<string | null> {
+  async getTransactionInvoiceUrl(
+    transactionId: string,
+  ): Promise<string | null> {
     return this.getOrderInvoiceUrl(transactionId);
   }
 
@@ -333,9 +340,12 @@ export class PolarService {
    * Note: Polar uses Standard Webhooks signature format
    */
   verifyWebhookSignature(rawBody: string, signatureHeader: string): boolean {
-    const webhookSecret = this.configService.get<string>('polar.webhookSecret') || '';
+    const webhookSecret =
+      this.configService.get<string>('polar.webhookSecret') || '';
     if (!webhookSecret) {
-      this.logger.warn('POLAR_WEBHOOK_SECRET is not configured; skipping signature verification.');
+      this.logger.warn(
+        'POLAR_WEBHOOK_SECRET is not configured; skipping signature verification.',
+      );
       return true;
     }
 
@@ -345,7 +355,9 @@ export class PolarService {
       // Standard Webhooks format: timestamp,signature pairs separated by commas
       // Format: t=<timestamp>,v1=<signature>
       // For now, simplified verification - in production, implement full Standard Webhooks verification
-      this.logger.log('Webhook signature verification enabled (Standard Webhooks format)');
+      this.logger.log(
+        'Webhook signature verification enabled (Standard Webhooks format)',
+      );
       return true;
     } catch (error) {
       this.logger.error('Error validating Polar webhook signature:', error);
@@ -390,7 +402,8 @@ export class PolarService {
     apiKeyConfigured: boolean;
     items: PolarCatalogLiveSlot[];
   }> {
-    const accessToken = this.configService.get<string>('polar.accessToken') || '';
+    const accessToken =
+      this.configService.get<string>('polar.accessToken') || '';
     const fetchedAt = new Date().toISOString();
     const slots = this.getConfiguredCatalogSlots();
 
@@ -424,16 +437,18 @@ export class PolarService {
           const prices = (result as any).prices || [];
           const price =
             prices.find(
-              (p: any) =>
-                p.amountType === 'fixed' && !p.isArchived,
+              (p: any) => p.amountType === 'fixed' && !p.isArchived,
             ) ||
             prices.find((p: any) => p.amountType === 'fixed') ||
             prices[0];
 
           // Polar stores fixed prices in minor units (cents)
           const amountCents = price?.priceAmount ?? price?.amount ?? 0;
-          const currencyCode =
-            (price?.priceCurrency || price?.currency || 'usd').toUpperCase();
+          const currencyCode = (
+            price?.priceCurrency ||
+            price?.currency ||
+            'usd'
+          ).toUpperCase();
           const amountMajor = amountCents / 100;
 
           return {
@@ -446,7 +461,8 @@ export class PolarService {
             ...slot,
             amountMajor: null,
             currencyCode: null,
-            error: e.message?.slice(0, 280) || 'Failed to fetch product from Polar',
+            error:
+              e.message?.slice(0, 280) || 'Failed to fetch product from Polar',
           } satisfies PolarCatalogLiveSlot;
         }
       }),
@@ -454,7 +470,7 @@ export class PolarService {
 
     const items = [...itemsParallel].sort((a, b) => {
       const planOrder = (p: PlanType) =>
-        ({ standard: 0, pro: 1, ultimate: 2 }[p]);
+        ({ standard: 0, pro: 1, ultimate: 2 })[p];
       const cyc = (c: BillingCycle) => (c === 'monthly' ? 0 : 1);
       const d = planOrder(a.planType) - planOrder(b.planType);
       if (d !== 0) return d;
@@ -466,21 +482,28 @@ export class PolarService {
 
   /** True when Polar API token is configured (launch-pricing sync always attempts when set). */
   isPolarApiConfigured(): boolean {
-    return Boolean(this.configService.get<string>('polar.accessToken')?.trim() && this.polar);
+    return Boolean(
+      this.configService.get<string>('polar.accessToken')?.trim() && this.polar,
+    );
   }
 
   /**
    * Whether admin saves should sync Polar catalog prices. Requires `POLAR_ACCESS_TOKEN`.
    */
   shouldSyncCatalogOnAdminSave(): boolean {
-    const accessToken = this.configService.get<string>('polar.accessToken') || '';
+    const accessToken =
+      this.configService.get<string>('polar.accessToken') || '';
     if (!accessToken) return false;
 
-    const master = this.configService.get<string | undefined>('polar.enableCatalogSync');
+    const master = this.configService.get<string | undefined>(
+      'polar.enableCatalogSync',
+    );
     if (master === 'false' || master === '0') return false;
     if (master === 'true' || master === '1') return true;
 
-    const explicit = this.configService.get<string | undefined>('polar.syncPricesOnAdminSave');
+    const explicit = this.configService.get<string | undefined>(
+      'polar.syncPricesOnAdminSave',
+    );
     if (explicit === 'false' || explicit === '0') return false;
     if (explicit === 'true' || explicit === '1') return true;
 
@@ -520,7 +543,8 @@ export class PolarService {
     planType: 'standard' | 'pro' | 'ultimate',
   ): { monthly: string; yearly: string } {
     // Use product IDs instead of price IDs - Polar checkout uses product IDs
-    const products = this.configService.get<Record<string, string>>('polar.products') || {};
+    const products =
+      this.configService.get<Record<string, string>>('polar.products') || {};
     const byPlan = {
       standard: {
         monthly: products.standardMonthly || '',
@@ -542,9 +566,10 @@ export class PolarService {
    * Get product IDs for discount restrictions
    * Discounts in Polar apply to products, not prices
    */
-  private getProductIdsForDiscount(
-    planType: 'standard' | 'pro' | 'ultimate',
-  ): { monthly: string; yearly: string } {
+  private getProductIdsForDiscount(planType: 'standard' | 'pro' | 'ultimate'): {
+    monthly: string;
+    yearly: string;
+  } {
     return this.getCatalogPriceIdsForPlan(planType);
   }
 
@@ -597,14 +622,22 @@ export class PolarService {
           continue;
         }
 
-        const amountMajor = this.launchUsdAmount(config, planType, billingCycle);
+        const amountMajor = this.launchUsdAmount(
+          config,
+          planType,
+          billingCycle,
+        );
         if (!Number.isFinite(amountMajor) || amountMajor <= 0) {
           skipped.push(`${planType}/${billingCycle}: invalid USD amount`);
           continue;
         }
 
         try {
-          await this.updateCatalogPrice(productId.trim(), amountMajor, currency);
+          await this.updateCatalogPrice(
+            productId.trim(),
+            amountMajor,
+            currency,
+          );
           synced += 1;
           this.logger.log(
             `Launch pricing Polar sync: ${planType} ${billingCycle} → ${amountMajor} ${currency} (product ${productId})`,
@@ -662,7 +695,8 @@ export class PolarService {
       return false;
     }
 
-    const accessToken = this.configService.get<string>('polar.accessToken') || '';
+    const accessToken =
+      this.configService.get<string>('polar.accessToken') || '';
     if (!accessToken) {
       this.logger.warn(
         'Polar catalog sync skipped: POLAR_ACCESS_TOKEN is not set (display pricing saved to database only).',
@@ -692,17 +726,23 @@ export class PolarService {
     }
 
     // Calculate effective amounts from display pricing
-    const monthlyMajor = baseTier.offerMonthly ?? baseTier.listMonthly ?? baseTier.monthly ?? 0;
-    const yearlyMajor = baseTier.offerYearly ?? baseTier.listYearly ?? baseTier.yearly ?? 0;
+    const monthlyMajor =
+      baseTier.offerMonthly ?? baseTier.listMonthly ?? baseTier.monthly ?? 0;
+    const yearlyMajor =
+      baseTier.offerYearly ?? baseTier.listYearly ?? baseTier.yearly ?? 0;
 
     try {
       // Update monthly price
       await this.updateCatalogPrice(ids.monthly, monthlyMajor, dc);
-      this.logger.log(`Updated monthly price for ${planType}: ${monthlyMajor} ${dc}`);
+      this.logger.log(
+        `Updated monthly price for ${planType}: ${monthlyMajor} ${dc}`,
+      );
 
       // Update yearly price
       await this.updateCatalogPrice(ids.yearly, yearlyMajor, dc);
-      this.logger.log(`Updated yearly price for ${planType}: ${yearlyMajor} ${dc}`);
+      this.logger.log(
+        `Updated yearly price for ${planType}: ${yearlyMajor} ${dc}`,
+      );
 
       this.logger.log(
         `Polar catalog prices updated for ${planType} (${dc} monthly=${monthlyMajor} yearly=${yearlyMajor}).`,
@@ -717,7 +757,9 @@ export class PolarService {
     }
   }
 
-  private async getOrderDetails(orderId: string): Promise<Record<string, any> | null> {
+  private async getOrderDetails(
+    orderId: string,
+  ): Promise<Record<string, any> | null> {
     if (!this.polar || !orderId) return null;
     try {
       const result = await this.polar.orders.get({ id: orderId });
@@ -809,7 +851,9 @@ export class PolarService {
 
     const result = mapping[priceOrProductId] || null;
     if (result) {
-      this.logger.debug(`Found mapping for "${priceOrProductId}": ${result.planType}/${result.billingCycle}`);
+      this.logger.debug(
+        `Found mapping for "${priceOrProductId}": ${result.planType}/${result.billingCycle}`,
+      );
     } else {
       this.logger.debug(`No mapping found for "${priceOrProductId}"`);
     }
@@ -850,13 +894,15 @@ export class PolarService {
     const productName =
       (typeof data?.product === 'object' && data?.product?.name
         ? String(data.product.name)
-        : null) ||
-      (data?.product_name ? String(data.product_name) : null);
+        : null) || (data?.product_name ? String(data.product_name) : null);
     const mappedFromName = this.resolvePlanFromProductName(productName);
 
-    const planType = customPlan || mappedFromId?.planType || mappedFromName?.planType;
+    const planType =
+      customPlan || mappedFromId?.planType || mappedFromName?.planType;
     const billingCycle =
-      customBilling || mappedFromId?.billingCycle || mappedFromName?.billingCycle;
+      customBilling ||
+      mappedFromId?.billingCycle ||
+      mappedFromName?.billingCycle;
 
     if (!userId || !planType || !billingCycle) return null;
     return { userId, planType, billingCycle };
@@ -870,14 +916,16 @@ export class PolarService {
       const result = await this.polar.subscriptions.get({ id: subscriptionId });
       const sub = result as Record<string, unknown>;
       // Debug logging to understand Polar's response structure
-      this.logger.debug(`Polar subscription ${subscriptionId} response: ${JSON.stringify({
-        hasProduct: !!sub?.product,
-        productType: typeof sub?.product,
-        productId: (sub?.product as { id?: string })?.id,
-        productName: (sub?.product as { name?: string })?.name,
-        directProductId: sub?.product_id,
-        directPriceId: sub?.price_id,
-      })}`);
+      this.logger.debug(
+        `Polar subscription ${subscriptionId} response: ${JSON.stringify({
+          hasProduct: !!sub?.product,
+          productType: typeof sub?.product,
+          productId: (sub?.product as { id?: string })?.id,
+          productName: (sub?.product as { name?: string })?.name,
+          directProductId: sub?.product_id,
+          directPriceId: sub?.price_id,
+        })}`,
+      );
 
       // Try multiple paths to extract the product/price ID
       const productId =
@@ -887,14 +935,16 @@ export class PolarService {
 
       const priceId =
         (sub?.price_id as string | undefined) ||
-        ((sub?.price as { id?: string })?.id) ||
+        (sub?.price as { id?: string })?.id ||
         null;
 
       // Try mapping from product ID first (Polar uses product-centric model)
       if (productId) {
         const mapped = this.resolvePriceMapping(String(productId));
         if (mapped) {
-          this.logger.debug(`Resolved plan from product_id: ${productId} -> ${mapped.planType}/${mapped.billingCycle}`);
+          this.logger.debug(
+            `Resolved plan from product_id: ${productId} -> ${mapped.planType}/${mapped.billingCycle}`,
+          );
           return mapped;
         }
       }
@@ -903,7 +953,9 @@ export class PolarService {
       if (priceId) {
         const mapped = this.resolvePriceMapping(String(priceId));
         if (mapped) {
-          this.logger.debug(`Resolved plan from price_id: ${priceId} -> ${mapped.planType}/${mapped.billingCycle}`);
+          this.logger.debug(
+            `Resolved plan from price_id: ${priceId} -> ${mapped.planType}/${mapped.billingCycle}`,
+          );
           return mapped;
         }
       }
@@ -913,7 +965,9 @@ export class PolarService {
       if (anyId) {
         const mapped = this.resolvePriceMapping(String(anyId));
         if (mapped) {
-          this.logger.debug(`Resolved plan from any_id: ${anyId} -> ${mapped.planType}/${mapped.billingCycle}`);
+          this.logger.debug(
+            `Resolved plan from any_id: ${anyId} -> ${mapped.planType}/${mapped.billingCycle}`,
+          );
           return mapped;
         }
       }
@@ -923,20 +977,29 @@ export class PolarService {
         (sub?.product as { name?: string } | undefined)?.name ||
         (sub?.product_name as string | undefined);
 
-      this.logger.debug(`Attempting to resolve plan from product name: ${productName}`);
+      this.logger.debug(
+        `Attempting to resolve plan from product name: ${productName}`,
+      );
       const fromName = this.resolvePlanFromProductName(
         productName ? String(productName) : null,
       );
 
       if (fromName) {
-        this.logger.debug(`Resolved plan from product name: ${fromName.planType}/${fromName.billingCycle}`);
+        this.logger.debug(
+          `Resolved plan from product name: ${fromName.planType}/${fromName.billingCycle}`,
+        );
         return fromName;
       }
 
-      this.logger.warn(`Could not resolve plan from subscription ${subscriptionId}. productId=${productId}, priceId=${priceId}, productName=${productName}`);
+      this.logger.warn(
+        `Could not resolve plan from subscription ${subscriptionId}. productId=${productId}, priceId=${priceId}, productName=${productName}`,
+      );
       return null;
     } catch (error) {
-      this.logger.error(`Error resolving plan from subscription ${subscriptionId}:`, error);
+      this.logger.error(
+        `Error resolving plan from subscription ${subscriptionId}:`,
+        error,
+      );
       return null;
     }
   }
@@ -955,7 +1018,8 @@ export class PolarService {
 
     // Check for recent API changes to avoid race condition
     // Gracefully handle case where columns don't exist yet
-    let existing: { last_updated_by?: string; changed_at?: string } | null = null;
+    let existing: { last_updated_by?: string; changed_at?: string } | null =
+      null;
     try {
       const { data } = await this.supabaseService
         .getServiceClient()
@@ -1097,23 +1161,12 @@ export class PolarService {
 
     const details = await this.getOrderDetails(orderId);
 
-    const invoiceUrl =
-      details?.invoice_url ||
-      data?.invoice_url ||
-      null;
+    const invoiceUrl = details?.invoice_url || data?.invoice_url || null;
     const invoiceNumber =
-      details?.invoice_number ||
-      data?.invoice_number ||
-      orderId;
-    const amountRaw =
-      details?.amount ||
-      data?.amount ||
-      '0';
+      details?.invoice_number || data?.invoice_number || orderId;
+    const amountRaw = details?.amount || data?.amount || '0';
     const amount = this.toMajorAmount(amountRaw);
-    const currency =
-      details?.currency ||
-      data?.currency ||
-      'USD';
+    const currency = details?.currency || data?.currency || 'USD';
 
     let minioPath: string | null = null;
     let minioUrl: string | null = null;
@@ -1153,8 +1206,7 @@ export class PolarService {
           invoice_url: invoiceUrl,
           minio_path: minioPath,
           minio_url: minioUrl,
-          issued_at:
-            data?.created_at || new Date().toISOString(),
+          issued_at: data?.created_at || new Date().toISOString(),
           metadata: {
             webhook: data,
             order_details: details,
@@ -1164,7 +1216,8 @@ export class PolarService {
         { onConflict: 'polar_order_id' },
       );
 
-    const paymentMethod = data?.payment_method || (details as any)?.payment_method;
+    const paymentMethod =
+      data?.payment_method || (details as any)?.payment_method;
     if (paymentMethod) {
       await this.supabaseService
         .getServiceClient()
@@ -1194,9 +1247,8 @@ export class PolarService {
   async handleWebhook(event: PolarWebhookEvent): Promise<void> {
     if (event.type === 'customer.created') {
       const customer = event.data || {};
-      const polarCustomerId = this.extractPolarCustomerIdFromWebhookData(
-        customer,
-      );
+      const polarCustomerId =
+        this.extractPolarCustomerIdFromWebhookData(customer);
       const userId =
         (customer.external_id as string | undefined) ||
         (customer.externalId as string | undefined) ||
@@ -1253,18 +1305,15 @@ export class PolarService {
         event.data?.subscription?.id ||
         event.data?.subscription_id ||
         (event.data?.id as string | undefined) ||
-        (event.data?.data as any)?.subscription_id;
+        event.data?.data?.subscription_id;
       let mappedFromSubscription =
         await this.resolvePlanFromSubscription(subscriptionId);
       if (!mappedFromSubscription) {
         const productName =
-          (typeof event.data?.product === 'object' &&
-            event.data?.product?.name
+          (typeof event.data?.product === 'object' && event.data?.product?.name
             ? String(event.data.product.name)
             : null) ||
-          (event.data?.product_name
-            ? String(event.data.product_name)
-            : null);
+          (event.data?.product_name ? String(event.data.product_name) : null);
         mappedFromSubscription = this.resolvePlanFromProductName(productName);
       }
       if (mappedFromSubscription) {
@@ -1309,7 +1358,9 @@ export class PolarService {
     ]);
 
     const orderStatus = String(event.data?.status || '').toLowerCase();
-    const subscriptionStatus = String(event.data?.subscription?.status || '').toLowerCase();
+    const subscriptionStatus = String(
+      event.data?.subscription?.status || '',
+    ).toLowerCase();
 
     const polarCustomerId =
       this.extractPolarCustomerIdFromWebhookData(event.data || {}) || null;
@@ -1332,8 +1383,10 @@ export class PolarService {
       event.data?.timestamp ||
       null;
 
-    if (activeEvents.has(event.type) ||
-        (event.type === 'order.created' && orderStatus === 'paid')) {
+    if (
+      activeEvents.has(event.type) ||
+      (event.type === 'order.created' && orderStatus === 'paid')
+    ) {
       await this.upsertUserSubscription(
         effective.userId,
         effective.planType,
@@ -1354,8 +1407,11 @@ export class PolarService {
       return;
     }
 
-    if (deactivateEvents.has(event.type) ||
-        (event.type === 'subscription.canceled' && subscriptionStatus === 'canceled')) {
+    if (
+      deactivateEvents.has(event.type) ||
+      (event.type === 'subscription.canceled' &&
+        subscriptionStatus === 'canceled')
+    ) {
       await this.upsertUserSubscription(
         effective.userId,
         effective.planType,
@@ -1435,7 +1491,9 @@ export class PolarService {
 
     try {
       if (subscriptionId) {
-        const result = await this.polar.subscriptions.get({ id: subscriptionId });
+        const result = await this.polar.subscriptions.get({
+          id: subscriptionId,
+        });
         const paymentMethod = (result as any)?.payment_method;
         if (paymentMethod?.card_last_four) {
           return `Card ending in ${paymentMethod.card_last_four}`;
@@ -1471,9 +1529,7 @@ export class PolarService {
   /**
    * Get invoice download URL for an order
    */
-  async getOrderInvoiceUrl(
-    orderId: string,
-  ): Promise<string | null> {
+  async getOrderInvoiceUrl(orderId: string): Promise<string | null> {
     if (!this.polar) return null;
     try {
       const result = await this.polar.orders.get({ id: orderId });
@@ -1550,7 +1606,8 @@ export class PolarService {
     }
 
     const priceIds = this.getCatalogPriceIdsForPlan(params.planType);
-    const productId = params.billingCycle === 'monthly' ? priceIds.monthly : priceIds.yearly;
+    const productId =
+      params.billingCycle === 'monthly' ? priceIds.monthly : priceIds.yearly;
 
     if (!productId) {
       throw new BadRequestException(
@@ -1580,8 +1637,7 @@ export class PolarService {
         returnUrl: params.cancelUrl,
         discountId: params.discountId ?? undefined,
         allowDiscountCodes:
-          params.allowDiscountCodes ??
-          (params.discountId ? false : true),
+          params.allowDiscountCodes ?? (params.discountId ? false : true),
         // Polar defaults allowTrial to true; disable when trial was already consumed.
         allowTrial: params.allowTrial ?? false,
         externalCustomerId: params.userId.trim(),
@@ -1665,12 +1721,20 @@ export class PolarService {
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       // ResourceNotFound indicates the subscription doesn't exist in this environment
-      if (message.includes('ResourceNotFound') || message.includes('NotFound') || message.includes('not found')) {
-        this.logger.warn(`Subscription ${subscriptionId} not found in current Polar environment (likely sandbox/production mismatch)`);
+      if (
+        message.includes('ResourceNotFound') ||
+        message.includes('NotFound') ||
+        message.includes('not found')
+      ) {
+        this.logger.warn(
+          `Subscription ${subscriptionId} not found in current Polar environment (likely sandbox/production mismatch)`,
+        );
         return false;
       }
       // Other errors are treated as "exists but there's another problem"
-      this.logger.warn(`Error checking subscription ${subscriptionId}: ${message}`);
+      this.logger.warn(
+        `Error checking subscription ${subscriptionId}: ${message}`,
+      );
       return true;
     }
   }
@@ -1710,7 +1774,9 @@ export class PolarService {
         throw e;
       }
       const message =
-        e instanceof Error ? e.message : 'Failed to update subscription on Polar';
+        e instanceof Error
+          ? e.message
+          : 'Failed to update subscription on Polar';
       this.logger.error(`Failed to change subscription plan: ${message}`, e);
       throw new BadGatewayException(message);
     }
@@ -1727,7 +1793,9 @@ export class PolarService {
       throw new BadGatewayException('Polar SDK is not initialized');
     }
     if (!userId?.trim()) {
-      throw new BadRequestException('User id is required for Polar customer portal');
+      throw new BadRequestException(
+        'User id is required for Polar customer portal',
+      );
     }
 
     try {
@@ -1739,16 +1807,24 @@ export class PolarService {
         'customer portal session',
       );
       if (!session.customerPortalUrl) {
-        throw new BadGatewayException('Polar did not return a customer portal URL');
+        throw new BadGatewayException(
+          'Polar did not return a customer portal URL',
+        );
       }
       return session.customerPortalUrl;
     } catch (e: unknown) {
-      if (e instanceof BadGatewayException || e instanceof BadRequestException) {
+      if (
+        e instanceof BadGatewayException ||
+        e instanceof BadRequestException
+      ) {
         throw e;
       }
       const message =
         e instanceof Error ? e.message : 'Failed to open Polar customer portal';
-      this.logger.error(`Failed to create customer portal session: ${message}`, e);
+      this.logger.error(
+        `Failed to create customer portal session: ${message}`,
+        e,
+      );
       throw new BadGatewayException(message);
     }
   }
@@ -1769,7 +1845,9 @@ export class PolarService {
       });
     } catch (e: unknown) {
       const message =
-        e instanceof Error ? e.message : 'Failed to cancel subscription on Polar';
+        e instanceof Error
+          ? e.message
+          : 'Failed to cancel subscription on Polar';
       this.logger.error(`Failed to cancel subscription: ${message}`, e);
       throw new BadGatewayException(message);
     }
@@ -1780,14 +1858,18 @@ export class PolarService {
    */
   async getCustomerPortalUrl(customerId: string): Promise<string | null> {
     try {
-      const baseUrl = this.isProduction() ? 'https://polar.sh' : 'https://sandbox.polar.sh';
+      const baseUrl = this.isProduction()
+        ? 'https://polar.sh'
+        : 'https://sandbox.polar.sh';
       return `${baseUrl}/customer/${customerId}`;
     } catch {
       return null;
     }
   }
 
-  private async recordDiscountRedemption(polarDiscountId: string): Promise<void> {
+  private async recordDiscountRedemption(
+    polarDiscountId: string,
+  ): Promise<void> {
     const { data: row } = await this.supabaseService
       .getServiceClient()
       .from('discount_codes')
@@ -1813,19 +1895,29 @@ export class PolarService {
     planTypes: string[] | null,
     billingCycles: string[] | null,
   ): string[] | null {
-    const products = this.configService.get<Record<string, string>>('polar.products') || {};
+    const products =
+      this.configService.get<Record<string, string>>('polar.products') || {};
     const slots: Array<{ plan: PlanType; cycle: BillingCycle; id: string }> = [
-      { plan: 'standard', cycle: 'monthly', id: products.standardMonthly || '' },
+      {
+        plan: 'standard',
+        cycle: 'monthly',
+        id: products.standardMonthly || '',
+      },
       { plan: 'standard', cycle: 'yearly', id: products.standardYearly || '' },
       { plan: 'pro', cycle: 'monthly', id: products.proMonthly || '' },
       { plan: 'pro', cycle: 'yearly', id: products.proYearly || '' },
-      { plan: 'ultimate', cycle: 'monthly', id: products.ultimateMonthly || '' },
+      {
+        plan: 'ultimate',
+        cycle: 'monthly',
+        id: products.ultimateMonthly || '',
+      },
       { plan: 'ultimate', cycle: 'yearly', id: products.ultimateYearly || '' },
     ];
     const filtered = slots.filter((s) => {
       if (!s.id?.trim()) return false;
       if (planTypes?.length && !planTypes.includes(s.plan)) return false;
-      if (billingCycles?.length && !billingCycles.includes(s.cycle)) return false;
+      if (billingCycles?.length && !billingCycles.includes(s.cycle))
+        return false;
       return true;
     });
     const ids = [...new Set(filtered.map((s) => s.id.trim()))];
@@ -1969,7 +2061,7 @@ export class PolarService {
 
     const updated = await this.polar.discounts.update({
       id: row.polar_discount_id,
-      discountUpdate: patch as any,
+      discountUpdate: patch,
     });
     const id = (updated as any)?.id || row.polar_discount_id;
     this.logger.log(`Updated Polar discount ${id} for code ${row.code}`);

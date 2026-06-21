@@ -44,9 +44,7 @@ export class ImmediatePostPublishService {
     private readonly webhookDispatcher: WebhookDispatcherService,
   ) {}
 
-  async publishImmediate(
-    params: ImmediatePublishParams,
-  ): Promise<{
+  async publishImmediate(params: ImmediatePublishParams): Promise<{
     success: boolean;
     postId: string;
     message: string;
@@ -146,7 +144,9 @@ export class ImmediatePostPublishService {
       : hasValidImage
         ? 'image'
         : 'text';
-    const creditCost = postNowCost(publishContentType, { pdf: Boolean(pdfUrl) });
+    const creditCost = postNowCost(publishContentType, {
+      pdf: Boolean(pdfUrl),
+    });
 
     const hasQuota = await this.quotaService.checkQuotaAvailable(
       userId,

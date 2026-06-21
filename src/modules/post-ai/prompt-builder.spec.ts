@@ -39,7 +39,7 @@ describe('buildCustomTopicPrompt / off-topic instructions', () => {
         topic: 'how are you today',
         tonality: 'professional',
         wordLimit: { kind: 'short' },
-      } as PostGenerationInput,
+      },
       resolveWordLimit({ kind: 'short' }),
       getTonalityGuide('professional'),
       null,

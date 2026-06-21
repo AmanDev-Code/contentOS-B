@@ -100,7 +100,10 @@ export class GenerationService {
     // Check quota and consume credits immediately (no more test user exception).
     // Cost from the single source of truth (credit-costs.ts).
     const legacyCost = CREDIT_COSTS.legacyGenerate;
-    const hasQuota = await this.quotaService.checkQuotaAvailable(userId, legacyCost);
+    const hasQuota = await this.quotaService.checkQuotaAvailable(
+      userId,
+      legacyCost,
+    );
     if (!hasQuota) {
       throw new BadRequestException(
         `Insufficient credits. Content generation requires ${legacyCost} credits. Please upgrade your plan.`,
@@ -523,12 +526,18 @@ export class GenerationService {
         const prefs = bullJob.data?.preferences;
         const creditSlices: CreditSlice[] = prefs?.creditSlices ?? [];
         if (creditSlices.length > 0) {
-          await this.customTopicCreditService.refundAllSlices(userId, jobId, creditSlices);
+          await this.customTopicCreditService.refundAllSlices(
+            userId,
+            jobId,
+            creditSlices,
+          );
           refunded = true;
         }
         await bullJob.remove().catch(() => undefined);
       }
-    } catch { /* best effort queue cleanup */ }
+    } catch {
+      /* best effort queue cleanup */
+    }
 
     if (!refunded) {
       await this.refundGenerationCredits(userId, jobId, 'Cancelled by user');
@@ -584,8 +593,11 @@ export class GenerationService {
   private async enforceInFlightLimit(userId: string): Promise<void> {
     // Default to 5 minutes (300000ms) to match n8n workflow timeout.
     // Can be increased via GENERATION_ACTIVE_STALE_MS env var for long-running jobs.
-    const staleAfterMs = Number(process.env.GENERATION_ACTIVE_STALE_MS || '300000');
-    const existingJobs = await this.generationJobRepository.findByUserId(userId);
+    const staleAfterMs = Number(
+      process.env.GENERATION_ACTIVE_STALE_MS || '300000',
+    );
+    const existingJobs =
+      await this.generationJobRepository.findByUserId(userId);
     const activeJobs = existingJobs.filter(
       (j) =>
         j.status === JobStatus.GENERATING ||
@@ -595,23 +607,28 @@ export class GenerationService {
 
     let cleanedCount = 0;
     for (const staleCandidate of activeJobs) {
-      const createdAtMs = new Date(staleCandidate.createdAt as any).getTime();
+      const createdAtMs = new Date(staleCandidate.createdAt).getTime();
       const ageMs = Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : 0;
       if (ageMs > staleAfterMs) {
         // Atomic guard: skip if the worker has already finalized the row.
         // See `updateErrorIfStillActive` for rationale.
-        const updated = await this.generationJobRepository.updateErrorIfStillActive(
-          staleCandidate.id,
-          `Auto-failed stale active job after ${Math.round(ageMs / 1000)}s without completion (n8n callback timeout)`,
-          staleCandidate.retryCount || 0,
-        );
+        const updated =
+          await this.generationJobRepository.updateErrorIfStillActive(
+            staleCandidate.id,
+            `Auto-failed stale active job after ${Math.round(ageMs / 1000)}s without completion (n8n callback timeout)`,
+            staleCandidate.retryCount || 0,
+          );
         if (updated) {
           cleanedCount++;
           this.logger.warn(
             `Cleaned up stale job ${staleCandidate.id} for user ${userId} (age=${Math.round(ageMs / 1000)}s, threshold=${Math.round(staleAfterMs / 1000)}s)`,
           );
           // Refund credits for the stale job
-          await this.refundGenerationCredits(userId, staleCandidate.id, 'stale job timeout');
+          await this.refundGenerationCredits(
+            userId,
+            staleCandidate.id,
+            'stale job timeout',
+          );
         }
       }
     }
@@ -623,7 +640,7 @@ export class GenerationService {
     }
 
     const liveCount = activeJobs.filter((j) => {
-      const createdAtMs = new Date(j.createdAt as any).getTime();
+      const createdAtMs = new Date(j.createdAt).getTime();
       const ageMs = Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : 0;
       return ageMs <= staleAfterMs;
     }).length;
@@ -719,9 +736,10 @@ export class GenerationService {
     const customMeta = (pp?.customTopicMeta ?? {}) as Record<string, unknown>;
     const hasCustomMeta = Boolean(
       customMeta.contentType ||
-        (Array.isArray(customMeta.imagePrompts) && customMeta.imagePrompts.length > 0) ||
-        (Array.isArray(customMeta.slides) && customMeta.slides.length > 0) ||
-        String(customMeta.topic ?? '').trim(),
+      (Array.isArray(customMeta.imagePrompts) &&
+        customMeta.imagePrompts.length > 0) ||
+      (Array.isArray(customMeta.slides) && customMeta.slides.length > 0) ||
+      String(customMeta.topic ?? '').trim(),
     );
     if ((content as any).source !== 'custom' && !hasCustomMeta) {
       throw new BadRequestException(
@@ -732,7 +750,8 @@ export class GenerationService {
     let topic = String(customMeta.topic ?? '').trim();
     if (!topic) {
       const body = String((content as any).content || '');
-      const withoutFooter = body.split(/\n\n— Generated by/)[0]?.trim() ?? body.trim();
+      const withoutFooter =
+        body.split(/\n\n— Generated by/)[0]?.trim() ?? body.trim();
       topic =
         withoutFooter.split(/(?<=[.!?])\s+/)[0]?.trim() ||
         withoutFooter.slice(0, 300).trim();
@@ -752,11 +771,11 @@ export class GenerationService {
     const imageCount =
       typeof customMeta.imageCount === 'number'
         ? customMeta.imageCount
-        : imagePrompts?.length ?? 1;
+        : (imagePrompts?.length ?? 1);
     const slideCount =
       typeof customMeta.slideCount === 'number'
         ? customMeta.slideCount
-        : slides?.length ?? 2;
+        : (slides?.length ?? 2);
 
     const creditSlices = buildCreditSlices(contentType, imageCount, slideCount);
     const totalCost = calculateTotalCredits(
@@ -803,7 +822,8 @@ export class GenerationService {
       jobType: 'custom_topic' as const,
       contentType,
       topic,
-      platform: (customMeta.platform as 'linkedin' | 'instagram' | 'x') ?? 'linkedin',
+      platform:
+        (customMeta.platform as 'linkedin' | 'instagram' | 'x') ?? 'linkedin',
       tonality: String(customMeta.tonality ?? 'professional'),
       wordLimit: (customMeta.wordLimit as { kind: string; words?: number }) ?? {
         kind: 'medium',
@@ -879,19 +899,28 @@ export class GenerationService {
       throw new BadRequestException('Unauthorized');
     }
 
-    const pp = (content as any).performance_prediction as Record<string, unknown> | undefined;
-    const customMeta = pp?.customTopicMeta as Record<string, unknown> | undefined;
+    const pp = (content as any).performance_prediction as
+      | Record<string, unknown>
+      | undefined;
+    const customMeta = pp?.customTopicMeta as
+      | Record<string, unknown>
+      | undefined;
 
     if (regenerationType === 'carousel') {
       const slides = customMeta?.slides as unknown[] | undefined;
       if (!slides || slides.length === 0) {
-        throw new BadRequestException('No carousel slides found in content to regenerate');
+        throw new BadRequestException(
+          'No carousel slides found in content to regenerate',
+        );
       }
 
       const slideCount = slides.length;
       const creditsCost = regenerateCarouselCost(slideCount);
 
-      const hasQuota = await this.quotaService.checkQuotaAvailable(userId, creditsCost);
+      const hasQuota = await this.quotaService.checkQuotaAvailable(
+        userId,
+        creditsCost,
+      );
       if (!hasQuota) {
         throw new BadRequestException(
           `Insufficient credits. Regenerating ${slideCount} slides requires ${creditsCost} credits.`,
@@ -911,10 +940,18 @@ export class GenerationService {
       }
 
       try {
-        await this.customTopicCreditService.reserveCredits(userId, job.id, creditSlices);
+        await this.customTopicCreditService.reserveCredits(
+          userId,
+          job.id,
+          creditSlices,
+        );
       } catch (err) {
         const rawMsg = err instanceof Error ? err.message : String(err);
-        await this.generationJobRepository.updateError(job.id, `Credit reservation failed: ${rawMsg}`, 0);
+        await this.generationJobRepository.updateError(
+          job.id,
+          `Credit reservation failed: ${rawMsg}`,
+          0,
+        );
         throw this.mapCustomTopicCreditReservationError(err);
       }
 
@@ -928,7 +965,10 @@ export class GenerationService {
           userId,
           originalContentId: contentId,
           slides,
-          carouselVisualStyle: customMeta?.carouselVisualStyleResolved ?? customMeta?.carouselVisualStyleRequested ?? 'handwritten_notebook',
+          carouselVisualStyle:
+            customMeta?.carouselVisualStyleResolved ??
+            customMeta?.carouselVisualStyleRequested ??
+            'handwritten_notebook',
           carouselNoteDensity: customMeta?.carouselNoteDensity ?? 'standard',
           carouselDocumentMode: customMeta?.carouselDocumentMode,
           carouselDocumentTheme: customMeta?.carouselDocumentTheme,
@@ -953,13 +993,18 @@ export class GenerationService {
     if (regenerationType === 'images') {
       const imagePrompts = customMeta?.imagePrompts as string[] | undefined;
       if (!imagePrompts || imagePrompts.length === 0) {
-        throw new BadRequestException('No image prompts found in content to regenerate');
+        throw new BadRequestException(
+          'No image prompts found in content to regenerate',
+        );
       }
 
       const imageCount = imagePrompts.length;
       const creditsCost = regenerateAllImagesCost(imageCount);
 
-      const hasQuota = await this.quotaService.checkQuotaAvailable(userId, creditsCost);
+      const hasQuota = await this.quotaService.checkQuotaAvailable(
+        userId,
+        creditsCost,
+      );
       if (!hasQuota) {
         throw new BadRequestException(
           `Insufficient credits. Regenerating ${imageCount} images requires ${creditsCost} credits.`,
@@ -979,10 +1024,18 @@ export class GenerationService {
       }
 
       try {
-        await this.customTopicCreditService.reserveCredits(userId, job.id, creditSlices);
+        await this.customTopicCreditService.reserveCredits(
+          userId,
+          job.id,
+          creditSlices,
+        );
       } catch (err) {
         const rawMsg = err instanceof Error ? err.message : String(err);
-        await this.generationJobRepository.updateError(job.id, `Credit reservation failed: ${rawMsg}`, 0);
+        await this.generationJobRepository.updateError(
+          job.id,
+          `Credit reservation failed: ${rawMsg}`,
+          0,
+        );
         throw this.mapCustomTopicCreditReservationError(err);
       }
 
@@ -1038,7 +1091,9 @@ export class GenerationService {
     },
   ): Promise<{ jobId: string; estimatedCost: number; message: string }> {
     if (!Number.isInteger(imageIndex) || imageIndex < 0) {
-      throw new BadRequestException('imageIndex must be a non-negative integer');
+      throw new BadRequestException(
+        'imageIndex must be a non-negative integer',
+      );
     }
 
     const content = await this.generatedContentRepository.findById(contentId);
@@ -1052,12 +1107,15 @@ export class GenerationService {
     const pp = (content as any).performance_prediction as
       | Record<string, unknown>
       | undefined;
-    const customMeta = pp?.customTopicMeta as Record<string, unknown> | undefined;
-    const imagePrompts = (customMeta?.imagePrompts as string[] | undefined) ?? [];
+    const customMeta = pp?.customTopicMeta as
+      | Record<string, unknown>
+      | undefined;
+    const imagePrompts =
+      (customMeta?.imagePrompts as string[] | undefined) ?? [];
     const hasCustomMeta = Boolean(
       customMeta?.contentType ||
-        imagePrompts.length > 0 ||
-        String(customMeta?.topic ?? '').trim(),
+      imagePrompts.length > 0 ||
+      String(customMeta?.topic ?? '').trim(),
     );
     if ((content as any).source !== 'custom' && !hasCustomMeta) {
       throw new BadRequestException(
@@ -1068,7 +1126,8 @@ export class GenerationService {
     let topic = String(customMeta?.topic ?? '').trim();
     if (!topic) {
       const body = String((content as any).content || '');
-      const withoutFooter = body.split(/\n\n— Generated by/)[0]?.trim() ?? body.trim();
+      const withoutFooter =
+        body.split(/\n\n— Generated by/)[0]?.trim() ?? body.trim();
       topic =
         withoutFooter.split(/(?<=[.!?])\s+/)[0]?.trim() ||
         withoutFooter.slice(0, 300).trim();
@@ -1091,7 +1150,8 @@ export class GenerationService {
       );
     }
 
-    const platform = (customMeta?.platform as 'linkedin' | 'instagram' | 'x') ?? 'linkedin';
+    const platform =
+      (customMeta?.platform as 'linkedin' | 'instagram' | 'x') ?? 'linkedin';
     const includeBrandKit =
       opts?.includeBrandKit !== undefined
         ? opts.includeBrandKit
@@ -1201,7 +1261,9 @@ export class GenerationService {
     const pp = (content as any).performance_prediction as
       | Record<string, unknown>
       | undefined;
-    const customMeta = pp?.customTopicMeta as Record<string, unknown> | undefined;
+    const customMeta = pp?.customTopicMeta as
+      | Record<string, unknown>
+      | undefined;
     const slides = customMeta?.slides as unknown[] | undefined;
     if (!slides || slides.length === 0) {
       throw new BadRequestException(
@@ -1309,7 +1371,10 @@ export class GenerationService {
     const creditsCost = CREDIT_COSTS.aiTextFormatting;
 
     // Check if user has enough credits
-    const hasQuota = await this.quotaService.checkQuotaAvailable(userId, creditsCost);
+    const hasQuota = await this.quotaService.checkQuotaAvailable(
+      userId,
+      creditsCost,
+    );
     if (!hasQuota) {
       throw new HttpException(
         {

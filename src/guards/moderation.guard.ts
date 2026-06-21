@@ -24,8 +24,7 @@ export class ModerationGuard implements CanActivate {
     const body = request.body as Record<string, unknown> | undefined;
 
     const topic =
-      (body?.topic as string | undefined) ??
-      (body?.text as string | undefined);
+      (body?.topic as string | undefined) ?? (body?.text as string | undefined);
 
     if (!topic || typeof topic !== 'string') {
       return true;
@@ -43,7 +42,9 @@ export class ModerationGuard implements CanActivate {
       this.moderationService
         .recordStrike(userId, topic, result.matches, 'api')
         .catch((err) =>
-          this.logger.error(`Failed to record moderation strike: ${err.message}`),
+          this.logger.error(
+            `Failed to record moderation strike: ${err.message}`,
+          ),
         );
     }
 

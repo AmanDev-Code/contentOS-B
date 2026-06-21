@@ -132,16 +132,20 @@ export class PlatformUsersController {
 
   @Get('metrics/dashboard')
   @ApiOperation({
-    summary: 'Summary + daily series for charts (staff); requires DB fn when deployed',
+    summary:
+      'Summary + daily series for charts (staff); requires DB fn when deployed',
   })
   async metricsDashboard(@Query('days') days?: string) {
     const d = Math.min(90, Math.max(1, parseInt(days || '30', 10) || 30));
     const summary = await this.metricsSummaryPayload();
 
     const client = this.supabaseService.getServiceClient();
-    const { data: tsRaw, error } = await client.rpc('admin_metrics_timeseries_agg', {
-      p_days: d,
-    });
+    const { data: tsRaw, error } = await client.rpc(
+      'admin_metrics_timeseries_agg',
+      {
+        p_days: d,
+      },
+    );
 
     let signupsByDay: { date: string; count: number }[] = [];
     let feedbackByDay: { date: string; count: number }[] = [];
@@ -188,9 +192,7 @@ export class PlatformUsersController {
 
     if (term.length > 0) {
       const safe = term.replace(/%/g, '').slice(0, 80);
-      query = query.or(
-        `username.ilike.%${safe}%,full_name.ilike.%${safe}%`,
-      );
+      query = query.or(`username.ilike.%${safe}%,full_name.ilike.%${safe}%`);
     }
 
     const { data, error, count } = await query;
@@ -199,7 +201,9 @@ export class PlatformUsersController {
     }
 
     const rows = data || [];
-    const quotaMap = await this.quotasForUserIds(rows.map((r) => r.id as string));
+    const quotaMap = await this.quotasForUserIds(
+      rows.map((r) => r.id as string),
+    );
     const items = rows.map((row) => {
       const q = quotaMap.get(row.id as string) ?? this.freeQuotaFallback();
       return {
@@ -217,7 +221,9 @@ export class PlatformUsersController {
   }
 
   @Get(':userId/billing')
-  @ApiOperation({ summary: 'Invoice rows persisted from billing webhooks (staff)' })
+  @ApiOperation({
+    summary: 'Invoice rows persisted from billing webhooks (staff)',
+  })
   async userBilling(@Param('userId') userId: string) {
     const { data, error } = await this.supabaseService
       .getServiceClient()
@@ -241,7 +247,9 @@ export class PlatformUsersController {
 
   @Patch(':userId/credits')
   @UseGuards(AdminGuard)
-  @ApiOperation({ summary: 'Adjust credits (+/-); notifies user in-app (super-admin)' })
+  @ApiOperation({
+    summary: 'Adjust credits (+/-); notifies user in-app (super-admin)',
+  })
   async adjustCredits(
     @Param('userId') userId: string,
     @Body() body: { delta?: number; reason?: string },
@@ -276,11 +284,17 @@ export class PlatformUsersController {
     // touch any bucket, so it no longer affected the displayed balance).
     if (delta > 0) {
       // Positive grant -> never-expiring REWARD bucket (operation_type 'admin_grant').
-      await this.quotaService.grantCredits(userId, delta, description, 'admin_grant', {
-        source: 'admin',
-        admin_id: adminId,
-        reason: reason || undefined,
-      });
+      await this.quotaService.grantCredits(
+        userId,
+        delta,
+        description,
+        'admin_grant',
+        {
+          source: 'admin',
+          admin_id: adminId,
+          reason: reason || undefined,
+        },
+      );
     } else {
       // Negative adjustment/correction -> bucket-aware debit (deducts trial -> plan
       // -> reward), recorded as operation_type 'admin_adjustment'.
@@ -327,7 +341,7 @@ export class PlatformUsersController {
     const resetIso =
       quota.resetDate instanceof Date
         ? quota.resetDate.toISOString()
-        : new Date(quota.resetDate as unknown as string).toISOString();
+        : new Date(quota.resetDate).toISOString();
 
     return {
       success: true,
@@ -497,7 +511,7 @@ export class PlatformUsersController {
     const resetIso =
       quota.resetDate instanceof Date
         ? quota.resetDate.toISOString()
-        : new Date(quota.resetDate as unknown as string).toISOString();
+        : new Date(quota.resetDate).toISOString();
 
     return {
       profile,
@@ -554,12 +568,10 @@ export class PlatformUsersController {
   @Delete(':userId')
   @UseGuards(AdminGuard)
   @ApiOperation({
-    summary: 'Delete a user completely (super-admin). Cascades to all related data.',
+    summary:
+      'Delete a user completely (super-admin). Cascades to all related data.',
   })
-  async deleteUser(
-    @Request() req: AuthReq,
-    @Param('userId') userId: string,
-  ) {
+  async deleteUser(@Request() req: AuthReq, @Param('userId') userId: string) {
     if (req.user.id === userId) {
       throw new ForbiddenException('Cannot delete your own account');
     }

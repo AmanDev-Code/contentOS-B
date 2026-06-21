@@ -21,9 +21,9 @@ describe('linkedin-publish-text length validation', () => {
     const body = 'b'.repeat(LINKEDIN_MAX_TEXT_LENGTH);
     const hashtags = ['#Overflow'];
 
-    expect(() =>
-      assertLinkedInCommentaryWithinLimit(body, hashtags),
-    ).toThrow(/3000-character limit/);
+    expect(() => assertLinkedInCommentaryWithinLimit(body, hashtags)).toThrow(
+      /3000-character limit/,
+    );
   });
 
   it('assertLinkedInCommentaryWithinLimit passes when within cap', () => {

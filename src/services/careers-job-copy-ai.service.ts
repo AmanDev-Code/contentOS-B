@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { AiGatewayService } from './ai-gateway.service';
 
 export type JobCopyField =
@@ -124,8 +120,7 @@ export class CareersJobCopyAiService {
         'Bullet list using "- " lines (6–12 items). Concrete, outcome-oriented tasks.',
       requirements:
         'Bullet list using "- " (5–10 items). Must-haves: skills, experience, tools mindset.',
-      nice_to_have:
-        'Bullet list using "- " (3–8 items). Optional strengths.',
+      nice_to_have: 'Bullet list using "- " (3–8 items). Optional strengths.',
       benefits:
         'Bullet list using "- " (5–10 items). Realistic benefits for a growing SaaS (learning, flexibility, equity if mentioned in context, etc.).',
       team_overview:
@@ -196,12 +191,15 @@ export class CareersJobCopyAiService {
 
     const parsed = this.tryParseJson(raw);
     if (!parsed || typeof parsed !== 'object') {
-      throw new BadRequestException('AI returned invalid JSON for all-sections');
+      throw new BadRequestException(
+        'AI returned invalid JSON for all-sections',
+      );
     }
     const out = {} as Record<JobCopyField, string>;
     for (const k of ALL_FIELDS) {
       const v = parsed[k];
-      out[k] = typeof v === 'string' ? v.trim() : v != null ? String(v).trim() : '';
+      out[k] =
+        typeof v === 'string' ? v.trim() : v != null ? String(v).trim() : '';
     }
     return out;
   }

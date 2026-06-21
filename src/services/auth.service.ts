@@ -8,7 +8,6 @@ import { EmailService } from './email.service';
 import { NotificationService } from './notification.service';
 import { ReferralService } from './referral.service';
 
-
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -95,7 +94,9 @@ export class AuthService {
     // Record referral if a valid code was provided
     if (referralCode) {
       this.referralService.recordReferral(userId, referralCode).catch((err) => {
-        this.logger.error(`Background referral recording failed: ${err.message}`);
+        this.logger.error(
+          `Background referral recording failed: ${err.message}`,
+        );
       });
     }
 
@@ -597,7 +598,11 @@ export class AuthService {
       this.configService.get<string>('supabase.anonKey') ?? '';
 
     const client = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { flowType: 'pkce', detectSessionInUrl: false, persistSession: false },
+      auth: {
+        flowType: 'pkce',
+        detectSessionInUrl: false,
+        persistSession: false,
+      },
     });
 
     const { data, error } = await client.auth.exchangeCodeForSession(code);

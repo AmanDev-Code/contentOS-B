@@ -89,7 +89,7 @@ export class ApiKeysController {
 
     const created = await this.apiKeyService.createKey(userId, {
       name: body.name.trim(),
-      scopes: body.scopes as ApiScope[] | undefined,
+      scopes: body.scopes,
       planType,
       expiresAt: body.expiresAt ?? null,
     });

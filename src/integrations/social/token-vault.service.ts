@@ -73,20 +73,26 @@ export class TokenVaultService {
   }
 
   // Read the decrypted token set for an account (publish-time use).
-  public async readTokens(socialAccountId: string): Promise<OAuthTokenSet | null> {
+  public async readTokens(
+    socialAccountId: string,
+  ): Promise<OAuthTokenSet | null> {
     const client = this.supabase.getServiceClient();
     const { data, error } = await client
       .from('social_tokens')
-      .select('vault_secret_id, refresh_vault_secret_id, scopes, expires_at, refresh_expires_at')
+      .select(
+        'vault_secret_id, refresh_vault_secret_id, scopes, expires_at, refresh_expires_at',
+      )
       .eq('social_account_id', socialAccountId)
       .maybeSingle();
-    if (error) throw new Error(`Failed to read social_tokens row: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to read social_tokens row: ${error.message}`);
     if (!data) return null;
 
     const accessToken = await this.readSecret(data.vault_secret_id as string);
     if (accessToken == null) return null;
     const refreshToken = data.refresh_vault_secret_id
-      ? (await this.readSecret(data.refresh_vault_secret_id as string)) ?? undefined
+      ? ((await this.readSecret(data.refresh_vault_secret_id as string)) ??
+        undefined)
       : undefined;
 
     return {
@@ -113,7 +119,10 @@ export class TokenVaultService {
       .select('vault_secret_id, refresh_vault_secret_id')
       .eq('social_account_id', socialAccountId)
       .maybeSingle();
-    if (readErr) throw new Error(`Failed to read social_tokens for rotation: ${readErr.message}`);
+    if (readErr)
+      throw new Error(
+        `Failed to read social_tokens for rotation: ${readErr.message}`,
+      );
     if (!existing) {
       // Nothing to rotate — treat as first store.
       return this.storeTokens(socialAccountId, tokens);
@@ -147,7 +156,9 @@ export class TokenVaultService {
     if (updErr) {
       await this.deleteSecretSafe(newAccessId);
       if (newRefreshId) await this.deleteSecretSafe(newRefreshId);
-      throw new Error(`Failed to update social_tokens during rotation: ${updErr.message}`);
+      throw new Error(
+        `Failed to update social_tokens during rotation: ${updErr.message}`,
+      );
     }
 
     // Old secrets are now unreferenced — delete them best-effort.
@@ -166,7 +177,11 @@ export class TokenVaultService {
     };
   }
 
-  private async createSecret(secret: string, name: string, description: string): Promise<string> {
+  private async createSecret(
+    secret: string,
+    name: string,
+    description: string,
+  ): Promise<string> {
     const client = this.supabase.getServiceClient();
     const { data, error } = await client.rpc('trndinn_vault_create_secret', {
       p_secret: secret,
@@ -174,14 +189,18 @@ export class TokenVaultService {
       p_description: description,
     });
     if (error || typeof data !== 'string') {
-      throw new Error(`Vault create_secret failed: ${error?.message ?? 'no id returned'}`);
+      throw new Error(
+        `Vault create_secret failed: ${error?.message ?? 'no id returned'}`,
+      );
     }
     return data;
   }
 
   private async readSecret(id: string): Promise<string | null> {
     const client = this.supabase.getServiceClient();
-    const { data, error } = await client.rpc('trndinn_vault_read_secret', { p_id: id });
+    const { data, error } = await client.rpc('trndinn_vault_read_secret', {
+      p_id: id,
+    });
     if (error) throw new Error(`Vault read_secret failed: ${error.message}`);
     return typeof data === 'string' ? data : null;
   }
@@ -189,8 +208,13 @@ export class TokenVaultService {
   private async deleteSecretSafe(id: string): Promise<void> {
     try {
       const client = this.supabase.getServiceClient();
-      const { error } = await client.rpc('trndinn_vault_delete_secret', { p_id: id });
-      if (error) this.logger.warn(`Vault delete_secret failed for ${id}: ${error.message}`);
+      const { error } = await client.rpc('trndinn_vault_delete_secret', {
+        p_id: id,
+      });
+      if (error)
+        this.logger.warn(
+          `Vault delete_secret failed for ${id}: ${error.message}`,
+        );
     } catch (err) {
       this.logger.warn(`Vault delete_secret threw for ${id}: ${String(err)}`);
     }

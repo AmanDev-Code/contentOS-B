@@ -1,7 +1,13 @@
 import { Test } from '@nestjs/testing';
 import { ProviderRegistryService } from '../provider-registry.service';
-import type { PlatformAuth, AuthorizationUrlResult } from '../platform-auth.interface';
-import type { PlatformPublisher, MediaUploadResult } from '../platform-publisher.interface';
+import type {
+  PlatformAuth,
+  AuthorizationUrlResult,
+} from '../platform-auth.interface';
+import type {
+  PlatformPublisher,
+  MediaUploadResult,
+} from '../platform-publisher.interface';
 import type { PlatformAnalytics } from '../platform-analytics.interface';
 import type { PlatformCapabilities } from '../platform-capabilities.interface';
 import type {
@@ -59,7 +65,12 @@ class StubPublisher implements PlatformPublisher {
 
 class StubAnalytics implements PlatformAnalytics {
   public async getAccountAnalytics(): Promise<AccountAnalytics> {
-    return { windowStart: new Date(), windowEnd: new Date(), metrics: {}, raw: {} };
+    return {
+      windowStart: new Date(),
+      windowEnd: new Date(),
+      metrics: {},
+      raw: {},
+    };
   }
   public async getPostAnalytics(): Promise<PostAnalytics> {
     return {
@@ -93,8 +104,8 @@ describe('ProviderRegistryService', () => {
   });
 
   it('returns undefined for an unknown platform', () => {
-    expect(registry.getProvider('linkedin' as Platform)).toBeUndefined();
-    expect(registry.hasProvider('linkedin' as Platform)).toBe(false);
+    expect(registry.getProvider('linkedin')).toBeUndefined();
+    expect(registry.hasProvider('linkedin')).toBe(false);
   });
 
   it('registers and retrieves a provider bundle', () => {

@@ -18,12 +18,16 @@ export class MaintenanceProcessor extends WorkerHost {
 
   async process(job: Job<MaintenanceJobPayload>) {
     if (job.name === MAINTENANCE_JOB_NAMES.ENABLE) {
-      await this.maintenanceService.handleScheduledEnable(job.data?.scheduleVersion);
+      await this.maintenanceService.handleScheduledEnable(
+        job.data?.scheduleVersion,
+      );
       return;
     }
 
     if (job.name === MAINTENANCE_JOB_NAMES.DISABLE) {
-      await this.maintenanceService.handleScheduledDisable(job.data?.scheduleVersion);
+      await this.maintenanceService.handleScheduledDisable(
+        job.data?.scheduleVersion,
+      );
       return;
     }
 

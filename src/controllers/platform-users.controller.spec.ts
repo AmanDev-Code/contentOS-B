@@ -14,15 +14,21 @@ describe('PlatformUsersController.adjustCredits (Sprint 1.9b bucket routing)', (
   let getUserQuota: jest.Mock;
   let createNotification: jest.Mock;
 
-  const adminReq = { user: { id: 'admin-9', email: 'admin@trndinn.test' } } as never;
+  const adminReq = {
+    user: { id: 'admin-9', email: 'admin@trndinn.test' },
+  } as never;
 
   function buildClient() {
     const chain = {
       select: jest.fn(() => chain),
       update: jest.fn(() => chain),
       eq: jest.fn(() => chain),
-      maybeSingle: jest.fn().mockResolvedValue({ data: { id: 'user-1' }, error: null }),
-      single: jest.fn().mockResolvedValue({ data: { id: 'user-1' }, error: null }),
+      maybeSingle: jest
+        .fn()
+        .mockResolvedValue({ data: { id: 'user-1' }, error: null }),
+      single: jest
+        .fn()
+        .mockResolvedValue({ data: { id: 'user-1' }, error: null }),
       then: (resolve: (v: { error: null }) => void) => resolve({ error: null }),
     };
     return { from: jest.fn(() => chain) };
@@ -83,7 +89,11 @@ describe('PlatformUsersController.adjustCredits (Sprint 1.9b bucket routing)', (
       75,
       expect.stringContaining('Admin credit adjustment'),
       'admin_grant',
-      expect.objectContaining({ source: 'admin', admin_id: 'admin-9', reason: 'goodwill' }),
+      expect.objectContaining({
+        source: 'admin',
+        admin_id: 'admin-9',
+        reason: 'goodwill',
+      }),
     );
     expect(consumeCredits).not.toHaveBeenCalled();
     expect(logTransaction).not.toHaveBeenCalled();
@@ -105,7 +115,11 @@ describe('PlatformUsersController.adjustCredits (Sprint 1.9b bucket routing)', (
       'admin_adjustment',
       undefined,
       undefined,
-      expect.objectContaining({ source: 'admin', admin_id: 'admin-9', reason: 'chargeback' }),
+      expect.objectContaining({
+        source: 'admin',
+        admin_id: 'admin-9',
+        reason: 'chargeback',
+      }),
     );
     expect(grantCredits).not.toHaveBeenCalled();
     expect(res.success).toBe(true);

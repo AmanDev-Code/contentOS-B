@@ -43,10 +43,17 @@ export class CreditPreflightGuard implements CanActivate {
     const imageCount: number | undefined = body.imageCount;
     const slideCount: number | undefined = body.slideCount;
 
-    const totalCost = calculateTotalCredits(contentType, imageCount, slideCount);
+    const totalCost = calculateTotalCredits(
+      contentType,
+      imageCount,
+      slideCount,
+    );
     const creditSlices = buildCreditSlices(contentType, imageCount, slideCount);
 
-    const hasQuota = await this.quotaService.checkQuotaAvailable(userId, totalCost);
+    const hasQuota = await this.quotaService.checkQuotaAvailable(
+      userId,
+      totalCost,
+    );
 
     if (!hasQuota) {
       const quota = await this.quotaService.getUserQuota(userId);
@@ -65,7 +72,10 @@ export class CreditPreflightGuard implements CanActivate {
       );
     }
 
-    req.creditPreflight = { totalCost, creditSlices } satisfies CreditPreflightData;
+    req.creditPreflight = {
+      totalCost,
+      creditSlices,
+    } satisfies CreditPreflightData;
     return true;
   }
 }

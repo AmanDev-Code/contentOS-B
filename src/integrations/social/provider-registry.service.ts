@@ -30,7 +30,9 @@ export class ProviderRegistryService {
 
   public registerProvider(platform: Platform, bundle: ProviderBundle): void {
     if (this.providers.has(platform)) {
-      throw new Error(`Provider for platform "${platform}" is already registered`);
+      throw new Error(
+        `Provider for platform "${platform}" is already registered`,
+      );
     }
     this.providers.set(platform, bundle);
     this.logger.log(`Registered social provider: ${platform}`);

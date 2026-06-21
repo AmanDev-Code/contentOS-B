@@ -74,7 +74,7 @@ export class BrandVisionAnalysisService {
   }
 
   private getCached(brand: BrandProfile): BrandVisualAnalysis | null {
-    const meta = brand.metadata as Record<string, unknown>;
+    const meta = brand.metadata;
     const stored = meta?.brandVisualAnalysis as BrandVisualAnalysis | undefined;
     if (!stored?.analyzedAt) return null;
     const age = Date.now() - new Date(stored.analyzedAt).getTime();
@@ -88,7 +88,7 @@ export class BrandVisionAnalysisService {
     analysis: BrandVisualAnalysis,
   ): Promise<void> {
     try {
-      const existingMeta = (brand.metadata as Record<string, unknown>) ?? {};
+      const existingMeta = brand.metadata ?? {};
       // Metadata-only patch — never overwrites logo/colors/assets/voice.
       // Scoped to this user's own brand row (per-user isolated).
       await this.brandProfiles.updateMetadata(userId, brand.id, {
@@ -96,7 +96,9 @@ export class BrandVisionAnalysisService {
         brandVisualAnalysis: analysis,
       });
     } catch (e) {
-      this.logger.warn(`Failed to cache brand analysis: ${(e as Error).message}`);
+      this.logger.warn(
+        `Failed to cache brand analysis: ${(e as Error).message}`,
+      );
     }
   }
 
@@ -124,8 +126,12 @@ export class BrandVisionAnalysisService {
         '5. OVERALL FEELING: Premium/casual/playful/corporate/bold/minimal, etc.',
         '',
         `Name: "${brand.name}"`,
-        brand.primary_color ? `Stated primary color: ${brand.primary_color}` : '',
-        brand.secondary_color ? `Stated secondary color: ${brand.secondary_color}` : '',
+        brand.primary_color
+          ? `Stated primary color: ${brand.primary_color}`
+          : '',
+        brand.secondary_color
+          ? `Stated secondary color: ${brand.secondary_color}`
+          : '',
         brand.accent_color ? `Stated accent color: ${brand.accent_color}` : '',
         '',
         'Return a JSON object with these fields:',

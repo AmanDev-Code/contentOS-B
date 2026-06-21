@@ -51,17 +51,23 @@ function normalizeTitleKey(title: string): string {
 function bodyBulletList(slide: CarouselSlideOutput): string[] {
   const collected: string[] = [];
   for (const b of slide.bullets || []) {
-    const t = String(b ?? '').replace(/\s+/g, ' ').trim();
+    const t = String(b ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (t) collected.push(t);
   }
   // Body decks may also use notebookSections.lines as natural bullets.
   for (const sec of slide.notebookSections || []) {
     for (const ln of sec.lines || []) {
-      const t = String(ln ?? '').replace(/\s+/g, ' ').trim();
+      const t = String(ln ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (t) collected.push(t);
     }
     for (const b of sec.bulletItems || []) {
-      const t = String(b ?? '').replace(/\s+/g, ' ').trim();
+      const t = String(b ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (t) collected.push(t);
     }
   }
@@ -97,7 +103,8 @@ export function analyzeDocumentDeckQuality(
   if (!cover || cover.sectionType !== 'cover') {
     issues.push({
       code: 'documentdeck_cover_missing',
-      detail: 'Document deck must have a cover slide as the first page (sectionType="cover", pageNumber=1).',
+      detail:
+        'Document deck must have a cover slide as the first page (sectionType="cover", pageNumber=1).',
     });
   } else if (cover.pageNumber !== 1) {
     issues.push({
@@ -118,7 +125,8 @@ export function analyzeDocumentDeckQuality(
   if (!tocSlide || tocSlide.sectionType !== 'toc') {
     issues.push({
       code: 'documentdeck_toc_missing',
-      detail: 'Document deck must include a Table of Contents slide as page 2 (sectionType="toc", pageNumber=2).',
+      detail:
+        'Document deck must include a Table of Contents slide as page 2 (sectionType="toc", pageNumber=2).',
     });
   } else if (tocSlide.pageNumber !== 2) {
     issues.push({
@@ -133,7 +141,8 @@ export function analyzeDocumentDeckQuality(
   if (bodySlides.length === 0) {
     issues.push({
       code: 'documentdeck_no_body',
-      detail: 'Document deck must include at least one body slide (sectionType="body").',
+      detail:
+        'Document deck must include at least one body slide (sectionType="body").',
     });
   }
 
@@ -169,7 +178,11 @@ export function analyzeDocumentDeckQuality(
   // Page numbers monotonic 1..N, no duplicates, no gaps
   const numbered = slides
     .map((s, i) => ({ idx: i, n: s.pageNumber, sectionType: s.sectionType }))
-    .filter((s) => typeof s.n === 'number') as Array<{ idx: number; n: number; sectionType?: string }>;
+    .filter((s) => typeof s.n === 'number') as Array<{
+    idx: number;
+    n: number;
+    sectionType?: string;
+  }>;
   if (numbered.length === slides.length) {
     const sorted = [...numbered].sort((a, b) => a.n - b.n);
     for (let i = 0; i < sorted.length; i++) {

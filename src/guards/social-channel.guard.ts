@@ -7,15 +7,18 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ProfileRepository } from '../repositories/profile.repository';
-import { REQUIRE_SOCIAL_CHANNEL_KEY, SocialPlatform } from '../decorators/require-social-channel.decorator';
+import {
+  REQUIRE_SOCIAL_CHANNEL_KEY,
+  SocialPlatform,
+} from '../decorators/require-social-channel.decorator';
 
 /**
  * Guard that checks if user has connected the required social channel.
- * 
+ *
  * Usage:
  * - Apply globally with @UseGuards(SocialChannelGuard)
  * - Or use with decorator: @RequireSocialChannel('linkedin')
- * 
+ *
  * When no decorator is present, defaults to checking LinkedIn for
  * generation and posting endpoints.
  */
@@ -43,7 +46,10 @@ export class SocialChannelGuard implements CanActivate {
       return true;
     }
 
-    const isConnected = await this.checkPlatformConnected(userId, requiredPlatform);
+    const isConnected = await this.checkPlatformConnected(
+      userId,
+      requiredPlatform,
+    );
 
     if (!isConnected) {
       const platformName = this.getPlatformDisplayName(requiredPlatform);

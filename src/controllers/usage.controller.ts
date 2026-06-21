@@ -28,10 +28,15 @@ export class UsageController {
   constructor(private readonly usageTrackingService: UsageTrackingService) {}
 
   @Get()
-  async getUsage(@Req() req: { user?: { id?: string } }): Promise<UsageSummary> {
+  async getUsage(
+    @Req() req: { user?: { id?: string } },
+  ): Promise<UsageSummary> {
     const userId = req.user?.id;
     if (!userId) {
-      throw new HttpException('User not authenticated', HttpStatus.UNAUTHORIZED);
+      throw new HttpException(
+        'User not authenticated',
+        HttpStatus.UNAUTHORIZED,
+      );
     }
     return this.usageTrackingService.getUsageSummary(userId);
   }

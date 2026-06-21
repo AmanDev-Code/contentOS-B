@@ -33,7 +33,10 @@ export type ChatMessageContent =
   | string
   | Array<
       | { type: 'text'; text: string }
-      | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } }
+      | {
+          type: 'image_url';
+          image_url: { url: string; detail?: 'low' | 'high' | 'auto' };
+        }
     >;
 
 export interface ChatMessage {
@@ -74,6 +77,9 @@ export class AiGatewayService {
    * Run a chat completion against the text model chain (or an explicit model
    * list), returning the first successful completion's content. Throws
    * `AiGatewayError` only when every candidate fails.
+   *
+   * For `seo_generation` and `seo_analysis` categories, falls back to `text`
+   * if no models are configured for the specific category.
    */
   async chatCompletionRaw(opts: {
     messages: ChatMessage[];
@@ -87,12 +93,26 @@ export class AiGatewayService {
   }): Promise<{ content: string; model: string }> {
     const cfg = this.cfg();
     if (!cfg.apiKey) throw new AiGatewayError('AI gateway API key is not set');
-    const chain =
-      opts.models && opts.models.length
-        ? opts.models
-        : opts.category === 'vision'
-          ? this.registry.getVisionChainSync()
-          : this.registry.getModelChainSync(opts.category || 'text');
+
+    let chain: string[];
+    if (opts.models && opts.models.length) {
+      chain = opts.models;
+    } else if (opts.category === 'vision') {
+      chain = this.registry.getVisionChainSync();
+    } else if (opts.category === 'seo_generation') {
+      chain = this.registry.getModelChainSync('seo_generation');
+      if (chain.length === 0) {
+        chain = this.registry.getModelChainSync('text');
+      }
+    } else if (opts.category === 'seo_analysis') {
+      chain = this.registry.getModelChainSync('seo_analysis');
+      if (chain.length === 0) {
+        chain = this.registry.getModelChainSync('text');
+      }
+    } else {
+      chain = this.registry.getModelChainSync(opts.category || 'text');
+    }
+
     if (!chain.length) {
       throw new AiGatewayError(
         `No ${opts.category || 'text'} models are configured in the AI model registry`,
@@ -187,7 +207,7 @@ export class AiGatewayService {
         const errText = await res.text();
         throw new Error(`HTTP ${res.status}: ${errText.slice(0, 240)}`);
       }
-      const json = (await res.json()) as any;
+      const json = await res.json();
       const content = String(json?.choices?.[0]?.message?.content || '').trim();
       if (!content) throw new Error('Empty completion');
       return content;
@@ -228,7 +248,9 @@ export class AiGatewayService {
         ? opts.models
         : this.registry.getModelChainSync('image');
     if (!chain.length) {
-      throw new AiGatewayError('No image models are configured in the registry');
+      throw new AiGatewayError(
+        'No image models are configured in the registry',
+      );
     }
     const endpoint = `${this.base()}/images/generations`;
     const timeoutMs = opts.timeoutMs ?? 90_000;
@@ -344,7 +366,7 @@ export class AiGatewayService {
         const errText = await res.text();
         throw new Error(`HTTP ${res.status}: ${errText.slice(0, 240)}`);
       }
-      const json = (await res.json()) as any;
+      const json = await res.json();
       const item = Array.isArray(json?.data) ? json.data[0] : null;
       if (item?.b64_json) return item.b64_json as string;
       if (item?.url) return await this.urlToB64(item.url as string, timeoutMs);
@@ -476,7 +498,7 @@ export class AiGatewayService {
         throw new Error(`HTTP ${res.status}: ${errText.slice(0, 300)}`);
       }
 
-      const json = (await res.json()) as any;
+      const json = await res.json();
 
       // Extract b64 image from the Responses API output array
       const outputs: any[] = Array.isArray(json?.output) ? json.output : [];
@@ -531,7 +553,7 @@ export class AiGatewayService {
           `Gateway ${res.status} listing models: ${text.slice(0, 200)}`,
         );
       }
-      const json = (await res.json()) as any;
+      const json = await res.json();
       const rows: any[] = Array.isArray(json?.data)
         ? json.data
         : Array.isArray(json?.models)
@@ -603,9 +625,7 @@ export class AiGatewayService {
     //  - Bedrock: stability.*upscale*, stability.*inpaint*, amazon.titan-image-*-inpainting
     //  - OpenAI:  (none currently — all OpenAI image models are generators)
     //  - Generic: *-upscale*, *-enhance*, *-super-res*, *-inpaint*
-    if (
-      /upscale|super-?res|enhance|inpaint/.test(hay)
-    ) {
+    if (/upscale|super-?res|enhance|inpaint/.test(hay)) {
       return 'image_enhance';
     }
 

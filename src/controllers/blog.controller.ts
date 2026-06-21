@@ -45,7 +45,10 @@ export class BlogController {
   }
 
   @Get('sitemap-paths')
-  @ApiOperation({ summary: 'All published post paths + timestamps for sitemap generation (no pagination cap)' })
+  @ApiOperation({
+    summary:
+      'All published post paths + timestamps for sitemap generation (no pagination cap)',
+  })
   async sitemapPaths() {
     try {
       return await this.blogService.listAllPublishedPathsForSitemap();
@@ -59,7 +62,9 @@ export class BlogController {
   }
 
   @Get('post')
-  @ApiOperation({ summary: 'Get a single published post by path (e.g. releases/v2)' })
+  @ApiOperation({
+    summary: 'Get a single published post by path (e.g. releases/v2)',
+  })
   async getPost(@Query('path') path: string) {
     try {
       if (!path?.trim()) {

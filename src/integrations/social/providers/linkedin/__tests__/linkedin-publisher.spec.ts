@@ -55,7 +55,13 @@ function makeResponse(spec: FakeResponseSpec) {
 }
 
 // Routes fake fetch calls by URL + method, returning queued responses.
-function routerFetch(routes: Array<{ match: RegExp; method?: string; responses: FakeResponseSpec[] }>) {
+function routerFetch(
+  routes: Array<{
+    match: RegExp;
+    method?: string;
+    responses: FakeResponseSpec[];
+  }>,
+) {
   const calls: Array<{ url: string; method: string; body: unknown }> = [];
   const fn = (async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -83,7 +89,9 @@ function buildPublisher(fetchImpl: typeof fetch, byteReader: MediaByteReader) {
   return new LinkedInPublisherService(http, media, '202604');
 }
 
-const fakeByteReader: MediaByteReader = { read: async () => Buffer.from('fake-image-bytes') };
+const fakeByteReader: MediaByteReader = {
+  read: async () => Buffer.from('fake-image-bytes'),
+};
 
 describe('LinkedInPublisherService', () => {
   it('publishes a text-only post and returns the post id from x-restli-id', async () => {
@@ -91,12 +99,18 @@ describe('LinkedInPublisherService', () => {
       {
         match: /\/rest\/posts$/,
         method: 'POST',
-        responses: [{ status: 201, headers: { 'x-restli-id': 'urn:li:share:999' } }],
+        responses: [
+          { status: 201, headers: { 'x-restli-id': 'urn:li:share:999' } },
+        ],
       },
     ]);
     const publisher = buildPublisher(fn, fakeByteReader);
 
-    const payload: PostPayload = { content: 'Hello LinkedIn', media: [], metadata: {} };
+    const payload: PostPayload = {
+      content: 'Hello LinkedIn',
+      media: [],
+      metadata: {},
+    };
     const result = await publisher.publishPost(ACCOUNT, payload, TOKENS);
 
     expect(result.platformPostId).toBe('urn:li:share:999');
@@ -115,11 +129,20 @@ describe('LinkedInPublisherService', () => {
         responses: [
           {
             status: 200,
-            body: { value: { uploadUrl: 'https://upload.test/img', image: 'urn:li:image:42' } },
+            body: {
+              value: {
+                uploadUrl: 'https://upload.test/img',
+                image: 'urn:li:image:42',
+              },
+            },
           },
         ],
       },
-      { match: /upload\.test\/img$/, method: 'PUT', responses: [{ status: 201 }] },
+      {
+        match: /upload\.test\/img$/,
+        method: 'PUT',
+        responses: [{ status: 201 }],
+      },
       {
         match: /\/rest\/images\/urn/,
         method: 'GET',
@@ -128,12 +151,17 @@ describe('LinkedInPublisherService', () => {
       {
         match: /\/rest\/posts$/,
         method: 'POST',
-        responses: [{ status: 201, headers: { 'x-restli-id': 'urn:li:share:777' } }],
+        responses: [
+          { status: 201, headers: { 'x-restli-id': 'urn:li:share:777' } },
+        ],
       },
     ]);
     const publisher = buildPublisher(fn, fakeByteReader);
 
-    const orgAccount: ConnectedAccount = { ...ACCOUNT, accountType: 'organization' };
+    const orgAccount: ConnectedAccount = {
+      ...ACCOUNT,
+      accountType: 'organization',
+    };
     const image: MediaAttachment = {
       id: 'm1',
       kind: 'image',
@@ -142,7 +170,11 @@ describe('LinkedInPublisherService', () => {
       storagePath: 'posts/m1.jpg',
       altText: 'A chart',
     };
-    const payload: PostPayload = { content: 'With image', media: [image], metadata: {} };
+    const payload: PostPayload = {
+      content: 'With image',
+      media: [image],
+      metadata: {},
+    };
     const result = await publisher.publishPost(orgAccount, payload, TOKENS);
 
     expect(result.platformPostId).toBe('urn:li:share:777');
@@ -182,16 +214,26 @@ describe('LinkedInPublisherService', () => {
     ]);
     const publisher = buildPublisher(fn, fakeByteReader);
     await expect(
-      publisher.publishPost(ACCOUNT, { content: 'x', media: [], metadata: {} }, TOKENS),
+      publisher.publishPost(
+        ACCOUNT,
+        { content: 'x', media: [], metadata: {} },
+        TOKENS,
+      ),
     ).rejects.toBeInstanceOf(RefreshRequiredError);
   });
 
   it('rejects posts over the character limit before calling LinkedIn', async () => {
-    const { fn, calls } = routerFetch([{ match: /.*/, responses: [{ status: 201 }] }]);
+    const { fn, calls } = routerFetch([
+      { match: /.*/, responses: [{ status: 201 }] },
+    ]);
     const publisher = buildPublisher(fn, fakeByteReader);
     const tooLong = 'a'.repeat(3001);
     await expect(
-      publisher.publishPost(ACCOUNT, { content: tooLong, media: [], metadata: {} }, TOKENS),
+      publisher.publishPost(
+        ACCOUNT,
+        { content: tooLong, media: [], metadata: {} },
+        TOKENS,
+      ),
     ).rejects.toBeInstanceOf(PlatformBadRequestError);
     expect(calls).toHaveLength(0);
   });
@@ -207,7 +249,11 @@ describe('LinkedInPublisherService', () => {
       storagePath: 'a.jpg',
     };
     await expect(
-      publisher.publishPost(ACCOUNT, { content: 'x', media: [img, img], metadata: {} }, TOKENS),
+      publisher.publishPost(
+        ACCOUNT,
+        { content: 'x', media: [img, img], metadata: {} },
+        TOKENS,
+      ),
     ).rejects.toBeInstanceOf(PlatformBadRequestError);
   });
 });

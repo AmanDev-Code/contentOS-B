@@ -33,7 +33,9 @@ export class AdminOnboardingController {
   // ═══════════════════════════════════════════════════════════════════════════
 
   @Get('questions')
-  @ApiOperation({ summary: 'List all onboarding questions (including inactive)' })
+  @ApiOperation({
+    summary: 'List all onboarding questions (including inactive)',
+  })
   async listQuestions() {
     try {
       const questions = await this.onboardingService.listAllQuestions();
@@ -121,7 +123,10 @@ export class AdminOnboardingController {
       );
     }
     if (body.options !== undefined && !Array.isArray(body.options)) {
-      throw new HttpException('options must be an array', HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        'options must be an array',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     try {

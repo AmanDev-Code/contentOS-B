@@ -67,8 +67,8 @@ function buildQueue() {
 
 function makeService(supabase: any, queue: any) {
   return new PostSchedulingService(
-    queue as any,
-    supabase as any,
+    queue,
+    supabase,
     { checkRateLimit: jest.fn().mockResolvedValue(true) } as any, // mediaGenerationService
     {} as any, // linkedinService
     {} as any, // cacheService

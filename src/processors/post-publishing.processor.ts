@@ -61,7 +61,8 @@ export class PostPublishingProcessor extends WorkerHost {
   async handleScheduledPost(job: Job<SocialPublishJobData>) {
     this.logger.log(`Processing scheduled post job: ${job.id || 'unknown'}`);
 
-    const { contentId, userId, platform, actorType, organizationUrn } = job.data;
+    const { contentId, userId, platform, actorType, organizationUrn } =
+      job.data;
 
     const { data: existingContent } = await this.supabaseService
       .getServiceClient()
@@ -166,11 +167,8 @@ export class PostPublishingProcessor extends WorkerHost {
       this.logger.log(`Scheduled post published successfully: ${postId}`);
       return { success: true, postId };
     } catch (error: unknown) {
-      const errMessage =
-        error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `Failed to publish scheduled post: ${errMessage}`,
-      );
+      const errMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to publish scheduled post: ${errMessage}`);
 
       // Update job status to failed
       await this.updateScheduledPostStatus(

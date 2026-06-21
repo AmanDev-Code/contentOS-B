@@ -130,10 +130,7 @@ export class AdminFeatureFlagsController {
     if (body.config !== undefined) updatePayload.config = body.config;
 
     if (Object.keys(updatePayload).length === 0) {
-      throw new HttpException(
-        'No fields to update',
-        HttpStatus.BAD_REQUEST,
-      );
+      throw new HttpException('No fields to update', HttpStatus.BAD_REQUEST);
     }
 
     const { data, error } = await client

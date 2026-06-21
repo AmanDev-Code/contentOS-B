@@ -12,7 +12,8 @@ describe('notebook compositor lines', () => {
           subheading: 'Concept',
           lines: Array.from(
             { length: 10 },
-            (_, i) => `Line ${i} with dense filler handwriting content for ruler snap`,
+            (_, i) =>
+              `Line ${i} with dense filler handwriting content for ruler snap`,
           ),
           bulletItems: ['alpha detail', 'beta detail'],
         },
@@ -21,7 +22,10 @@ describe('notebook compositor lines', () => {
           lines: ['Interviewers love to probe this edge case'],
         },
       ],
-      ['Tip · use ArrayDeque as stack', 'Mistake · forgetting null head checks'],
+      [
+        'Tip · use ArrayDeque as stack',
+        'Mistake · forgetting null head checks',
+      ],
     );
 
     expect(mainRows.length).toBeGreaterThan(12);
@@ -33,9 +37,7 @@ describe('notebook compositor lines', () => {
       title: 'T',
       body: 'Body line one',
       bullets: ['b1'],
-      notebookSections: [
-        { lines: ['s1'], subheading: 'H' },
-      ],
+      notebookSections: [{ lines: ['s1'], subheading: 'H' }],
     });
     expect(lines.join(' ').length).toBeGreaterThan(8);
   });

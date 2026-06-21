@@ -37,14 +37,17 @@ export function resolveCustomTopicTextModel(params: {
 
   const slides = slideCount ?? 0;
   const denseOrNotebookDense =
-    noteDensity === 'dense' || resolvedVisualStyle === 'handwritten_notebook_dense';
-  const longHandwrittenNotebook = resolvedVisualStyle === 'handwritten_notebook' && slides >= 10;
+    noteDensity === 'dense' ||
+    resolvedVisualStyle === 'handwritten_notebook_dense';
+  const longHandwrittenNotebook =
+    resolvedVisualStyle === 'handwritten_notebook' && slides >= 10;
   const twelveSlideNotebook =
     resolvedVisualStyle != null &&
     isNotebookPaperCarouselStyle(resolvedVisualStyle) &&
     slides >= 12;
 
-  const heavyCarousel = denseOrNotebookDense || longHandwrittenNotebook || twelveSlideNotebook;
+  const heavyCarousel =
+    denseOrNotebookDense || longHandwrittenNotebook || twelveSlideNotebook;
 
   if (!heavyCarousel) {
     return customTopicModel;

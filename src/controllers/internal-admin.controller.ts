@@ -1,4 +1,10 @@
-import { Controller, HttpException, HttpStatus, Post, Req } from '@nestjs/common';
+import {
+  Controller,
+  HttpException,
+  HttpStatus,
+  Post,
+  Req,
+} from '@nestjs/common';
 import { TrendingHashtagOrchestratorService } from '../services/trending-hashtag-orchestrator.service';
 
 /**
@@ -35,4 +41,3 @@ export class InternalAdminController {
     return { success: true, message: 'Global tag sync queued' };
   }
 }
-

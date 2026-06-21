@@ -57,7 +57,8 @@ export class LinkedInMediaService {
     sleepFn?: (ms: number) => Promise<void>,
   ) {
     this.sleepFn =
-      sleepFn ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+      sleepFn ??
+      ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   public async upload(
@@ -67,7 +68,8 @@ export class LinkedInMediaService {
   ): Promise<LinkedInMediaUploadResult> {
     const kind = this.resolveKind(asset);
     const endpoint = kind === 'image' ? 'images' : 'documents';
-    const mediaType: LinkedInMediaType = kind === 'image' ? 'images' : 'documents';
+    const mediaType: LinkedInMediaType =
+      kind === 'image' ? 'images' : 'documents';
 
     const initResponse = await this.http.request({
       method: 'POST',
@@ -78,12 +80,16 @@ export class LinkedInMediaService {
 
     const init = (await initResponse.json()) as InitializeUploadResponse;
     const uploadUrl = init.value?.uploadUrl;
-    const assetUrn = kind === 'image' ? init.value?.image : init.value?.document;
+    const assetUrn =
+      kind === 'image' ? init.value?.image : init.value?.document;
     if (!uploadUrl || !assetUrn) {
-      throw new PlatformBadRequestError('LinkedIn did not return an upload URL or asset URN.', {
-        platform: 'linkedin',
-        raw: init,
-      });
+      throw new PlatformBadRequestError(
+        'LinkedIn did not return an upload URL or asset URN.',
+        {
+          platform: 'linkedin',
+          raw: init,
+        },
+      );
     }
 
     const bytes = await this.byteReader.read(asset);
@@ -126,7 +132,11 @@ export class LinkedInMediaService {
     const intervalMs =
       mediaType === 'videos' ? POLL_INTERVAL_VIDEO_MS : POLL_INTERVAL_IMAGE_MS;
     const label =
-      mediaType === 'videos' ? 'video' : mediaType === 'documents' ? 'document' : 'image';
+      mediaType === 'videos'
+        ? 'video'
+        : mediaType === 'documents'
+          ? 'document'
+          : 'image';
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       let json: MediaStatusResponse;
@@ -152,7 +162,9 @@ export class LinkedInMediaService {
       }
 
       if (json.status === 'AVAILABLE') {
-        this.logger.log(`LinkedIn ${label} ${assetUrn} is AVAILABLE (attempt ${attempt})`);
+        this.logger.log(
+          `LinkedIn ${label} ${assetUrn} is AVAILABLE (attempt ${attempt})`,
+        );
         return;
       }
 
@@ -184,7 +196,10 @@ export class LinkedInMediaService {
     );
   }
 
-  private headers(accessToken: string, contentType: string): Record<string, string> {
+  private headers(
+    accessToken: string,
+    contentType: string,
+  ): Record<string, string> {
     return {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': contentType,

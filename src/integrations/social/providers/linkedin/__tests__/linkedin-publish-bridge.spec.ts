@@ -1,5 +1,9 @@
 import { LinkedInPublishBridgeService } from '../linkedin-publish-bridge.service';
-import type { ConnectedAccount, OAuthTokenSet, PostPayload } from '../../../types';
+import type {
+  ConnectedAccount,
+  OAuthTokenSet,
+  PostPayload,
+} from '../../../types';
 
 const account: ConnectedAccount = {
   id: 'acc-1',
@@ -37,8 +41,10 @@ function make(overrides: {
       overrides.getConnectedLinkedIn ?? jest.fn().mockResolvedValue(account),
   } as never;
   const tokenVault = {
-    readTokens: overrides.readTokens ?? jest.fn().mockResolvedValue(validTokens()),
-    rotateTokens: overrides.rotateTokens ?? jest.fn().mockResolvedValue(undefined),
+    readTokens:
+      overrides.readTokens ?? jest.fn().mockResolvedValue(validTokens()),
+    rotateTokens:
+      overrides.rotateTokens ?? jest.fn().mockResolvedValue(undefined),
   } as never;
   const auth = {
     refreshTokens: overrides.refreshTokens ?? jest.fn(),
@@ -48,13 +54,20 @@ function make(overrides: {
       overrides.publishPost ??
       jest.fn().mockResolvedValue({ platformPostId: 'urn:li:share:123' }),
   } as never;
-  const service = new LinkedInPublishBridgeService(connections, tokenVault, auth, publisher);
+  const service = new LinkedInPublishBridgeService(
+    connections,
+    tokenVault,
+    auth,
+    publisher,
+  );
   return { service, connections, tokenVault, auth, publisher };
 }
 
 describe('LinkedInPublishBridgeService.publish', () => {
   it('returns not_connected when the user has no new-model account', async () => {
-    const { service } = make({ getConnectedLinkedIn: jest.fn().mockResolvedValue(null) });
+    const { service } = make({
+      getConnectedLinkedIn: jest.fn().mockResolvedValue(null),
+    });
     const result = await service.publish({
       userId: 'user-1',
       text: 'hello',

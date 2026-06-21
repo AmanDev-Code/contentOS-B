@@ -17,7 +17,10 @@ import {
   AiModelCategory,
 } from '../services/ai-model-registry.service';
 import { AiGatewayService } from '../services/ai-gateway.service';
-import { WebResearchService, WebResearchConfig } from '../services/web-research.service';
+import {
+  WebResearchService,
+  WebResearchConfig,
+} from '../services/web-research.service';
 
 /**
  * Admin control for the AI gateway model registry. The gateway URL + key are
@@ -37,14 +40,17 @@ export class AdminAiModelsController {
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'List AI models by category, active selection, and gateway info' })
+  @ApiOperation({
+    summary: 'List AI models by category, active selection, and gateway info',
+  })
   list() {
     return this.registry.list();
   }
 
   @Get('catalog')
   @ApiOperation({
-    summary: 'List models the Bifrost gateway can serve (so admins can browse + add)',
+    summary:
+      'List models the Bifrost gateway can serve (so admins can browse + add)',
   })
   async catalog(@Query('refresh') refresh?: string) {
     try {
@@ -56,7 +62,9 @@ export class AdminAiModelsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Add a model (provider/model string) to a category' })
+  @ApiOperation({
+    summary: 'Add a model (provider/model string) to a category',
+  })
   async add(
     @Body()
     body: {
@@ -87,7 +95,9 @@ export class AdminAiModelsController {
   }
 
   @Put('reorder')
-  @ApiOperation({ summary: 'Reorder model priority (fallback chain) within a category' })
+  @ApiOperation({
+    summary: 'Reorder model priority (fallback chain) within a category',
+  })
   async reorder(
     @Body() body: { category: AiModelCategory; orderedIds: string[] },
   ) {
@@ -96,7 +106,10 @@ export class AdminAiModelsController {
   }
 
   @Post('test')
-  @ApiOperation({ summary: 'Ping the gateway with a model (routes by category) to verify it works' })
+  @ApiOperation({
+    summary:
+      'Ping the gateway with a model (routes by category) to verify it works',
+  })
   test(@Body() body: { model: string; category?: AiModelCategory }) {
     return this.registry.testModel(body?.model, body?.category || 'text');
   }
@@ -126,7 +139,10 @@ export class AdminAiModelsController {
     if (!model) {
       return { ok: false, latencyMs: 0, message: 'model is required' };
     }
-    if (!imageDataUrl || !/^data:image\/[a-z0-9.+-]+;base64,/i.test(imageDataUrl)) {
+    if (
+      !imageDataUrl ||
+      !/^data:image\/[a-z0-9.+-]+;base64,/i.test(imageDataUrl)
+    ) {
       return {
         ok: false,
         latencyMs: 0,
@@ -145,22 +161,23 @@ export class AdminAiModelsController {
       (body?.prompt || '').trim() ||
       'Describe what you see in this image for a graphic designer who will recreate the visual style. Cover: the exact colors with hex codes, any shapes/icons/symbols and how they look, typography if present, the lighting and mood, and the overall composition. Be concrete and specific.';
     try {
-      const { content, model: usedModel } = await this.gateway.chatCompletionRaw({
-        models: [model],
-        category: 'vision',
-        maxTokens: 1024,
-        temperature: 0.3,
-        timeoutMs: 60_000,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: imageDataUrl } },
-            ],
-          },
-        ],
-      });
+      const { content, model: usedModel } =
+        await this.gateway.chatCompletionRaw({
+          models: [model],
+          category: 'vision',
+          maxTokens: 1024,
+          temperature: 0.3,
+          timeoutMs: 60_000,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: prompt },
+                { type: 'image_url', image_url: { url: imageDataUrl } },
+              ],
+            },
+          ],
+        });
       return {
         ok: true,
         model: usedModel,
@@ -193,9 +210,7 @@ export class AdminAiModelsController {
 
   @Put('web-research')
   @ApiOperation({ summary: 'Update web research (Tavily) config' })
-  async updateWebResearch(
-    @Body() body: Partial<WebResearchConfig>,
-  ) {
+  async updateWebResearch(@Body() body: Partial<WebResearchConfig>) {
     await this.webResearch.updateConfig(body);
     return this.webResearch.getConfig();
   }
@@ -203,7 +218,8 @@ export class AdminAiModelsController {
   @Post('web-research/test')
   @ApiOperation({ summary: 'Run a test Tavily search to verify the key works' })
   async testWebResearch(@Body() body: { query?: string }) {
-    const query = body?.query?.trim() || 'latest trends in social media marketing';
+    const query =
+      body?.query?.trim() || 'latest trends in social media marketing';
     const result = await this.webResearch.search(query, {
       maxResults: 3,
       includeAnswer: true,
@@ -211,7 +227,8 @@ export class AdminAiModelsController {
     if (!result) {
       return {
         ok: false,
-        message: 'Search returned no results. Check API key and enabled status.',
+        message:
+          'Search returned no results. Check API key and enabled status.',
       };
     }
     return {

@@ -46,10 +46,7 @@ export class PlatformGrantsController {
 
   @Post()
   @ApiOperation({ summary: 'Grant platform staff (super-admin only)' })
-  async grant(
-    @Request() req: AuthReq,
-    @Body() body: { userId: string },
-  ) {
+  async grant(@Request() req: AuthReq, @Body() body: { userId: string }) {
     const targetUserId = body?.userId?.trim();
     if (!targetUserId) {
       throw new BadRequestException('userId is required');

@@ -96,7 +96,15 @@ export class UsageTrackingService {
     );
     if (periodStart.getTime() > now.getTime()) {
       periodStart = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, anchorDay, 0, 0, 0, 0),
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth() - 1,
+          anchorDay,
+          0,
+          0,
+          0,
+          0,
+        ),
       );
     }
     const periodEnd = new Date(

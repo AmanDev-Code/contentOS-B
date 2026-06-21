@@ -56,7 +56,9 @@ export class ContactService {
       'hello@trndinn.com';
   }
 
-  async submit(input: ContactSubmissionInput): Promise<{ ok: true; id: string }> {
+  async submit(
+    input: ContactSubmissionInput,
+  ): Promise<{ ok: true; id: string }> {
     const name = clamp(input.name, MAX_NAME);
     const email = clamp(input.email, MAX_EMAIL).toLowerCase();
     const company = clamp(input.company, MAX_COMPANY);
@@ -67,7 +69,9 @@ export class ContactService {
       throw new BadRequestException('A valid email is required.');
     }
     if (message.length < MIN_MESSAGE) {
-      throw new BadRequestException('Please include a message of at least 10 characters.');
+      throw new BadRequestException(
+        'Please include a message of at least 10 characters.',
+      );
     }
 
     // Persist first: the stored row is the durable source of truth.
@@ -87,14 +91,25 @@ export class ContactService {
 
     if (error || !data) {
       this.logger.error(`Failed to store contact message: ${error?.message}`);
-      throw new BadRequestException('Could not submit your message. Please try again.');
+      throw new BadRequestException(
+        'Could not submit your message. Please try again.',
+      );
     }
 
     const id = data.id as string;
 
     // Fire-and-forget notifications. Never fail the request on email problems.
-    void this.sendNotifications({ id, name, email, company, message, source }).catch((e) =>
-      this.logger.error(`Contact email dispatch failed for ${id}: ${(e as Error).message}`),
+    void this.sendNotifications({
+      id,
+      name,
+      email,
+      company,
+      message,
+      source,
+    }).catch((e) =>
+      this.logger.error(
+        `Contact email dispatch failed for ${id}: ${(e as Error).message}`,
+      ),
     );
 
     return { ok: true, id };

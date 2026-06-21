@@ -47,7 +47,10 @@ function buildController(rescheduleImpl?: jest.Mock) {
   const configService = {};
   const immediatePostPublishService = {};
   const feedbackService = {};
-  const webhookDispatcher = { emitPostScheduled: jest.fn(), emitPostCancelled: jest.fn() };
+  const webhookDispatcher = {
+    emitPostScheduled: jest.fn(),
+    emitPostCancelled: jest.fn(),
+  };
 
   const controller = new PostsController(
     postSchedulingService,

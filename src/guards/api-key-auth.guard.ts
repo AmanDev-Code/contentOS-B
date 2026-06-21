@@ -9,7 +9,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ApiKeyService, type ValidatedApiKey } from '../services/api-key.service';
+import {
+  ApiKeyService,
+  type ValidatedApiKey,
+} from '../services/api-key.service';
 import { CacheService } from '../services/cache.service';
 import { API_SCOPE_KEY } from '../decorators/api-scope.decorator';
 

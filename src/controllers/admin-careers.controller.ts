@@ -38,7 +38,8 @@ export class AdminCareersController {
 
   @Post('ai/field')
   @ApiOperation({
-    summary: 'Generate or refine one job section with AI (same stack as content refinement)',
+    summary:
+      'Generate or refine one job section with AI (same stack as content refinement)',
   })
   async aiField(
     @Body()
@@ -63,7 +64,10 @@ export class AdminCareersController {
         throw new HttpException('Invalid field', HttpStatus.BAD_REQUEST);
       }
       if (!body?.context?.title?.trim()) {
-        throw new HttpException('context.title is required', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'context.title is required',
+          HttpStatus.BAD_REQUEST,
+        );
       }
       return await this.careersJobCopyAi.generateField(
         body.context,
@@ -94,7 +98,10 @@ export class AdminCareersController {
   ) {
     try {
       if (!body?.context?.title?.trim()) {
-        throw new HttpException('context.title is required', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'context.title is required',
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const sections = await this.careersJobCopyAi.generateAllSections(
         body.context,
@@ -127,9 +134,13 @@ export class AdminCareersController {
 
   @Post('jobs')
   @ApiOperation({ summary: 'Create job (draft, scheduled, or published)' })
-  async create(@Req() req: ExpressRequest, @Body() body: Record<string, unknown>) {
+  async create(
+    @Req() req: ExpressRequest,
+    @Body() body: Record<string, unknown>,
+  ) {
     try {
-      const userId = (req as ExpressRequest & { user?: { id: string } }).user?.id;
+      const userId = (req as ExpressRequest & { user?: { id: string } }).user
+        ?.id;
       if (!userId) {
         throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
       }
@@ -166,7 +177,7 @@ export class AdminCareersController {
   @ApiOperation({ summary: 'Update job and optionally replace questions' })
   async update(@Param('id') id: string, @Body() body: Record<string, unknown>) {
     try {
-      return await this.careersService.updateJob(id, body as any);
+      return await this.careersService.updateJob(id, body);
     } catch (e: any) {
       if (e.status === 404) throw e;
       this.logger.error(e?.message);

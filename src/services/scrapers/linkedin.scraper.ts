@@ -54,37 +54,47 @@ export class LinkedinScraperService {
       }
 
       const max = Math.max(5, Math.min(limit, 60));
-      let posts = await page.$$eval(feedSelector, (nodes, maxItems) => {
-        const out: Array<{
-          id: string;
-          text: string;
-          hashtags: string[];
-          publishedAt: string;
-          platform?: string;
-          contentType?: string;
-        }> = [];
-        for (const node of nodes.slice(0, maxItems)) {
-          const text = (node.textContent || '').trim();
-          if (!text) continue;
-          const hashtags =
-            text.match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)?.map((h) => h.toLowerCase()) || [];
-          out.push({
-            id:
-              String((node as any).getAttribute?.('data-id') || '').trim() ||
-              crypto.randomUUID(),
-            text,
-            hashtags: Array.from(new Set(hashtags)),
-            publishedAt: new Date().toISOString(),
-            platform: 'linkedin',
-            contentType: 'post',
-          });
-        }
-        return out;
-      }, max);
+      let posts = await page.$$eval(
+        feedSelector,
+        (nodes, maxItems) => {
+          const out: Array<{
+            id: string;
+            text: string;
+            hashtags: string[];
+            publishedAt: string;
+            platform?: string;
+            contentType?: string;
+          }> = [];
+          for (const node of nodes.slice(0, maxItems)) {
+            const text = (node.textContent || '').trim();
+            if (!text) continue;
+            const hashtags =
+              text
+                .match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)
+                ?.map((h) => h.toLowerCase()) || [];
+            out.push({
+              id:
+                String((node as any).getAttribute?.('data-id') || '').trim() ||
+                crypto.randomUUID(),
+              text,
+              hashtags: Array.from(new Set(hashtags)),
+              publishedAt: new Date().toISOString(),
+              platform: 'linkedin',
+              contentType: 'post',
+            });
+          }
+          return out;
+        },
+        max,
+      );
 
       if (posts.length === 0) {
         // One small scroll then DOM-wide hashtag scan fallback
-        await boundedAutoScroll(page, { maxIterations: 2, distance: 1200, intervalMs: 250 });
+        await boundedAutoScroll(page, {
+          maxIterations: 2,
+          distance: 1200,
+          intervalMs: 250,
+        });
         posts = await page.evaluate((maxItems: number) => {
           const out: Array<{
             id: string;
@@ -95,14 +105,18 @@ export class LinkedinScraperService {
             contentType?: string;
           }> = [];
           const seen = new Set<string>();
-          const all = Array.from(document.querySelectorAll('div, li, article, section'));
+          const all = Array.from(
+            document.querySelectorAll('div, li, article, section'),
+          );
           for (const el of all) {
             const t = (el.textContent || '').trim();
             if (t.length < 40 || t.length > 4000) continue;
             if (!/#[a-zA-Z][a-zA-Z0-9_-]{1,48}/.test(t)) continue;
             if (el.querySelector('div,li,article,section')) {
               const inner = Array.from(el.children).some(
-                (c) => (c.textContent || '').includes('#') && (c.textContent || '').length > 40,
+                (c) =>
+                  (c.textContent || '').includes('#') &&
+                  (c.textContent || '').length > 40,
               );
               if (inner) continue;
             }
@@ -110,7 +124,9 @@ export class LinkedinScraperService {
             if (seen.has(key)) continue;
             seen.add(key);
             const hashtags =
-              t.match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)?.map((h) => h.toLowerCase()) || [];
+              t
+                .match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)
+                ?.map((h) => h.toLowerCase()) || [];
             out.push({
               id: crypto.randomUUID(),
               text: t,
@@ -126,11 +142,16 @@ export class LinkedinScraperService {
       }
 
       if (posts.length === 0) {
-        throw new Error('selector_miss: no LinkedIn feed update nodes with text');
+        throw new Error(
+          'selector_miss: no LinkedIn feed update nodes with text',
+        );
       }
 
       if (process.env.SCRAPER_DEBUG_SCREENSHOTS === 'true') {
-        await page.screenshot({ path: `debug-linkedin-${cleanTag}.png`, fullPage: false });
+        await page.screenshot({
+          path: `debug-linkedin-${cleanTag}.png`,
+          fullPage: false,
+        });
       }
 
       this.eventLog.record({
@@ -145,7 +166,10 @@ export class LinkedinScraperService {
     } catch (error) {
       if (process.env.SCRAPER_DEBUG_SCREENSHOTS === 'true') {
         await page
-          .screenshot({ path: `debug-linkedin-${cleanTag}-error.png`, fullPage: false })
+          .screenshot({
+            path: `debug-linkedin-${cleanTag}-error.png`,
+            fullPage: false,
+          })
           .catch(() => {});
       }
       this.eventLog.record({

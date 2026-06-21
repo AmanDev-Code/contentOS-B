@@ -1,5 +1,8 @@
 import { SocialConnectionBridgeService } from '../social-connection-bridge.service';
-import { SocialAccountAlreadyConnectedError, type OAuthTokenSet } from '../types';
+import {
+  SocialAccountAlreadyConnectedError,
+  type OAuthTokenSet,
+} from '../types';
 
 // Minimal chainable Supabase query-builder mock. Every non-terminal call returns
 // `this`; terminal resolvers (`maybeSingle`, `single`) and awaiting the builder
@@ -40,7 +43,9 @@ class QueryBuilderMock {
     return Promise.resolve(this.cfg.single ?? { data: null, error: null });
   }
   then(resolve: (v: unknown) => unknown) {
-    return Promise.resolve(this.cfg.awaited ?? { data: [], error: null }).then(resolve);
+    return Promise.resolve(this.cfg.awaited ?? { data: [], error: null }).then(
+      resolve,
+    );
   }
 }
 
@@ -58,7 +63,10 @@ const tokens: OAuthTokenSet = {
   scopes: ['openid', 'w_member_social'],
 };
 
-function makeService(client: unknown, vault: Partial<{ storeTokens: jest.Mock; rotateTokens: jest.Mock }>) {
+function makeService(
+  client: unknown,
+  vault: Partial<{ storeTokens: jest.Mock; rotateTokens: jest.Mock }>,
+) {
   const supabase = { getServiceClient: () => client } as never;
   const tokenVault = {
     storeTokens: vault.storeTokens ?? jest.fn().mockResolvedValue(undefined),
@@ -157,7 +165,11 @@ describe('SocialConnectionBridgeService.connectLinkedIn', () => {
     const service = makeService(client, {});
 
     await expect(
-      service.connectLinkedIn({ userId: 'user-1', memberId: 'member-1', tokens }),
+      service.connectLinkedIn({
+        userId: 'user-1',
+        memberId: 'member-1',
+        tokens,
+      }),
     ).rejects.toBeInstanceOf(SocialAccountAlreadyConnectedError);
   });
 
@@ -178,13 +190,19 @@ describe('SocialConnectionBridgeService.connectLinkedIn', () => {
     };
     const client = makeClient([
       new QueryBuilderMock({ maybeSingle: { data: null, error: null } }), // SELECT -> none
-      new QueryBuilderMock({ single: { data: null, error: { code: '23505' } } }), // INSERT conflict
+      new QueryBuilderMock({
+        single: { data: null, error: { code: '23505' } },
+      }), // INSERT conflict
       new QueryBuilderMock({ maybeSingle: { data: winnerRow, error: null } }), // re-SELECT winner
     ]);
     const service = makeService(client, {});
 
     await expect(
-      service.connectLinkedIn({ userId: 'user-1', memberId: 'member-1', tokens }),
+      service.connectLinkedIn({
+        userId: 'user-1',
+        memberId: 'member-1',
+        tokens,
+      }),
     ).rejects.toBeInstanceOf(SocialAccountAlreadyConnectedError);
   });
 });

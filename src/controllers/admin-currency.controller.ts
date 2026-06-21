@@ -55,7 +55,9 @@ export class AdminCurrencyController {
         forexUsdToInr != null ||
         rateData.updated_by === 'system-cron' ||
         rateData.updated_by === 'forex-api';
-      const source = isForexSource ? 'forex-api' : rateData.updated_by || 'database';
+      const source = isForexSource
+        ? 'forex-api'
+        : rateData.updated_by || 'database';
 
       return {
         rate: inrToUsd,
@@ -167,17 +169,20 @@ export class AdminCurrencyController {
       let formattedResult: string;
 
       if (from === 'INR' && to === 'USD') {
-        convertedAmount = await this.currencyService.convertInrToUsdWithCurrentRate(amount);
+        convertedAmount =
+          await this.currencyService.convertInrToUsdWithCurrentRate(amount);
         formattedResult = this.currencyService.formatUsd(convertedAmount);
       } else if (from === 'USD' && to === 'INR') {
-        convertedAmount = await this.currencyService.convertUsdToInrWithCurrentRate(amount);
+        convertedAmount =
+          await this.currencyService.convertUsdToInrWithCurrentRate(amount);
         formattedResult = this.currencyService.formatInr(convertedAmount);
       } else {
         // Same currency, no conversion needed
         convertedAmount = amount;
-        formattedResult = from === 'INR'
-          ? this.currencyService.formatInr(amount)
-          : this.currencyService.formatUsd(amount);
+        formattedResult =
+          from === 'INR'
+            ? this.currencyService.formatInr(amount)
+            : this.currencyService.formatUsd(amount);
       }
 
       return {
@@ -201,15 +206,27 @@ export class AdminCurrencyController {
   @Post('calculate-yearly')
   @ApiOperation({ summary: 'Calculate yearly price with discount' })
   async calculateYearlyPrice(
-    @Body() body: { monthlyPrice: number; discountPercent: number; currency?: 'INR' | 'USD' },
+    @Body()
+    body: {
+      monthlyPrice: number;
+      discountPercent: number;
+      currency?: 'INR' | 'USD';
+    },
   ) {
     const { monthlyPrice, discountPercent, currency = 'INR' } = body;
 
     if (monthlyPrice === undefined || monthlyPrice === null) {
-      throw new HttpException('monthlyPrice is required', HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        'monthlyPrice is required',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
-    if (typeof monthlyPrice !== 'number' || !Number.isFinite(monthlyPrice) || monthlyPrice < 0) {
+    if (
+      typeof monthlyPrice !== 'number' ||
+      !Number.isFinite(monthlyPrice) ||
+      monthlyPrice < 0
+    ) {
       throw new HttpException(
         'monthlyPrice must be a non-negative number',
         HttpStatus.BAD_REQUEST,
@@ -217,7 +234,10 @@ export class AdminCurrencyController {
     }
 
     if (discountPercent === undefined || discountPercent === null) {
-      throw new HttpException('discountPercent is required', HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        'discountPercent is required',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     if (
@@ -233,20 +253,26 @@ export class AdminCurrencyController {
     }
 
     try {
-      const yearlyPrice = this.currencyService.calculateYearlyPrice(monthlyPrice, discountPercent);
+      const yearlyPrice = this.currencyService.calculateYearlyPrice(
+        monthlyPrice,
+        discountPercent,
+      );
       const totalSavings = monthlyPrice * 12 - yearlyPrice;
 
-      const formattedYearly = currency === 'INR'
-        ? this.currencyService.formatInr(yearlyPrice)
-        : this.currencyService.formatUsd(yearlyPrice);
+      const formattedYearly =
+        currency === 'INR'
+          ? this.currencyService.formatInr(yearlyPrice)
+          : this.currencyService.formatUsd(yearlyPrice);
 
-      const formattedMonthly = currency === 'INR'
-        ? this.currencyService.formatInr(monthlyPrice)
-        : this.currencyService.formatUsd(monthlyPrice);
+      const formattedMonthly =
+        currency === 'INR'
+          ? this.currencyService.formatInr(monthlyPrice)
+          : this.currencyService.formatUsd(monthlyPrice);
 
-      const formattedSavings = currency === 'INR'
-        ? this.currencyService.formatInr(totalSavings)
-        : this.currencyService.formatUsd(totalSavings);
+      const formattedSavings =
+        currency === 'INR'
+          ? this.currencyService.formatInr(totalSavings)
+          : this.currencyService.formatUsd(totalSavings);
 
       return {
         success: true,
@@ -259,9 +285,10 @@ export class AdminCurrencyController {
           totalSavings,
           formattedSavings,
           effectiveMonthly: yearlyPrice / 12,
-          formattedEffectiveMonthly: currency === 'INR'
-            ? this.currencyService.formatInr(yearlyPrice / 12)
-            : this.currencyService.formatUsd(yearlyPrice / 12),
+          formattedEffectiveMonthly:
+            currency === 'INR'
+              ? this.currencyService.formatInr(yearlyPrice / 12)
+              : this.currencyService.formatUsd(yearlyPrice / 12),
           currency,
         },
       };
@@ -278,7 +305,8 @@ export class AdminCurrencyController {
   @Get('exchange-rate/status')
   @ApiOperation({
     summary: 'Get current exchange rate fetch status (forex API integration)',
-    description: 'Returns status of daily exchange rate fetches including USD rate, total currencies, and last fetched time',
+    description:
+      'Returns status of daily exchange rate fetches including USD rate, total currencies, and last fetched time',
   })
   async getExchangeRateStatus() {
     try {
@@ -298,13 +326,17 @@ export class AdminCurrencyController {
   @Post('exchange-rate/refresh')
   @ApiOperation({
     summary: 'Force refresh exchange rates from Forex API',
-    description: 'Manually trigger a fetch of exchange rates from the Forex API. This updates the exchange_rates table and syncs the USD rate to currency settings.',
+    description:
+      'Manually trigger a fetch of exchange rates from the Forex API. This updates the exchange_rates table and syncs the USD rate to currency settings.',
   })
   async refreshExchangeRates() {
     try {
       const result = await this.exchangeRateService.forceRefresh();
       if (!result.success) {
-        throw new HttpException(result.message, HttpStatus.INTERNAL_SERVER_ERROR);
+        throw new HttpException(
+          result.message,
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
       }
       await this.currencyService.invalidateCache();
       const rateData = await this.currencyService.getExchangeRate();
@@ -330,7 +362,8 @@ export class AdminCurrencyController {
   @Get('exchange-rate/all')
   @ApiOperation({
     summary: 'Get all exchange rates for today',
-    description: 'Returns all exchange rates fetched today with INR as base currency. Includes USD and other currencies.',
+    description:
+      'Returns all exchange rates fetched today with INR as base currency. Includes USD and other currencies.',
   })
   async getAllExchangeRates() {
     try {
@@ -358,7 +391,8 @@ export class AdminCurrencyController {
   @Get('exchange-rate/current')
   @ApiOperation({
     summary: 'Get current USD exchange rate',
-    description: 'Returns current INR/USD rate from both legacy currency settings and exchange_rates table.',
+    description:
+      'Returns current INR/USD rate from both legacy currency settings and exchange_rates table.',
   })
   async getCurrentExchangeRate() {
     try {

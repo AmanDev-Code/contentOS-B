@@ -90,7 +90,7 @@ export class MediaV1Controller {
       const filename = `${cleanBase || 'image'}-${Date.now()}.jpg`;
       const minioPath = `user-uploads/${userId}/${filename}`;
 
-      const bucket = this.minioService['bucketName'] as string;
+      const bucket = this.minioService['bucketName'];
       await this.minioService.uploadFile(
         bucket,
         minioPath,
@@ -138,7 +138,9 @@ export class MediaV1Controller {
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      this.logger.error(`API media upload failed: ${(error as Error)?.message}`);
+      this.logger.error(
+        `API media upload failed: ${(error as Error)?.message}`,
+      );
       throw new HttpException(
         (error as Error)?.message || 'Media upload failed',
         HttpStatus.INTERNAL_SERVER_ERROR,

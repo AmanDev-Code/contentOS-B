@@ -154,7 +154,10 @@ describe('MissedPostSweeperCronService', () => {
     await service.sweep();
 
     expect(queue._addCalls).toHaveLength(1);
-    const updateData = supabase._updateCalls[0]?.data as Record<string, unknown>;
+    const updateData = supabase._updateCalls[0]?.data as Record<
+      string,
+      unknown
+    >;
     expect(updateData?.status).toBe('retrying');
     expect(updateData?.retry_count).toBe(2);
   });

@@ -61,8 +61,13 @@ export class AdminBlogController {
 
   @Post('posts')
   @UseGuards(AuthGuard, PaywallGuard, BlogManagementGuard)
-  @ApiOperation({ summary: 'Create post (path = parent.path/slug when parent_id set)' })
-  async create(@Req() req: AuthenticatedRequest, @Body() body: Record<string, unknown>) {
+  @ApiOperation({
+    summary: 'Create post (path = parent.path/slug when parent_id set)',
+  })
+  async create(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: Record<string, unknown>,
+  ) {
     try {
       return await this.blogService.createPost(req.user!.id, body as any);
     } catch (e: any) {
@@ -122,12 +127,18 @@ export class AdminBlogController {
   @Post('editors')
   @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
   @ApiOperation({ summary: 'Grant blog editor role to a user id' })
-  async grant(@Req() req: AuthenticatedRequest, @Body() body: { user_id?: string }) {
+  async grant(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: { user_id?: string },
+  ) {
     try {
       if (!body.user_id?.trim()) {
         throw new HttpException('user_id required', HttpStatus.BAD_REQUEST);
       }
-      return await this.blogService.grantEditor(req.user!.id, body.user_id.trim());
+      return await this.blogService.grantEditor(
+        req.user!.id,
+        body.user_id.trim(),
+      );
     } catch (e: any) {
       this.logger.error(e?.message);
       throw new HttpException(

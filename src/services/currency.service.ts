@@ -72,17 +72,25 @@ export class CurrencyService {
    */
   async getExchangeRate(): Promise<ExchangeRateData> {
     // Try cache first
-    const cached = await this.cacheService.get(CURRENCY_CACHE_KEY) as ExchangeRateData | null;
+    const cached = (await this.cacheService.get(
+      CURRENCY_CACHE_KEY,
+    )) as ExchangeRateData | null;
     if (cached) {
       return cached;
     }
 
     // Fetch from database
-    const rateData = await this.appSettingsService.get<ExchangeRateData>('currency_exchange_rate');
+    const rateData = await this.appSettingsService.get<ExchangeRateData>(
+      'currency_exchange_rate',
+    );
 
     if (rateData && rateData.inr_to_usd && rateData.usd_to_inr) {
       // Cache the result
-      await this.cacheService.set(CURRENCY_CACHE_KEY, rateData, CURRENCY_CACHE_TTL);
+      await this.cacheService.set(
+        CURRENCY_CACHE_KEY,
+        rateData,
+        CURRENCY_CACHE_TTL,
+      );
       return rateData;
     }
 
@@ -115,7 +123,12 @@ export class CurrencyService {
     forexLastUpdated: string,
     updatedBy = 'forex-api',
   ): Promise<void> {
-    if (usdToInr <= 0 || inrToUsd <= 0 || !Number.isFinite(usdToInr) || !Number.isFinite(inrToUsd)) {
+    if (
+      usdToInr <= 0 ||
+      inrToUsd <= 0 ||
+      !Number.isFinite(usdToInr) ||
+      !Number.isFinite(inrToUsd)
+    ) {
       throw new Error('Exchange rates must be positive numbers');
     }
 
@@ -163,12 +176,18 @@ export class CurrencyService {
     };
 
     // Save to database
-    await this.appSettingsService.set('currency_exchange_rate', rateData, updatedBy);
+    await this.appSettingsService.set(
+      'currency_exchange_rate',
+      rateData,
+      updatedBy,
+    );
 
     // Invalidate cache
     await this.cacheService.delete(CURRENCY_CACHE_KEY);
 
-    this.logger.log(`Exchange rate updated: 1 INR = ${rate} USD (by ${updatedBy || 'system'})`);
+    this.logger.log(
+      `Exchange rate updated: 1 INR = ${rate} USD (by ${updatedBy || 'system'})`,
+    );
   }
 
   /**

@@ -66,7 +66,9 @@ export class SocialConnectionBridgeService {
     private readonly tokenVault: TokenVaultService,
   ) {}
 
-  public async connectLinkedIn(params: ConnectLinkedInParams): Promise<ConnectedAccount> {
+  public async connectLinkedIn(
+    params: ConnectLinkedInParams,
+  ): Promise<ConnectedAccount> {
     return this.connect('linkedin', 'personal', params);
   }
 
@@ -82,7 +84,9 @@ export class SocialConnectionBridgeService {
     });
   }
 
-  public async getConnectedLinkedInAccounts(userId: string): Promise<ConnectedAccount[]> {
+  public async getConnectedLinkedInAccounts(
+    userId: string,
+  ): Promise<ConnectedAccount[]> {
     const client = this.supabase.getServiceClient();
     const { data, error } = await client
       .from('social_accounts')
@@ -91,7 +95,8 @@ export class SocialConnectionBridgeService {
       .eq('user_id', userId)
       .eq('status', 'active')
       .order('connected_at', { ascending: false });
-    if (error) throw new Error(`Failed to read social_accounts: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to read social_accounts: ${error.message}`);
     return (data ?? []).map((row) => this.mapRow(row as SocialAccountRow));
   }
 
@@ -108,7 +113,8 @@ export class SocialConnectionBridgeService {
       .eq('platform_account_id', platformAccountId)
       .eq('status', 'active')
       .maybeSingle();
-    if (error) throw new Error(`Failed to read social_accounts: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to read social_accounts: ${error.message}`);
     return data ? this.mapRow(data as SocialAccountRow) : null;
   }
 
@@ -133,10 +139,12 @@ export class SocialConnectionBridgeService {
       .maybeSingle();
     if (error) {
       // Read failure → allow the flow to continue (fail-open on lookup error).
-      this.logger.warn(`assertLinkedInNotOwnedByOther lookup failed: ${error.message}`);
+      this.logger.warn(
+        `assertLinkedInNotOwnedByOther lookup failed: ${error.message}`,
+      );
       return;
     }
-    if (data && (data as { user_id: string }).user_id !== userId) {
+    if (data && data.user_id !== userId) {
       throw new SocialAccountAlreadyConnectedError('linkedin', memberId);
     }
   }
@@ -176,7 +184,9 @@ export class SocialConnectionBridgeService {
         })
         .eq('id', row.id);
       if (updErr) {
-        throw new Error(`Failed to update social_accounts on re-auth: ${updErr.message}`);
+        throw new Error(
+          `Failed to update social_accounts on re-auth: ${updErr.message}`,
+        );
       }
       await this.tokenVault.rotateTokens(row.id, params.tokens);
       return this.mapRow({ ...row, status: 'active' });
@@ -226,7 +236,10 @@ export class SocialConnectionBridgeService {
 
   // Best-effort disconnect: removes the new-model rows + vault secrets for this
   // user. Legacy disconnect (profiles.linkedin_*) is handled by the caller.
-  public async disconnectLinkedIn(userId: string, memberId?: string): Promise<void> {
+  public async disconnectLinkedIn(
+    userId: string,
+    memberId?: string,
+  ): Promise<void> {
     const client = this.supabase.getServiceClient();
     let query = client
       .from('social_accounts')
@@ -238,15 +251,22 @@ export class SocialConnectionBridgeService {
     }
     const { data, error } = await query;
     if (error) {
-      this.logger.warn(`disconnectLinkedIn lookup failed for ${userId}: ${error.message}`);
+      this.logger.warn(
+        `disconnectLinkedIn lookup failed for ${userId}: ${error.message}`,
+      );
       return;
     }
     for (const row of (data as Array<{ id: string }>) ?? []) {
       // Deleting the social_accounts row cascades to social_tokens; vault
       // secrets are cleaned up explicitly by the token service before delete.
-      const { error: delErr } = await client.from('social_accounts').delete().eq('id', row.id);
+      const { error: delErr } = await client
+        .from('social_accounts')
+        .delete()
+        .eq('id', row.id);
       if (delErr) {
-        this.logger.warn(`Failed to delete social_account ${row.id}: ${delErr.message}`);
+        this.logger.warn(
+          `Failed to delete social_account ${row.id}: ${delErr.message}`,
+        );
       }
     }
   }
@@ -299,12 +319,16 @@ export class SocialConnectionBridgeService {
       .eq('id', accountId)
       .eq('user_id', userId);
     if (delErr) {
-      throw new Error(`Failed to disconnect social_account ${accountId}: ${delErr.message}`);
+      throw new Error(
+        `Failed to disconnect social_account ${accountId}: ${delErr.message}`,
+      );
     }
     return existing;
   }
 
-  public async getConnectedLinkedIn(userId: string): Promise<ConnectedAccount | null> {
+  public async getConnectedLinkedIn(
+    userId: string,
+  ): Promise<ConnectedAccount | null> {
     const client = this.supabase.getServiceClient();
     const { data, error } = await client
       .from('social_accounts')
@@ -315,7 +339,8 @@ export class SocialConnectionBridgeService {
       .order('connected_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (error) throw new Error(`Failed to read social_accounts: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to read social_accounts: ${error.message}`);
     return data ? this.mapRow(data as SocialAccountRow) : null;
   }
 
@@ -325,7 +350,8 @@ export class SocialConnectionBridgeService {
       userId: row.user_id,
       platform: row.platform as Platform,
       platformAccountId: row.platform_account_id,
-      accountType: row.account_type === 'organization' ? 'organization' : 'personal',
+      accountType:
+        row.account_type === 'organization' ? 'organization' : 'personal',
       displayName: row.display_name,
       profileUrl: row.profile_url,
       avatarUrl: row.avatar_url,

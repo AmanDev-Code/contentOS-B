@@ -19,9 +19,7 @@ export class LinkedinOAuthStateService {
     metadata?: Record<string, unknown>,
   ): Promise<string> {
     const state = randomBytes(32).toString('hex');
-    const value = metadata
-      ? JSON.stringify({ userId, metadata })
-      : userId;
+    const value = metadata ? JSON.stringify({ userId, metadata }) : userId;
     await this.cacheService.set(PREFIX + state, value, TTL_SEC);
     return state;
   }

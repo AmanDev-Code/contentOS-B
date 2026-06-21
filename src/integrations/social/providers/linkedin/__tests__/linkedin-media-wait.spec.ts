@@ -31,7 +31,11 @@ function makeResponse(spec: FakeResponseSpec) {
 }
 
 function routerFetch(
-  routes: Array<{ match: RegExp; method?: string; responses: FakeResponseSpec[] }>,
+  routes: Array<{
+    match: RegExp;
+    method?: string;
+    responses: FakeResponseSpec[];
+  }>,
 ) {
   const calls: Array<{ url: string; method: string }> = [];
   const fn = (async (url: string, init?: RequestInit) => {
@@ -62,12 +66,7 @@ describe('LinkedInMediaService.waitForReady', () => {
     const { fn, calls } = routerFetch([]);
     const service = buildService(fn);
 
-    await service.waitForReady(
-      'urn:li:image:42',
-      'token',
-      'images',
-      true,
-    );
+    await service.waitForReady('urn:li:image:42', 'token', 'images', true);
 
     expect(calls).toHaveLength(0);
   });
@@ -86,12 +85,7 @@ describe('LinkedInMediaService.waitForReady', () => {
     ]);
     const service = buildService(fn);
 
-    await service.waitForReady(
-      'urn:li:image:42',
-      'token',
-      'images',
-      false,
-    );
+    await service.waitForReady('urn:li:image:42', 'token', 'images', false);
 
     expect(calls).toHaveLength(3);
   });
@@ -166,22 +160,33 @@ describe('LinkedInMediaService.waitForReady', () => {
           {
             status: 200,
             body: {
-              value: { uploadUrl: 'https://upload.test/img', image: 'urn:li:image:42' },
+              value: {
+                uploadUrl: 'https://upload.test/img',
+                image: 'urn:li:image:42',
+              },
             },
           },
         ],
       },
-      { match: /upload\.test\/img$/, method: 'PUT', responses: [{ status: 201 }] },
+      {
+        match: /upload\.test\/img$/,
+        method: 'PUT',
+        responses: [{ status: 201 }],
+      },
     ]);
     const service = buildService(fn);
 
-    const result = await service.upload('urn:li:person:123', {
-      id: 'm1',
-      kind: 'image',
-      mimeType: 'image/jpeg',
-      sizeBytes: 16,
-      storagePath: 'posts/m1.jpg',
-    }, 'token');
+    const result = await service.upload(
+      'urn:li:person:123',
+      {
+        id: 'm1',
+        kind: 'image',
+        mimeType: 'image/jpeg',
+        sizeBytes: 16,
+        storagePath: 'posts/m1.jpg',
+      },
+      'token',
+    );
 
     expect(result.assetUrn).toBe('urn:li:image:42');
     expect(result.mediaType).toBe('images');

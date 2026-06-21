@@ -1,4 +1,7 @@
-import { LinkedInAuthService, type LinkedInAuthConfig } from '../linkedin-auth.service';
+import {
+  LinkedInAuthService,
+  type LinkedInAuthConfig,
+} from '../linkedin-auth.service';
 import { AuthFailedError } from '../../../types';
 
 const config: LinkedInAuthConfig = {
@@ -13,7 +16,10 @@ interface FakeFetchCall {
 }
 
 function fakeFetch(
-  handler: (url: string, init?: RequestInit) => { ok: boolean; status: number; body: unknown },
+  handler: (
+    url: string,
+    init?: RequestInit,
+  ) => { ok: boolean; status: number; body: unknown },
 ): { fn: typeof fetch; calls: FakeFetchCall[] } {
   const calls: FakeFetchCall[] = [];
   const fn = (async (url: string, init?: RequestInit) => {
@@ -32,9 +38,14 @@ function fakeFetch(
 describe('LinkedInAuthService', () => {
   it('builds an authorization URL with required params', async () => {
     const svc = new LinkedInAuthService(config);
-    const { url } = await svc.getAuthorizationUrl('state-abc', ['openid', 'w_member_social']);
+    const { url } = await svc.getAuthorizationUrl('state-abc', [
+      'openid',
+      'w_member_social',
+    ]);
     const parsed = new URL(url);
-    expect(parsed.origin + parsed.pathname).toBe('https://www.linkedin.com/oauth/v2/authorization');
+    expect(parsed.origin + parsed.pathname).toBe(
+      'https://www.linkedin.com/oauth/v2/authorization',
+    );
     expect(parsed.searchParams.get('client_id')).toBe('client-123');
     expect(parsed.searchParams.get('redirect_uri')).toBe(config.redirectUri);
     expect(parsed.searchParams.get('state')).toBe('state-abc');
@@ -71,7 +82,11 @@ describe('LinkedInAuthService', () => {
     const { fn, calls } = fakeFetch(() => ({
       ok: true,
       status: 200,
-      body: { access_token: 'access-2', expires_in: 5184000, refresh_token: 'refresh-2' },
+      body: {
+        access_token: 'access-2',
+        expires_in: 5184000,
+        refresh_token: 'refresh-2',
+      },
     }));
     const svc = new LinkedInAuthService(config, fn);
 
@@ -83,9 +98,15 @@ describe('LinkedInAuthService', () => {
   });
 
   it('throws AuthFailedError when the token endpoint rejects', async () => {
-    const { fn } = fakeFetch(() => ({ ok: false, status: 400, body: { error: 'invalid_grant' } }));
+    const { fn } = fakeFetch(() => ({
+      ok: false,
+      status: 400,
+      body: { error: 'invalid_grant' },
+    }));
     const svc = new LinkedInAuthService(config, fn);
-    await expect(svc.refreshTokens('dead-token')).rejects.toBeInstanceOf(AuthFailedError);
+    await expect(svc.refreshTokens('dead-token')).rejects.toBeInstanceOf(
+      AuthFailedError,
+    );
   });
 
   it('never throws on revoke (best-effort contract)', async () => {
@@ -98,11 +119,15 @@ describe('LinkedInAuthService', () => {
 
   it('validates granted vs required scopes', () => {
     const svc = new LinkedInAuthService(config);
-    expect(svc.validateScopes(['openid', 'w_member_social'], ['openid'])).toEqual({
+    expect(
+      svc.validateScopes(['openid', 'w_member_social'], ['openid']),
+    ).toEqual({
       ok: true,
       missing: [],
     });
-    expect(svc.validateScopes(['openid'], ['openid', 'w_member_social'])).toEqual({
+    expect(
+      svc.validateScopes(['openid'], ['openid', 'w_member_social']),
+    ).toEqual({
       ok: false,
       missing: ['w_member_social'],
     });

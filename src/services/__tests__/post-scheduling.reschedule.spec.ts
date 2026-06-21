@@ -94,8 +94,8 @@ function makeService(supabase: any, queue: any) {
   // Only publishQueue + supabaseService are exercised by reschedulePost; the
   // remaining constructor deps are unused on this path.
   return new PostSchedulingService(
-    queue as any,
-    supabase as any,
+    queue,
+    supabase,
     {} as any, // mediaGenerationService
     {} as any, // linkedinService
     {} as any, // cacheService

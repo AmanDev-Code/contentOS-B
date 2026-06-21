@@ -61,7 +61,12 @@ export class BrowserPoolService implements OnModuleDestroy {
     const page = await context.newPage();
     if (options?.blockResources !== false) {
       const blocked = new Set<string>(
-        options?.blockedResourceTypes ?? ['image', 'media', 'font', 'stylesheet'],
+        options?.blockedResourceTypes ?? [
+          'image',
+          'media',
+          'font',
+          'stylesheet',
+        ],
       );
       await page.route('**/*', (route) => {
         if (blocked.has(route.request().resourceType())) return route.abort();

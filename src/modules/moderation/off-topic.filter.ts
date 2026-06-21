@@ -1,8 +1,4 @@
-import {
-  ExceptionFilter,
-  Catch,
-  ArgumentsHost,
-} from '@nestjs/common';
+import { ExceptionFilter, Catch, ArgumentsHost } from '@nestjs/common';
 import { Response } from 'express';
 import { OffTopicError } from '../post-ai/errors';
 
@@ -15,8 +11,7 @@ export class OffTopicExceptionFilter implements ExceptionFilter {
     response.status(422).json({
       statusCode: 422,
       code: 'off_topic',
-      message:
-        'Please describe a topic, event, or experience for your post.',
+      message: 'Please describe a topic, event, or experience for your post.',
     });
   }
 }

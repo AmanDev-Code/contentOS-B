@@ -32,14 +32,17 @@ export const SITE_CONTENT_KEYS = [
 
 export type SiteContentKey = (typeof SITE_CONTENT_KEYS)[number];
 
-export const DEFAULT_SITE_CONTENT: Record<SiteContentKey, Record<string, unknown>> = {
+export const DEFAULT_SITE_CONTENT: Record<
+  SiteContentKey,
+  Record<string, unknown>
+> = {
   landing_hero: {
-    eyebrow: 'AI social content platform',
-    title: "Run your brand's social presence on autopilot, with AI you control.",
+    eyebrow: 'All-in-one agentic social platform',
+    title: 'Run your social growth on autopilot with AI agents',
     subtitle:
-      "Trndinn turns the examples you provide into on-brand posts, then schedules and publishes them to the accounts you connect. You own your data; we comply with every platform's policies.",
-    primaryCta: { label: 'Start free', href: '/auth' },
-    secondaryCta: { label: 'See how it works', href: '/features' },
+      "Trndinn's agents draft on-brand posts from the examples you provide, schedule them on a visual calendar, and publish to the accounts you connect — then feed your Content Engine to rank, distribute, and newsletter. You stay in control; agents do the work.",
+    primaryCta: { label: 'Start free — 150 credits', href: '/auth' },
+    secondaryCta: { label: 'See agentic workflows', href: '/features#agentic' },
     trustLine: 'No card required. 150 free credits to start.',
   },
   landing_backers: {
@@ -47,35 +50,52 @@ export const DEFAULT_SITE_CONTENT: Record<SiteContentKey, Record<string, unknown
     subtitle:
       'Trndinn is a member of leading startup and AI programs that back early-stage builders.',
     items: [
-      { key: 'nvidia', name: 'NVIDIA Inception', href: 'https://www.nvidia.com/en-us/startups/' },
-      { key: 'google', name: 'Google for Startups', href: 'https://startup.google.com/' },
-      { key: 'aws', name: 'AWS Activate', href: 'https://aws.amazon.com/activate/' },
-      { key: 'elevenlabs', name: 'ElevenLabs Grants', href: 'https://elevenlabs.io/startup-grants' },
+      {
+        key: 'nvidia',
+        name: 'NVIDIA Inception',
+        href: 'https://www.nvidia.com/en-us/startups/',
+      },
+      {
+        key: 'google',
+        name: 'Google for Startups',
+        href: 'https://startup.google.com/',
+      },
+      {
+        key: 'aws',
+        name: 'AWS Activate',
+        href: 'https://aws.amazon.com/activate/',
+      },
+      {
+        key: 'elevenlabs',
+        name: 'ElevenLabs Grants',
+        href: 'https://elevenlabs.io/startup-grants',
+      },
     ],
   },
   landing_pillars: {
-    title: 'From prompt to published, one calm workflow',
-    subtitle: 'Four pillars that take you from idea to impact without the busywork.',
+    title: 'Create, schedule, manage, and grow — one agentic workflow',
+    subtitle:
+      'Four pillars where AI agents handle the busywork and you keep brand control.',
     items: [
       {
         key: 'generate',
-        title: 'Generate',
-        body: 'Draft on-brand posts, images, and carousels. Your Brand Voice is built only from the examples you provide. It is never scraped from your feeds.',
+        title: 'Create with agents',
+        body: 'Draft posts, images, and carousels in the Agent. Brand Voice learns only from examples you provide — never scraped from your feeds.',
       },
       {
         key: 'schedule',
-        title: 'Schedule',
-        body: 'Plan a week or a month on a drag-and-drop calendar. Recurring schedules keep you consistent automatically.',
+        title: 'Schedule everywhere you connect',
+        body: 'Visual calendar, drag-and-drop, recurring cadences. LinkedIn live today; more channels on the roadmap.',
       },
       {
         key: 'publish',
-        title: 'Publish',
-        body: 'Publish and schedule to the accounts you connect, with your consent. Reliable delivery, retries, and full history.',
+        title: 'Manage with confidence',
+        body: 'Publish with retries and full history. Public API v1 and signed webhooks for your automation stack.',
       },
       {
         key: 'analyze',
-        title: 'Analyze',
-        body: 'See what actually moves your audience and turn insights into your next post.',
+        title: 'Grow with Content Engine',
+        body: 'SEO articles, clusters, 31-platform distribution, internal links, and newsletter — agents feed the funnel.',
       },
     ],
   },
@@ -107,45 +127,67 @@ export const DEFAULT_SITE_CONTENT: Record<SiteContentKey, Record<string, unknown
     ],
   },
   landing_audiences: {
-    title: 'Built for how you actually work',
+    title: 'Who is Trndinn for?',
     subtitle:
-      'Whether you run one brand or many, Trndinn keeps publishing calm: your examples, your accounts, your consent.',
+      'Agentic creators, LinkedIn-first teams, and growth leads who want one platform — not five tabs.',
     items: [
       {
-        key: 'founders',
-        title: 'Founders and solo creators',
-        body: 'Paste your best posts once, generate a week of on-brand drafts, and schedule without living in five tabs.',
+        key: 'agentic',
+        title: 'Agentic',
+        body: "Tell Trndinn's Agent what to publish — or wire your stack via API and webhooks. MCP and CLI coming soon for Claude, ChatGPT, and Cursor.",
       },
       {
-        key: 'agencies',
-        title: 'Agencies and teams',
-        body: 'Keep client voices distinct with Brand Kits built from the examples each client provides, then publish from the accounts they connect.',
+        key: 'linkedin',
+        title: 'LinkedIn-first',
+        body: 'Personal profiles and Company Pages, posting identity picker, and Brand Voice built from your examples — not scraped from feeds.',
       },
       {
-        key: 'creators',
-        title: 'Growth and content leads',
-        body: 'Plan on a visual calendar, automate recurring cadences, and see what resonates, all from one command center.',
+        key: 'content-engine',
+        title: 'Content Engine',
+        body: 'Turn keywords into articles, distribute to 31 platforms, interlink, score SEO/AEO/GEO, and email your list — one agentic loop.',
       },
     ],
   },
   landing_comparison: {
-    title: 'Stop juggling tabs. Start publishing with confidence.',
+    title:
+      'Stop prompting in five tools. Start growing with one agentic platform.',
     subtitle:
       "Manual posting works until it doesn't. Missed slots, off-brand drafts, and no single source of truth.",
     manualLabel: 'Manual',
     trndinnLabel: 'Trndinn',
     rows: [
-      { label: 'On-brand drafts from your examples', manual: false, trndinn: true },
-      { label: 'Visual calendar with drag-and-drop', manual: false, trndinn: true },
-      { label: 'Reliable scheduled publishing (within 60s)', manual: false, trndinn: true },
-      { label: 'Recurring posts without copy-paste', manual: false, trndinn: true },
-      { label: 'Full publish history and retries', manual: false, trndinn: true },
+      {
+        label: 'Agent drafts + schedules end-to-end',
+        manual: false,
+        trndinn: true,
+      },
+      {
+        label: 'Brand Voice from your examples (no scraping)',
+        manual: false,
+        trndinn: true,
+      },
+      {
+        label: 'SEO article → social distribution loop',
+        manual: false,
+        trndinn: true,
+      },
+      {
+        label: 'Visual calendar with drag-and-drop',
+        manual: false,
+        trndinn: true,
+      },
+      {
+        label: 'Reliable scheduled publishing (within 60s)',
+        manual: false,
+        trndinn: true,
+      },
       { label: 'API and signed webhooks', manual: false, trndinn: true },
     ],
   },
   landing_secondary_features: {
     title: 'Everything else you need to stay consistent',
-    subtitle: 'Power features that compound, without adding noise to your workflow.',
+    subtitle:
+      'Power features that compound, without adding noise to your workflow.',
     items: [
       {
         key: 'variants',
@@ -229,107 +271,53 @@ export const DEFAULT_SITE_CONTENT: Record<SiteContentKey, Record<string, unknown
     ctaLabel: 'View plans',
     ctaHref: '/pricing',
     highlights: [
-      { name: 'Free', detail: '150 credits to explore Brand Voice and scheduling' },
+      {
+        name: 'Free',
+        detail: '150 credits to explore Brand Voice and scheduling',
+      },
       { name: 'Creator', detail: 'For consistent solo publishing' },
-      { name: 'Team and Agency', detail: 'Higher limits, webhooks, and team workflows' },
+      {
+        name: 'Team and Agency',
+        detail: 'Higher limits, webhooks, and team workflows',
+      },
     ],
   },
   landing_faq: {
     title: 'Questions, answered',
     items: [
       {
+        q: 'What does agentic mean on Trndinn?',
+        a: 'Agentic means AI that completes multi-step workflows — draft, adapt per platform, schedule, publish, and distribute — with minimal UI friction. Today that includes the in-app Agent, Brand Kit, calendar, Public API v1, webhooks, and Content Engine. MCP and CLI for external agents like Claude and ChatGPT are on the roadmap.',
+      },
+      {
         q: 'Does Trndinn learn from my LinkedIn posts?',
         a: "No. Your Brand Voice is built only from the examples you choose to provide. We never scrape, crawl, or ingest your social feeds, and we don't train AI on connected-platform data.",
       },
       {
-        q: 'Do I keep ownership of my content?',
-        a: 'Always. You own your content and inputs. We only use the limited rights needed to host, generate from your inputs, and publish on your behalf.',
-      },
-      {
-        q: 'Is Trndinn compliant with platform rules?',
-        a: "Yes. We're built to comply with and abide by the developer, platform, and AI policies of every connected platform, including LinkedIn and Meta/Instagram.",
-      },
-      {
-        q: 'What happens when I disconnect an account?',
-        a: "We delete that platform's tokens and platform-derived data, in line with each platform's retention limits.",
+        q: 'Can I connect Claude or ChatGPT today?',
+        a: 'Use Public API v1 and signed webhooks to wire Trndinn into your automation stack today. A dedicated MCP server and CLI for Claude, ChatGPT, and Cursor are coming soon.',
       },
       {
         q: 'Which platforms can I publish to today?',
-        a: "LinkedIn is live today. Other channels are on the roadmap. You connect accounts when each channel launches, and we comply with that platform's policies.",
+        a: 'LinkedIn is live today — personal profiles and Company Pages. Other channels are on the roadmap and marked Coming soon on our site. You connect accounts when each channel launches.',
+      },
+      {
+        q: 'What is the Content Engine?',
+        a: 'Content Engine turns keywords into SEO articles, distributes adapted copies to 31 platforms, builds internal links, scores SEO/AEO/GEO quality, and powers newsletter campaigns — so social is fed by search growth, not just prompts.',
       },
       {
         q: 'How does pricing work?',
-        a: 'Start free with 150 credits. Paid plans add more credits and features; checkout prices are fetched live from Polar so you always see current rates.',
+        a: 'Start free with 150 credits. Paid plans (Creator, Team, Agency) add more credits and features; checkout prices are fetched live from Polar so you always see current rates.',
       },
     ],
   },
   features_page: {
     eyebrow: 'Features',
-    title: 'Everything you need to publish with confidence',
+    title:
+      'Everything you need for agentic social media — create, schedule, manage, and grow',
     subtitle:
-      'A complete workflow: generate from your own examples, schedule with precision, publish reliably, and learn from results.',
-    sections: [
-      {
-        key: 'brand-voice',
-        title: 'Brand Voice from your examples',
-        body: 'Paste your best posts and brand guidelines. Trndinn builds a voice profile from the examples you provide, so drafts sound like you, with zero scraping of your feeds.',
-        bullets: [
-          'Bring your own examples and writing samples',
-          "Tone, do and don't, and brand colors in one Brand Kit",
-          'Consistent voice across every draft',
-        ],
-      },
-      {
-        key: 'ai-studio',
-        title: 'AI content studio',
-        body: 'Generate posts, images, and carousels from your inputs. Refine with one click and keep what works.',
-        bullets: [
-          'Text, image, and carousel generation',
-          'Regenerate single assets or whole sets',
-          'Credit-based: use credits on any action',
-        ],
-      },
-      {
-        key: 'calendar',
-        title: 'Calendar and scheduling',
-        body: 'Plan visually with a drag-and-drop calendar. Recurring schedules keep your cadence steady automatically.',
-        bullets: [
-          'Day, week, and month views',
-          'Drag-and-drop reschedule',
-          'Recurring workflows (RRULE)',
-        ],
-      },
-      {
-        key: 'publishing',
-        title: 'Reliable publishing',
-        body: 'Publish and schedule to the accounts you connect. Automatic retries, dead-letter handling, and full logs keep delivery dependable.',
-        bullets: [
-          'Publishes within 60s of schedule',
-          'Retry with backoff and failure alerts',
-          'Complete publish history and logs',
-        ],
-      },
-      {
-        key: 'api',
-        title: 'API and webhooks',
-        body: 'Automate with a stable Public API v1 and signed webhooks for post lifecycle events.',
-        bullets: [
-          'Create, schedule, and check status via API',
-          'HMAC-signed webhooks',
-          'Per-plan rate limits',
-        ],
-      },
-      {
-        key: 'compliance',
-        title: 'Compliant by design',
-        body: "You own your data; we comply with every connected platform's policies and delete platform data on disconnect.",
-        bullets: [
-          'No scraping, no AI training on platform data',
-          'Retention caps honored per platform',
-          'GDPR, CCPA, and DPDP aligned',
-        ],
-      },
-    ],
+      'One platform where AI agents handle the busywork and you keep brand control.',
+    sections: [],
   },
   features_roadmap: {
     eyebrow: 'Product roadmap',
@@ -346,10 +334,30 @@ export const DEFAULT_SITE_CONTENT: Record<SiteContentKey, Record<string, unknown
         caption: 'Available today',
         status: 'live',
         phases: [
-          { tag: 'Phase 0', name: 'Foundation & architecture', value: 'A secure, scalable core with encrypted account tokens and reliable publishing.' },
-          { tag: 'Phase 1', name: 'LinkedIn publishing & scheduling', value: 'Connect your LinkedIn, then draft, schedule, and publish with retries and full history.' },
-          { tag: 'Phase 1', name: 'Brand Voice from your examples', value: 'A voice profile built only from the posts and guidelines you provide.' },
-          { tag: 'Phase 1', name: 'Visual calendar & recurring posts', value: 'Plan a week or month on a drag-and-drop calendar with recurring cadences.' },
+          {
+            tag: 'Phase 0',
+            name: 'Foundation & architecture',
+            value:
+              'A secure, scalable core with encrypted account tokens and reliable publishing.',
+          },
+          {
+            tag: 'Phase 1',
+            name: 'LinkedIn publishing & scheduling',
+            value:
+              'Connect your LinkedIn, then draft, schedule, and publish with retries and full history.',
+          },
+          {
+            tag: 'Phase 1',
+            name: 'Brand Voice from your examples',
+            value:
+              'A voice profile built only from the posts and guidelines you provide.',
+          },
+          {
+            tag: 'Phase 1',
+            name: 'Visual calendar & recurring posts',
+            value:
+              'Plan a week or month on a drag-and-drop calendar with recurring cadences.',
+          },
         ],
       },
       {
@@ -358,9 +366,23 @@ export const DEFAULT_SITE_CONTENT: Record<SiteContentKey, Record<string, unknown
         caption: 'Building now',
         status: 'progress',
         phases: [
-          { tag: 'Phase 1.5', name: 'Launch & go-to-market', value: 'Pricing, billing, and the polish that takes Trndinn to public launch.' },
-          { tag: 'Phase 1', name: 'Public API & webhooks', value: 'Build on Trndinn with a documented API and event webhooks.' },
-          { tag: 'Phase 2', name: 'AI content studio', value: 'Deeper post, image, and carousel generation from your own inputs.' },
+          {
+            tag: 'Phase 1.5',
+            name: 'Launch & go-to-market',
+            value:
+              'Pricing, billing, and the polish that takes Trndinn to public launch.',
+          },
+          {
+            tag: 'Phase 1',
+            name: 'Public API & webhooks',
+            value: 'Build on Trndinn with a documented API and event webhooks.',
+          },
+          {
+            tag: 'Phase 2',
+            name: 'AI content studio',
+            value:
+              'Deeper post, image, and carousel generation from your own inputs.',
+          },
         ],
       },
       {
@@ -369,24 +391,65 @@ export const DEFAULT_SITE_CONTENT: Record<SiteContentKey, Record<string, unknown
         caption: 'On the roadmap',
         status: 'planned',
         phases: [
-          { tag: 'Phase 3', name: 'Trend intelligence', value: 'Spot what is resonating in your niche to inform your next post.' },
-          { tag: 'Phase 4', name: 'Campaign engine', value: 'Plan multi-post campaigns around launches and themes.' },
-          { tag: 'Phase 5', name: 'Creative studio', value: 'Richer on-brand visuals and templates for every post.' },
-          { tag: 'Phase 6', name: 'More channels', value: 'Publish to more networks you connect, as each one launches.' },
-          { tag: 'Phase 7', name: 'Workflow orchestration', value: 'Durable automation for complex, multi-step publishing.' },
-          { tag: 'Phase 8', name: 'Video generation', value: 'Generate short-form video from the inputs you provide.' },
-          { tag: 'Phase 9', name: 'Analytics intelligence', value: 'Turn results into clear, actionable next steps.' },
-          { tag: 'Phase 10', name: 'Teams & agency tools', value: 'Roles, approvals, and multi-brand workspaces.' },
-          { tag: 'Phase 11', name: 'Autonomous growth', value: 'An AI growth system that proposes and drafts, with you in control.' },
+          {
+            tag: 'Phase 3',
+            name: 'Trend intelligence',
+            value:
+              'Spot what is resonating in your niche to inform your next post.',
+          },
+          {
+            tag: 'Phase 4',
+            name: 'Campaign engine',
+            value: 'Plan multi-post campaigns around launches and themes.',
+          },
+          {
+            tag: 'Phase 5',
+            name: 'Creative studio',
+            value: 'Richer on-brand visuals and templates for every post.',
+          },
+          {
+            tag: 'Phase 6',
+            name: 'More channels',
+            value:
+              'Publish to more networks you connect, as each one launches.',
+          },
+          {
+            tag: 'Phase 7',
+            name: 'Workflow orchestration',
+            value: 'Durable automation for complex, multi-step publishing.',
+          },
+          {
+            tag: 'Phase 8',
+            name: 'Video generation',
+            value: 'Generate short-form video from the inputs you provide.',
+          },
+          {
+            tag: 'Phase 9',
+            name: 'Analytics intelligence',
+            value: 'Turn results into clear, actionable next steps.',
+          },
+          {
+            tag: 'Phase 10',
+            name: 'Teams & agency tools',
+            value: 'Roles, approvals, and multi-brand workspaces.',
+          },
+          {
+            tag: 'Phase 11',
+            name: 'Autonomous growth',
+            value:
+              'An AI growth system that proposes and drafts, with you in control.',
+          },
         ],
       },
     ],
   },
   about_us: {
     seoTitle: 'About Us | Trndinn',
-    seoDescription: "Learn about Trndinn's mission, values, and the team building the future of social content creation.",
+    seoDescription:
+      "Learn about Trndinn's mission, values, and the team building the future of social content creation.",
     heroHeadline: 'Building the future of social content creation',
-    heroSubtitle: "We're on a mission to help creators, brands, and teams publish with confidence—powered by AI that respects your voice and your data.",
+    heroSubtitle:
+      "We're on a mission to help creators, brands, and teams publish with confidence—powered by AI that respects your voice and your data.",
     heroEyebrow: 'About Trndinn',
     mainContent: `## Our Story
 
@@ -409,28 +472,38 @@ We exist to help creators, founders, marketers, and teams publish consistently a
 - **Reliability**: 99.9% delivery target, encrypted tokens, secure by default.
 - **Creativity**: AI assists; humans create. We're here to amplify, not replace.
 `,
-    missionStatement: 'Helping creators publish with confidence—powered by AI that respects their voice.',
+    missionStatement:
+      'Helping creators publish with confidence—powered by AI that respects their voice.',
     values: [
       {
         title: 'Transparency',
-        description: 'Clear pricing, honest roadmap, no dark patterns. We believe in building trust through openness.',
+        description:
+          'Clear pricing, honest roadmap, no dark patterns. We believe in building trust through openness.',
       },
       {
         title: 'Ownership',
-        description: 'You own your content. Your examples stay yours. Your brand voice belongs to you alone.',
+        description:
+          'You own your content. Your examples stay yours. Your brand voice belongs to you alone.',
       },
       {
         title: 'Reliability',
-        description: '99.9% delivery target, encrypted tokens, secure by default. Your trust is our foundation.',
+        description:
+          '99.9% delivery target, encrypted tokens, secure by default. Your trust is our foundation.',
       },
       {
         title: 'Creativity',
-        description: 'AI assists; humans create. We amplify your ideas, not replace your creative spark.',
+        description:
+          'AI assists; humans create. We amplify your ideas, not replace your creative spark.',
       },
     ],
   },
 };
 
-export function getDefaultSiteContent(key: string): Record<string, unknown> | null {
-  return (DEFAULT_SITE_CONTENT as Record<string, Record<string, unknown>>)[key] ?? null;
+export function getDefaultSiteContent(
+  key: string,
+): Record<string, unknown> | null {
+  return (
+    (DEFAULT_SITE_CONTENT as Record<string, Record<string, unknown>>)[key] ??
+    null
+  );
 }

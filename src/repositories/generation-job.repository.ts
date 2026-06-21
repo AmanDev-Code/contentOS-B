@@ -151,7 +151,9 @@ export class GenerationJobRepository {
   ): Promise<void> {
     const job = await this.findById(jobId);
     const existing =
-      job?.response && typeof job.response === 'object' && !Array.isArray(job.response)
+      job?.response &&
+      typeof job.response === 'object' &&
+      !Array.isArray(job.response)
         ? (job.response as Record<string, unknown>)
         : {};
     const { error } = await this.supabaseService
@@ -236,11 +238,7 @@ export class GenerationJobRepository {
       .getServiceClient()
       .from('generation_jobs')
       .select('*')
-      .in('status', [
-        JobStatus.GENERATING,
-        'media_generating',
-        'publishing',
-      ])
+      .in('status', [JobStatus.GENERATING, 'media_generating', 'publishing'])
       .lt('updated_at', threshold)
       .order('updated_at', { ascending: true })
       .limit(50);

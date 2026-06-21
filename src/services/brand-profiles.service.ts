@@ -122,7 +122,10 @@ export class BrandProfilesService {
     return data as BrandProfile;
   }
 
-  async create(userId: string, input: BrandProfileInput): Promise<BrandProfile> {
+  async create(
+    userId: string,
+    input: BrandProfileInput,
+  ): Promise<BrandProfile> {
     const row = this.toRow(userId, input);
     const client = this.supabaseService.getServiceClient();
     const { data, error } = await client
@@ -230,14 +233,19 @@ export class BrandProfilesService {
       secondary_color: this.cleanColor(input.secondaryColor, 'secondary'),
       accent_color: this.cleanColor(input.accentColor, 'accent'),
       tone: this.cleanString(input.tone, MAX_TONE) ?? null,
-      target_audience: this.cleanString(input.targetAudience, MAX_AUDIENCE) ?? null,
+      target_audience:
+        this.cleanString(input.targetAudience, MAX_AUDIENCE) ?? null,
       voice_examples: this.cleanArray(
         input.voiceExamples,
         MAX_VOICE_EXAMPLES,
         MAX_EXAMPLE_LEN,
       ),
       do_use: this.cleanArray(input.doUse, MAX_VOCAB_TERMS, MAX_TERM_LEN),
-      do_not_use: this.cleanArray(input.doNotUse, MAX_VOCAB_TERMS, MAX_TERM_LEN),
+      do_not_use: this.cleanArray(
+        input.doNotUse,
+        MAX_VOCAB_TERMS,
+        MAX_TERM_LEN,
+      ),
       additional_information:
         this.cleanString(input.additionalInformation, MAX_ADDITIONAL_INFO) ??
         null,

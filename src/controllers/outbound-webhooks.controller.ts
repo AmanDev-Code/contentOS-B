@@ -145,7 +145,8 @@ export class OutboundWebhooksController {
     try {
       const result = await this.deliveryService.testFire(userId, id);
       return {
-        success: result.status !== null && result.status >= 200 && result.status < 300,
+        success:
+          result.status !== null && result.status >= 200 && result.status < 300,
         status: result.status,
         body: result.body,
       };

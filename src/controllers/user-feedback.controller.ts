@@ -10,7 +10,10 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthGuard } from '../guards/auth.guard';
-import { UserFeedbackService, FeedbackType } from '../services/user-feedback.service';
+import {
+  UserFeedbackService,
+  FeedbackType,
+} from '../services/user-feedback.service';
 
 interface AuthedRequest extends Request {
   user: { id: string; email: string };
@@ -24,7 +27,9 @@ export class UserFeedbackController {
   constructor(private readonly userFeedbackService: UserFeedbackService) {}
 
   @Post('submit')
-  @ApiOperation({ summary: 'Submit general feedback (can submit multiple times)' })
+  @ApiOperation({
+    summary: 'Submit general feedback (can submit multiple times)',
+  })
   async submit(
     @Req() req: AuthedRequest,
     @Body()

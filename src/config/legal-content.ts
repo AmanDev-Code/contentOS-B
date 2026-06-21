@@ -197,7 +197,8 @@ ${NOT_AFFILIATED}`,
   cookies: {
     slug: 'cookies',
     title: 'Cookie Policy',
-    summary: 'What cookies and similar technologies we use, and how to control them.',
+    summary:
+      'What cookies and similar technologies we use, and how to control them.',
     seoDescription:
       "Trndinn's Cookie Policy: the cookies and similar technologies we use, their purposes, and how to manage your preferences.",
     version: '1.0',
@@ -234,7 +235,8 @@ Questions: ${COMPLIANCE_EMAIL}.`,
   aup: {
     slug: 'aup',
     title: 'Acceptable Use Policy',
-    summary: 'What you may and may not do with Trndinn — including platform-compliance rules.',
+    summary:
+      'What you may and may not do with Trndinn — including platform-compliance rules.',
     seoDescription:
       "Trndinn's Acceptable Use Policy: prohibited activities and our commitment to platform compliance and responsible use.",
     version: '1.0',
@@ -321,7 +323,8 @@ DPA requests / signature: ${COMPLIANCE_EMAIL}.`,
   subprocessors: {
     slug: 'subprocessors',
     title: 'Sub-processors',
-    summary: 'Third parties we use to provide the Service, and connected platforms you publish to.',
+    summary:
+      'Third parties we use to provide the Service, and connected platforms you publish to.',
     seoDescription:
       "Trndinn's list of sub-processors and connected platforms, the data they handle, and where they operate.",
     version: '1.0',
@@ -450,7 +453,9 @@ const LEGAL_PLACEHOLDER_RE =
   /\[(?:EFFECTIVE_DATE|LEGAL_ENTITY_NAME|LEGAL_ENTITY_ADDRESS|PLACEHOLDER)\]/;
 
 /** Detect draft/placeholder legal copy (DB override or legacy defaults). */
-export function hasLegalPlaceholders(value: string | null | undefined): boolean {
+export function hasLegalPlaceholders(
+  value: string | null | undefined,
+): boolean {
   if (value == null) return false;
   const text = String(value);
   if (!text.trim()) return false;
@@ -462,7 +467,9 @@ export function hasLegalPlaceholders(value: string | null | undefined): boolean 
 }
 
 /** True when a `legal_pages` row still contains launch-blocker placeholders. */
-export function isStaleLegalDbRow(row: Record<string, unknown> | null): boolean {
+export function isStaleLegalDbRow(
+  row: Record<string, unknown> | null,
+): boolean {
   if (!row) return false;
   return (
     hasLegalPlaceholders(row.body as string | undefined) ||
@@ -474,5 +481,7 @@ export function isStaleLegalDbRow(row: Record<string, unknown> | null): boolean 
 }
 
 export function getDefaultLegalPage(slug: string): LegalPageDefault | null {
-  return (DEFAULT_LEGAL_PAGES as Record<string, LegalPageDefault>)[slug] ?? null;
+  return (
+    (DEFAULT_LEGAL_PAGES as Record<string, LegalPageDefault>)[slug] ?? null
+  );
 }

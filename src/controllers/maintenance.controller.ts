@@ -30,11 +30,16 @@ interface AuthenticatedRequest extends Request {
 
 @ValidatorConstraint({ name: 'isAfterScheduledStart', async: false })
 class IsAfterScheduledStartConstraint implements ValidatorConstraintInterface {
-  validate(scheduledEnd: string | undefined, args: ValidationArguments): boolean {
+  validate(
+    scheduledEnd: string | undefined,
+    args: ValidationArguments,
+  ): boolean {
     const obj = args.object as SetMaintenanceDto;
     const scheduledStart = obj.scheduledStart;
     if (!scheduledStart || !scheduledEnd) return true;
-    return new Date(scheduledEnd).getTime() > new Date(scheduledStart).getTime();
+    return (
+      new Date(scheduledEnd).getTime() > new Date(scheduledStart).getTime()
+    );
   }
 
   defaultMessage(): string {
@@ -48,13 +53,15 @@ class SetMaintenanceDto {
   enabled?: boolean;
 
   @ValidateIf(
-    (o: SetMaintenanceDto) => o.scheduledStart !== undefined || o.scheduledEnd !== undefined,
+    (o: SetMaintenanceDto) =>
+      o.scheduledStart !== undefined || o.scheduledEnd !== undefined,
   )
   @IsISO8601()
   scheduledStart?: string;
 
   @ValidateIf(
-    (o: SetMaintenanceDto) => o.scheduledStart !== undefined || o.scheduledEnd !== undefined,
+    (o: SetMaintenanceDto) =>
+      o.scheduledStart !== undefined || o.scheduledEnd !== undefined,
   )
   @IsISO8601()
   @Validate(IsAfterScheduledStartConstraint)

@@ -114,9 +114,7 @@ export class AdminMediaController {
           key: o.name,
           name: shortName,
           size: o.size,
-          lastModified: o.lastModified
-            ? o.lastModified.toISOString()
-            : null,
+          lastModified: o.lastModified ? o.lastModified.toISOString() : null,
           contentType,
           url,
         });
@@ -143,9 +141,7 @@ export class AdminMediaController {
   @Post('folder')
   @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
   @ApiOperation({ summary: 'Create folder (prefix marker)' })
-  async createFolder(
-    @Body() body: { path?: string; name: string },
-  ) {
+  async createFolder(@Body() body: { path?: string; name: string }) {
     const seg = sanitizeSegment((body.name || '').trim());
     if (!seg) {
       throw new HttpException('Folder name required', HttpStatus.BAD_REQUEST);
@@ -185,7 +181,8 @@ export class AdminMediaController {
   @Post('upload')
   @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
   @ApiOperation({
-    summary: 'Upload image into media/cms (same optimization + credits as /media/upload)',
+    summary:
+      'Upload image into media/cms (same optimization + credits as /media/upload)',
   })
   async upload(
     @Req() req: AuthenticatedRequest,

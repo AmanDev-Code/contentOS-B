@@ -21,7 +21,9 @@ export class ModerationController {
 
   @Get('word-list')
   @UseGuards(PlatformStaffGuard)
-  @ApiOperation({ summary: 'Get the profanity word list (platform staff only)' })
+  @ApiOperation({
+    summary: 'Get the profanity word list (platform staff only)',
+  })
   getWordList() {
     return { words: this.moderationService.getWordList() };
   }

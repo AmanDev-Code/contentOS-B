@@ -95,7 +95,9 @@ export class QuotaService {
         raw.remainingCredits ?? raw.remaining_credits ?? 0,
       ),
       percentageUsed: Number(raw.percentageUsed ?? raw.percentage_used ?? 0),
-      planType: (raw.planType ?? raw.plan_type ?? 'free') as UserQuota['planType'],
+      planType: (raw.planType ??
+        raw.plan_type ??
+        'free') as UserQuota['planType'],
       resetDate,
     };
   }
@@ -148,10 +150,15 @@ export class QuotaService {
 
       // For free plan users, use the dynamic free credit limit
       const isFreeUser = quotaData.plan_type === 'free';
-      const totalCredits = isFreeUser ? freeCreditLimit : quotaData.total_credits;
+      const totalCredits = isFreeUser
+        ? freeCreditLimit
+        : quotaData.total_credits;
       const usedCredits = quotaData.used_credits;
       const remainingCredits = totalCredits - usedCredits;
-      const percentageUsed = totalCredits > 0 ? Math.round((usedCredits / totalCredits) * 100 * 100) / 100 : 0;
+      const percentageUsed =
+        totalCredits > 0
+          ? Math.round((usedCredits / totalCredits) * 100 * 100) / 100
+          : 0;
 
       const legacyQuota = this.coerceUserQuota(
         {

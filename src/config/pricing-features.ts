@@ -55,7 +55,10 @@ export const PUBLIC_PLAN_ORDER: InternalPlanType[] = [
   'ultimate',
 ];
 
-export const DEFAULT_PLAN_DISPLAY_META: Record<InternalPlanType, PlanDisplayMeta> = {
+export const DEFAULT_PLAN_DISPLAY_META: Record<
+  InternalPlanType,
+  PlanDisplayMeta
+> = {
   free: {
     planType: 'free',
     publicName: 'Free',
@@ -147,7 +150,8 @@ export const DEFAULT_PRICING_META: PricingMeta = {
     'You own your data',
     'GDPR · CCPA · DPDP aligned',
   ],
-  annualNote: 'Save with annual billing — discount applied automatically at checkout.',
+  annualNote:
+    'Save with annual billing — discount applied automatically at checkout.',
   faqs: [
     {
       q: 'How do credits work?',
@@ -173,7 +177,5 @@ export const DEFAULT_PRICING_META: PricingMeta = {
 };
 
 export function publicPlanName(planType: string): string {
-  return (
-    PUBLIC_PLAN_NAMES[planType as InternalPlanType] ?? planType
-  );
+  return PUBLIC_PLAN_NAMES[planType as InternalPlanType] ?? planType;
 }

@@ -91,7 +91,10 @@ export class BlogService {
     return isPlatformAdmin(user);
   }
 
-  async isBlogEditorOrAdmin(user: { id: string; email?: string }): Promise<boolean> {
+  async isBlogEditorOrAdmin(user: {
+    id: string;
+    email?: string;
+  }): Promise<boolean> {
     if (isPlatformAdmin(user)) return true;
     const client = this.supabaseService.getServiceClient();
     const { data } = await client
@@ -203,7 +206,9 @@ export class BlogService {
 
     const { data, error } = await q;
     if (error) throw new BadRequestException(error.message);
-    const visible = (data || []).filter((r: any) => this.isRowPubliclyVisible(r));
+    const visible = (data || []).filter((r: any) =>
+      this.isRowPubliclyVisible(r),
+    );
     const posts = visible.slice(offset, offset + limit);
     return { posts };
   }
@@ -218,7 +223,7 @@ export class BlogService {
       .maybeSingle();
     if (error) throw new BadRequestException(error.message);
     if (!data) throw new NotFoundException('Post not found');
-    if (!this.isRowPubliclyVisible(data as any)) {
+    if (!this.isRowPubliclyVisible(data)) {
       throw new NotFoundException('Post not found');
     }
     return data;
@@ -229,7 +234,7 @@ export class BlogService {
     let q = client
       .from('blog_posts')
       .select(
-        'id, parent_id, path, slug, title, post_kind, content_category, status, published_at, scheduled_publish_at, updated_at, tags',
+        'id, parent_id, path, slug, title, post_kind, content_category, status, published_at, scheduled_publish_at, updated_at, tags, seo_score, aeo_score, geo_score',
       )
       .order('updated_at', { ascending: false });
     if (filters?.status) q = q.eq('status', filters.status);
@@ -243,7 +248,9 @@ export class BlogService {
           String(row.title || '')
             .toLowerCase()
             .includes(s) ||
-          String(row.path || '').toLowerCase().includes(s) ||
+          String(row.path || '')
+            .toLowerCase()
+            .includes(s) ||
           String(row.id || '')
             .toLowerCase()
             .includes(s),
@@ -297,8 +304,9 @@ export class BlogService {
       published_at: input.published_at || null,
       display_order: input.display_order ?? 0,
       featured_image_url: input.featured_image_url || null,
-      featured_image_object_position:
-        this.sanitizeFeaturedImageObjectPosition(input.featured_image_object_position),
+      featured_image_object_position: this.sanitizeFeaturedImageObjectPosition(
+        input.featured_image_object_position,
+      ),
       hero_style: input.hero_style ?? 'default',
       reading_minutes: input.reading_minutes ?? null,
       author_display_name: input.author_display_name?.trim() || null,
@@ -340,14 +348,22 @@ export class BlogService {
   }
 
   async updatePost(id: string, patch: Record<string, unknown>) {
-    const forbidden = ['id', 'path', 'slug', 'parent_id', 'created_by', 'created_at'];
+    const forbidden = [
+      'id',
+      'path',
+      'slug',
+      'parent_id',
+      'created_by',
+      'created_at',
+    ];
     for (const k of forbidden) {
       if (k in patch) delete patch[k];
     }
     if ('featured_image_object_position' in patch) {
-      patch.featured_image_object_position = this.sanitizeFeaturedImageObjectPosition(
-        patch.featured_image_object_position,
-      );
+      patch.featured_image_object_position =
+        this.sanitizeFeaturedImageObjectPosition(
+          patch.featured_image_object_position,
+        );
     }
     const client = this.supabaseService.getServiceClient();
     if (Object.keys(patch).length === 0) {
@@ -382,7 +398,9 @@ export class BlogService {
 
   async grantEditor(adminUserId: string, targetUserId: string) {
     if (adminUserId === targetUserId) {
-      throw new BadRequestException('Cannot grant editor to yourself via this action');
+      throw new BadRequestException(
+        'Cannot grant editor to yourself via this action',
+      );
     }
     const client = this.supabaseService.getServiceClient();
     const { error } = await client.from('blog_editor_grants').upsert(
@@ -398,7 +416,10 @@ export class BlogService {
 
   async revokeEditor(userId: string) {
     const client = this.supabaseService.getServiceClient();
-    const { error } = await client.from('blog_editor_grants').delete().eq('user_id', userId);
+    const { error } = await client
+      .from('blog_editor_grants')
+      .delete()
+      .eq('user_id', userId);
     if (error) throw new BadRequestException(error.message);
     return { success: true };
   }
@@ -423,9 +444,8 @@ export class BlogService {
   async getPublicPageSeoPayload(routePath: string) {
     const path = this.normalizeRoutePath(routePath);
     const row = await this.getStaticPageSeo(path);
-    const assignment_primary_keyword = await this.seoKeywordsService.getPublicPrimaryRouteKeyword(
-      path,
-    );
+    const assignment_primary_keyword =
+      await this.seoKeywordsService.getPublicPrimaryRouteKeyword(path);
     return {
       ...(row ?? {}),
       assignment_primary_keyword,
@@ -471,7 +491,10 @@ export class BlogService {
   async deleteStaticPageSeo(routePath: string) {
     const path = this.normalizeRoutePath(routePath);
     const client = this.supabaseService.getServiceClient();
-    const { error } = await client.from('static_page_seo').delete().eq('route_path', path);
+    const { error } = await client
+      .from('static_page_seo')
+      .delete()
+      .eq('route_path', path);
     if (error) throw new BadRequestException(error.message);
     return { success: true };
   }

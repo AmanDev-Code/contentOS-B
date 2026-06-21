@@ -95,7 +95,10 @@ export class GeneratedContentRepository {
     return data || [];
   }
 
-  async countByUserId(userId: string, sourceFilter?: 'viral' | 'custom'): Promise<number> {
+  async countByUserId(
+    userId: string,
+    sourceFilter?: 'viral' | 'custom',
+  ): Promise<number> {
     let query = this.supabaseService
       .getServiceClient()
       .from('generated_content')
@@ -246,7 +249,9 @@ export class GeneratedContentRepository {
     newUrl: string,
   ): Promise<GeneratedContent | null> {
     if (!Number.isInteger(imageIndex) || imageIndex < 0) {
-      throw new Error(`replaceImageUrlAtIndex: invalid imageIndex=${imageIndex}`);
+      throw new Error(
+        `replaceImageUrlAtIndex: invalid imageIndex=${imageIndex}`,
+      );
     }
     const client = this.supabaseService.getServiceClient();
     const { data: existing, error: fetchError } = await client
@@ -319,7 +324,10 @@ export class GeneratedContentRepository {
     const newImageIndex = currentUrls.length;
     currentUrls.push(newUrl);
 
-    const pp = (existing.performance_prediction || {}) as Record<string, unknown>;
+    const pp = (existing.performance_prediction || {}) as Record<
+      string,
+      unknown
+    >;
     const customMeta = (pp.customTopicMeta || {}) as Record<string, unknown>;
     const prompts = Array.isArray(customMeta.imagePrompts)
       ? [...(customMeta.imagePrompts as string[])]
@@ -414,13 +422,6 @@ export class GeneratedContentRepository {
       .order('published_at', { ascending: false });
 
     if (error) throw error;
-    return (data || []) as Array<{
-      id: string;
-      title: string;
-      content: string;
-      visual_type: string | null;
-      published_at: string;
-      linkedin_post_url: string | null;
-    }>;
+    return data || [];
   }
 }

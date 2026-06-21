@@ -77,7 +77,10 @@ export class DiscountCodesService {
   }
 
   normalizeCode(raw: string): string {
-    const code = raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const code = raw
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
     if (code.length < 3 || code.length > 64) {
       throw new BadRequestException(
         'Code must be 3–64 alphanumeric characters after normalization',
@@ -136,7 +139,10 @@ export class DiscountCodesService {
         `This code does not apply to the ${planType} plan`,
       );
     }
-    if (row.billing_cycles?.length && !row.billing_cycles.includes(billingCycle)) {
+    if (
+      row.billing_cycles?.length &&
+      !row.billing_cycles.includes(billingCycle)
+    ) {
       throw new BadRequestException(
         `This code does not apply to ${billingCycle} billing`,
       );
@@ -207,7 +213,11 @@ export class DiscountCodesService {
     const duration = input.duration || 'once';
 
     if (input.discountType === 'percentage') {
-      if (input.percentOff == null || input.percentOff <= 0 || input.percentOff > 100) {
+      if (
+        input.percentOff == null ||
+        input.percentOff <= 0 ||
+        input.percentOff > 100
+      ) {
         throw new BadRequestException('percentOff must be between 0 and 100');
       }
     } else if (input.amountOff == null || input.amountOff <= 0) {
@@ -248,7 +258,9 @@ export class DiscountCodesService {
       .single();
     if (error) {
       if (error.code === '23505') {
-        throw new BadRequestException('A discount code with this value already exists');
+        throw new BadRequestException(
+          'A discount code with this value already exists',
+        );
       }
       throw new BadGatewayException(error.message);
     }
@@ -269,15 +281,19 @@ export class DiscountCodesService {
       patch.code = this.normalizeCode(input.code);
     }
     if (input.name !== undefined) patch.name = input.name.trim();
-    if (input.discountType !== undefined) patch.discount_type = input.discountType;
+    if (input.discountType !== undefined)
+      patch.discount_type = input.discountType;
     if (input.percentOff !== undefined) patch.percent_off = input.percentOff;
     if (input.amountOff !== undefined) patch.amount_off = input.amountOff;
-    if (input.currency !== undefined) patch.currency = input.currency.toUpperCase();
+    if (input.currency !== undefined)
+      patch.currency = input.currency.toUpperCase();
     if (input.planTypes !== undefined) {
       patch.plan_types = input.planTypes?.length ? input.planTypes : null;
     }
     if (input.billingCycles !== undefined) {
-      patch.billing_cycles = input.billingCycles?.length ? input.billingCycles : null;
+      patch.billing_cycles = input.billingCycles?.length
+        ? input.billingCycles
+        : null;
     }
     if (input.duration !== undefined) patch.duration = input.duration;
     if (input.durationInMonths !== undefined) {
@@ -298,7 +314,9 @@ export class DiscountCodesService {
       .single();
     if (error) {
       if (error.code === '23505') {
-        throw new BadRequestException('A discount code with this value already exists');
+        throw new BadRequestException(
+          'A discount code with this value already exists',
+        );
       }
       throw new BadGatewayException(error.message);
     }
@@ -329,9 +347,7 @@ export class DiscountCodesService {
       try {
         await this.polarService.deletePolarDiscount(row.polar_discount_id);
       } catch (e) {
-        this.logger.warn(
-          `Polar discount delete failed for ${row.code}: ${e}`,
-        );
+        this.logger.warn(`Polar discount delete failed for ${row.code}: ${e}`);
       }
     }
     const { data, error } = await this.db()
@@ -352,7 +368,9 @@ export class DiscountCodesService {
     return this.syncRowToPolar(row);
   }
 
-  async recordRedemption(polarDiscountId: string | null | undefined): Promise<void> {
+  async recordRedemption(
+    polarDiscountId: string | null | undefined,
+  ): Promise<void> {
     if (!polarDiscountId) return;
     const { data: row } = await this.db()
       .from('discount_codes')

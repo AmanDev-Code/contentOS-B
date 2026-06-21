@@ -85,7 +85,11 @@ export function resolveCarouselDocumentMode(params: {
   }
 
   const o: CarouselDocumentMode = params.override ?? 'auto';
-  if (o === 'none' || o === 'handwritten_notes' || o === 'structured_document') {
+  if (
+    o === 'none' ||
+    o === 'handwritten_notes' ||
+    o === 'structured_document'
+  ) {
     return { resolved: o, source: 'explicit' };
   }
 

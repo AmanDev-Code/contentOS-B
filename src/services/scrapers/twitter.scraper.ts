@@ -81,11 +81,14 @@ export class TwitterScraperService {
             const text = (node.textContent || '').trim();
             if (!text) continue;
             const hashtags =
-              text.match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)?.map((h) => h.toLowerCase()) || [];
+              text
+                .match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)
+                ?.map((h) => h.toLowerCase()) || [];
             const link = (node as any).querySelector?.('a[href*="/status/"]');
-            const href = String((link as any)?.href || '');
+            const href = String(link?.href || '');
             out.push({
-              id: href.split('/status/')[1]?.split('?')[0] || crypto.randomUUID(),
+              id:
+                href.split('/status/')[1]?.split('?')[0] || crypto.randomUUID(),
               text,
               hashtags: Array.from(new Set(hashtags)),
               publishedAt: new Date().toISOString(),
@@ -110,14 +113,18 @@ export class TwitterScraperService {
             contentType?: string;
           }> = [];
           const seen = new Set<string>();
-          const all = Array.from(document.querySelectorAll('div, article, section'));
+          const all = Array.from(
+            document.querySelectorAll('div, article, section'),
+          );
           for (const el of all) {
             const t = (el.textContent || '').trim();
             if (t.length < 30 || t.length > 3000) continue;
             if (!/#[a-zA-Z][a-zA-Z0-9_-]{1,48}/.test(t)) continue;
             if (el.querySelector('div, article, section')) {
               const inner = Array.from(el.children).some(
-                (c) => (c.textContent || '').includes('#') && (c.textContent || '').length > 30,
+                (c) =>
+                  (c.textContent || '').includes('#') &&
+                  (c.textContent || '').length > 30,
               );
               if (inner) continue;
             }
@@ -125,7 +132,9 @@ export class TwitterScraperService {
             if (seen.has(key)) continue;
             seen.add(key);
             const hashtags =
-              t.match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)?.map((h) => h.toLowerCase()) || [];
+              t
+                .match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)
+                ?.map((h) => h.toLowerCase()) || [];
             out.push({
               id: crypto.randomUUID(),
               text: t,
@@ -145,7 +154,10 @@ export class TwitterScraperService {
       }
 
       if (process.env.SCRAPER_DEBUG_SCREENSHOTS === 'true') {
-        await page.screenshot({ path: `debug-x-${cleanTag}.png`, fullPage: false });
+        await page.screenshot({
+          path: `debug-x-${cleanTag}.png`,
+          fullPage: false,
+        });
       }
 
       this.eventLog.record({
@@ -159,7 +171,12 @@ export class TwitterScraperService {
       return posts as ScrapedPost[];
     } catch (error) {
       if (process.env.SCRAPER_DEBUG_SCREENSHOTS === 'true') {
-        await page.screenshot({ path: `debug-x-${cleanTag}-error.png`, fullPage: false }).catch(() => {});
+        await page
+          .screenshot({
+            path: `debug-x-${cleanTag}-error.png`,
+            fullPage: false,
+          })
+          .catch(() => {});
       }
       this.eventLog.record({
         ts: new Date().toISOString(),

@@ -131,9 +131,7 @@ export class SiteContentService {
     const now = Date.now();
     const rows = (data ?? [])
       .map((r) => this.mapAnnouncement(r))
-      .filter(
-        (a) => !a.endsAt || new Date(a.endsAt).getTime() >= now,
-      );
+      .filter((a) => !a.endsAt || new Date(a.endsAt).getTime() >= now);
 
     await this.cacheService.set(C.announcementsPublic, rows, CACHE_TTL);
     return rows;
@@ -282,7 +280,7 @@ export class SiteContentService {
     Array<Pick<LegalPagePublic, 'slug' | 'title' | 'summary' | 'sortOrder'>>
   > {
     const cached = await this.cacheService.get(C.legalPublicList);
-    if (cached) return cached as any;
+    if (cached) return cached;
 
     const { data } = await this.db().from('legal_pages').select('*');
     const overrides = new Map<string, Record<string, any>>(
@@ -404,7 +402,9 @@ export class SiteContentService {
     return out;
   }
 
-  async getAllPublicContent(): Promise<Record<string, Record<string, unknown>>> {
+  async getAllPublicContent(): Promise<
+    Record<string, Record<string, unknown>>
+  > {
     const out: Record<string, Record<string, unknown>> = {};
     for (const key of SITE_CONTENT_KEYS) {
       const c = await this.getContentPublic(key);
@@ -458,7 +458,10 @@ export class SiteContentService {
     await this.cacheService.delete(C.contentPublic(key));
     return {
       key,
-      content: { ...DEFAULT_SITE_CONTENT[key as keyof typeof DEFAULT_SITE_CONTENT], ...(data.content as Record<string, unknown>) },
+      content: {
+        ...DEFAULT_SITE_CONTENT[key as keyof typeof DEFAULT_SITE_CONTENT],
+        ...(data.content as Record<string, unknown>),
+      },
       isDefault: false,
       updatedAt: data.updated_at,
     };
@@ -488,13 +491,19 @@ export class SiteContentService {
 
     let meta: PricingMeta = DEFAULT_PRICING_META;
     if (data && data.is_published !== false && data.content) {
-      meta = { ...DEFAULT_PRICING_META, ...(data.content as Partial<PricingMeta>) } as PricingMeta;
+      meta = {
+        ...DEFAULT_PRICING_META,
+        ...(data.content as Partial<PricingMeta>),
+      };
     }
     await this.cacheService.set(C.pricingMeta, meta, CACHE_TTL);
     return meta;
   }
 
-  async adminGetPricingMeta(): Promise<{ meta: PricingMeta; isDefault: boolean }> {
+  async adminGetPricingMeta(): Promise<{
+    meta: PricingMeta;
+    isDefault: boolean;
+  }> {
     const { data } = await this.db()
       .from('site_content')
       .select('content,is_published')
@@ -502,7 +511,10 @@ export class SiteContentService {
       .maybeSingle();
     if (data && data.is_published !== false && data.content) {
       return {
-        meta: { ...DEFAULT_PRICING_META, ...(data.content as Partial<PricingMeta>) } as PricingMeta,
+        meta: {
+          ...DEFAULT_PRICING_META,
+          ...(data.content as Partial<PricingMeta>),
+        },
         isDefault: false,
       };
     }
@@ -524,11 +536,14 @@ export class SiteContentService {
       .upsert(row, { onConflict: 'section_key' });
     if (error) throw new Error(error.message);
     await this.cacheService.delete(C.pricingMeta);
-    return { ...DEFAULT_PRICING_META, ...meta } as PricingMeta;
+    return { ...DEFAULT_PRICING_META, ...meta };
   }
 
   async resetPricingMeta(): Promise<PricingMeta> {
-    await this.db().from('site_content').delete().eq('section_key', 'pricing_meta');
+    await this.db()
+      .from('site_content')
+      .delete()
+      .eq('section_key', 'pricing_meta');
     await this.cacheService.delete(C.pricingMeta);
     return DEFAULT_PRICING_META;
   }

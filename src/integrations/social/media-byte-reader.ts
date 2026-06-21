@@ -27,14 +27,20 @@ export class MinioMediaByteReader implements MediaByteReader {
 
   // Accepts either a bare object key ("posts/abc.jpg") or a "bucket/key" form.
   // Bare keys use the default bucket.
-  private resolveLocation(storagePath: string): { bucket: string; objectKey: string } {
+  private resolveLocation(storagePath: string): {
+    bucket: string;
+    objectKey: string;
+  } {
     const defaultBucket = this.minio.getBucketName();
     const trimmed = storagePath.replace(/^\/+/, '');
     const firstSlash = trimmed.indexOf('/');
     if (firstSlash > 0) {
       const maybeBucket = trimmed.slice(0, firstSlash);
       if (maybeBucket === defaultBucket) {
-        return { bucket: defaultBucket, objectKey: trimmed.slice(firstSlash + 1) };
+        return {
+          bucket: defaultBucket,
+          objectKey: trimmed.slice(firstSlash + 1),
+        };
       }
     }
     return { bucket: defaultBucket, objectKey: trimmed };
@@ -44,7 +50,7 @@ export class MinioMediaByteReader implements MediaByteReader {
 async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer));
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
   }
   return Buffer.concat(chunks);
 }

@@ -38,7 +38,11 @@ function makeSlide(partial: Partial<CarouselSlideOutput>): CarouselSlideOutput {
 describe('buildDocumentDeckSlideSvg', () => {
   it('produces an SVG of the right canvas size for a notebook cover', () => {
     const svg = buildDocumentDeckSlideSvg({
-      slide: makeSlide({ sectionType: 'cover', pageNumber: 1, title: META.coverTitle }),
+      slide: makeSlide({
+        sectionType: 'cover',
+        pageNumber: 1,
+        title: META.coverTitle,
+      }),
       pageNumber: 1,
       totalPages: 12,
       theme: 'notebook',
@@ -52,7 +56,11 @@ describe('buildDocumentDeckSlideSvg', () => {
 
   it('renders TOC entries with page numbers in the notebook theme', () => {
     const svg = buildDocumentDeckSlideSvg({
-      slide: makeSlide({ sectionType: 'toc', pageNumber: 2, title: 'Table of Contents' }),
+      slide: makeSlide({
+        sectionType: 'toc',
+        pageNumber: 2,
+        title: 'Table of Contents',
+      }),
       pageNumber: 2,
       totalPages: 12,
       theme: 'notebook',
@@ -79,7 +87,11 @@ describe('buildDocumentDeckSlideSvg', () => {
 
   it('renders clean_document footer with page numbers', () => {
     const svg = buildDocumentDeckSlideSvg({
-      slide: makeSlide({ sectionType: 'cover', pageNumber: 1, title: META.coverTitle }),
+      slide: makeSlide({
+        sectionType: 'cover',
+        pageNumber: 1,
+        title: META.coverTitle,
+      }),
       pageNumber: 1,
       totalPages: 12,
       theme: 'clean_document',
@@ -95,7 +107,9 @@ describe('buildDocumentDeckSlideSvg', () => {
     const svg = buildDocumentDeckSlideSvg({
       slide: makeSlide({
         title: 'Hash Maps',
-        marginNotes: ['Avoid mutable keys to keep hashCode stable across operations'],
+        marginNotes: [
+          'Avoid mutable keys to keep hashCode stable across operations',
+        ],
       }),
       pageNumber: 5,
       totalPages: 12,

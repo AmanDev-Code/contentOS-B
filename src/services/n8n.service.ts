@@ -12,7 +12,8 @@ export class N8nService {
   constructor(private configService: ConfigService) {
     this.webhookUrl = this.configService.get<string>('n8n.webhookUrl') || '';
     this.apiKey = this.configService.get<string>('n8n.apiKey') || '';
-    this.webhookSecret = this.configService.get<string>('n8n.webhookSecret') || '';
+    this.webhookSecret =
+      this.configService.get<string>('n8n.webhookSecret') || '';
   }
 
   async triggerContentGeneration(
@@ -75,7 +76,7 @@ export class N8nService {
       const parsed = this.parseJsonLike(responseText);
       const parsedKeys =
         parsed && typeof parsed === 'object'
-          ? Object.keys(parsed as Record<string, unknown>).slice(0, 12)
+          ? Object.keys(parsed).slice(0, 12)
           : [];
       this.logger.log(
         JSON.stringify({

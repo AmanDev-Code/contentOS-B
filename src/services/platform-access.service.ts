@@ -14,10 +14,7 @@ export class PlatformAccessService {
     return isPlatformAdmin(user);
   }
 
-  async hasStaffAccess(user: {
-    id: string;
-    email?: string;
-  }): Promise<boolean> {
+  async hasStaffAccess(user: { id: string; email?: string }): Promise<boolean> {
     if (this.isSuperAdmin(user)) return true;
     const cacheKey = `platform_staff:${user.id}`;
     const cached = await this.cacheService.get(cacheKey);

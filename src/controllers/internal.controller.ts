@@ -46,4 +46,3 @@ export class InternalController {
     return { success: true, removed };
   }
 }
-

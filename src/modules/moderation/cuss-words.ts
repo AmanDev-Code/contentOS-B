@@ -183,9 +183,7 @@ function buildWordSet(words: readonly string[]): Set<string> {
 }
 
 function buildRegex(words: readonly string[]): RegExp {
-  const escaped = words.map((w) =>
-    w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-  );
+  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const sorted = [...escaped].sort((a, b) => b.length - a.length);
   const pattern = `${WORD_BOUNDARY}(?:${sorted.join('|')})${WORD_BOUNDARY_END}`;
   return new RegExp(pattern, 'gi');

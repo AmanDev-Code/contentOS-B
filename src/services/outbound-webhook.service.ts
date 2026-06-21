@@ -149,7 +149,8 @@ export class OutboundWebhookService {
     const updatePayload: Record<string, unknown> = {};
     if (dto.url !== undefined) updatePayload.url = dto.url;
     if (dto.events !== undefined) updatePayload.events = dto.events;
-    if (dto.description !== undefined) updatePayload.description = dto.description;
+    if (dto.description !== undefined)
+      updatePayload.description = dto.description;
     if (dto.enabled !== undefined) updatePayload.enabled = dto.enabled;
 
     const { data, error } = await client
@@ -258,7 +259,7 @@ export class OutboundWebhookService {
       this.logger.warn(`Failed to record delivery: ${error.message}`);
       return -1;
     }
-    return (data as { id: number }).id;
+    return data.id;
   }
 
   async listDeliveries(
@@ -331,7 +332,9 @@ export class OutboundWebhookService {
         p_id: id,
       });
       if (error) {
-        this.logger.warn(`Vault delete_secret failed for ${id}: ${error.message}`);
+        this.logger.warn(
+          `Vault delete_secret failed for ${id}: ${error.message}`,
+        );
       }
     } catch (err) {
       this.logger.warn(`Vault delete_secret threw for ${id}: ${String(err)}`);

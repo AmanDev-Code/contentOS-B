@@ -55,10 +55,7 @@ export class AuthGuard implements CanActivate {
       const accountStatus = await this.profileRepository.getAccountStatus(
         user.id,
       );
-      if (
-        accountStatus === 'suspended' ||
-        accountStatus === 'banned'
-      ) {
+      if (accountStatus === 'suspended' || accountStatus === 'banned') {
         const method = request.method?.toUpperCase() || 'GET';
         if (!SAFE_READ_METHODS.has(method)) {
           throw new ForbiddenException(

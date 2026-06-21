@@ -34,7 +34,11 @@ export class InstagramScraperService {
     const cookies: Array<any> = [
       { ...base, name: 'sessionid', value: igSession, httpOnly: true },
     ];
-    const add = (name: string, value: string, sameSite: 'None' | 'Lax' = 'None') => {
+    const add = (
+      name: string,
+      value: string,
+      sameSite: 'None' | 'Lax' = 'None',
+    ) => {
       if (value) cookies.push({ ...base, name, value, sameSite });
     };
     add('csrftoken', c.instagramCsrfToken, 'Lax');
@@ -64,9 +68,11 @@ export class InstagramScraperService {
         const j = JSON.parse(text);
         const cap =
           j?.items?.[0]?.caption?.text ||
-          j?.graphql?.shortcode_media?.edge_media_to_caption?.edges?.[0]?.node?.text ||
+          j?.graphql?.shortcode_media?.edge_media_to_caption?.edges?.[0]?.node
+            ?.text ||
           '';
-        if (typeof cap === 'string' && cap.trim().length >= 8) return cap.trim();
+        if (typeof cap === 'string' && cap.trim().length >= 8)
+          return cap.trim();
       } catch {
         /* html fallback below */
       }
@@ -109,19 +115,25 @@ export class InstagramScraperService {
         if (r.ok()) {
           const j = await r.json();
           const sections =
-            j?.data?.top?.sections ||
-            j?.data?.recent?.sections ||
-            [];
+            j?.data?.top?.sections || j?.data?.recent?.sections || [];
           const reelsSections = j?.data?.top?.sections || [];
-          const collect: Array<{ link: string; isReel: boolean; caption: string }> = [];
+          const collect: Array<{
+            link: string;
+            isReel: boolean;
+            caption: string;
+          }> = [];
           const pickFromSections = (secs: any[]) => {
             for (const s of secs) {
-              const medias = s?.layout_content?.medias || s?.layout_content?.fill_items || [];
+              const medias =
+                s?.layout_content?.medias ||
+                s?.layout_content?.fill_items ||
+                [];
               for (const m of medias) {
                 const media = m?.media || m;
                 const code = media?.code || media?.shortcode;
                 if (!code) continue;
-                const isReel = media?.product_type === 'clips' || media?.media_type === 2;
+                const isReel =
+                  media?.product_type === 'clips' || media?.media_type === 2;
                 collect.push({
                   link: `https://www.instagram.com/${isReel ? 'reel' : 'p'}/${code}/`,
                   isReel,
@@ -142,7 +154,9 @@ export class InstagramScraperService {
               const cap = item.caption || '';
               if (!cap || cap.length < 8) continue;
               const hashtags =
-                cap.match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)?.map((h) => h.toLowerCase()) || [];
+                cap
+                  .match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)
+                  ?.map((h) => h.toLowerCase()) || [];
               const shortcode = item.link.match(IG_SHORTCODE_RE)?.[1];
               posts.push({
                 id: shortcode || crypto.randomUUID(),
@@ -175,22 +189,35 @@ export class InstagramScraperService {
 
       // STRATEGY 2: DOM scrape the hashtag page
       if (links.length === 0) {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10_000 });
+        await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 10_000,
+        });
 
         const currentUrl = page.url();
         if (
           currentUrl.includes('/accounts/login') ||
           currentUrl.includes('/challenge')
         ) {
-          throw new Error('login_wall: redirected to Instagram login/challenge');
+          throw new Error(
+            'login_wall: redirected to Instagram login/challenge',
+          );
         }
 
         // Scroll to trigger lazy-load of the hashtag grid.
         await Promise.race([
-          page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', { timeout: 5000 }).catch(() => null),
+          page
+            .waitForSelector('a[href*="/p/"], a[href*="/reel/"]', {
+              timeout: 5000,
+            })
+            .catch(() => null),
           page.waitForTimeout(2500),
         ]);
-        await boundedAutoScroll(page, { maxIterations: 4, distance: 1200, intervalMs: 300 });
+        await boundedAutoScroll(page, {
+          maxIterations: 4,
+          distance: 1200,
+          intervalMs: 300,
+        });
         await page.waitForTimeout(800);
 
         links = await page.$$eval('a[href*="/p/"], a[href*="/reel/"]', (els) =>
@@ -205,11 +232,15 @@ export class InstagramScraperService {
       }
 
       if (links.length === 0) {
-        throw new Error('selector_miss: no /p/ or /reel/ links found on hashtag page');
+        throw new Error(
+          'selector_miss: no /p/ or /reel/ links found on hashtag page',
+        );
       }
 
       // Prefer reels: sort so /reel/ links come first
-      links.sort((a, b) => Number(b.includes('/reel/')) - Number(a.includes('/reel/')));
+      links.sort(
+        (a, b) => Number(b.includes('/reel/')) - Number(a.includes('/reel/')),
+      );
 
       // Done with the grid page — close it to release memory; API calls use context.request directly.
       await page.close().catch(() => {});
@@ -218,7 +249,10 @@ export class InstagramScraperService {
       const targetPosts = Math.min(max, 10);
 
       // Fetch captions concurrently via IG JSON API (no Playwright per post).
-      const candidates = links.slice(0, Math.min(links.length, targetPosts + 6));
+      const candidates = links.slice(
+        0,
+        Math.min(links.length, targetPosts + 6),
+      );
       const results = await Promise.allSettled(
         candidates.map(async (link) => {
           if (Date.now() > deadline) throw new Error('budget');
@@ -234,7 +268,9 @@ export class InstagramScraperService {
         if (r.status !== 'fulfilled') continue;
         const { link, cap } = r.value;
         const hashtags =
-          cap.match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)?.map((h) => h.toLowerCase()) || [];
+          cap
+            .match(/#([a-zA-Z0-9][a-zA-Z0-9_-]{0,48})/g)
+            ?.map((h) => h.toLowerCase()) || [];
         const shortcode = link.match(IG_SHORTCODE_RE)?.[1];
         posts.push({
           id: shortcode || crypto.randomUUID(),

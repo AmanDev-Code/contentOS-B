@@ -28,9 +28,7 @@ describe('buildFrontendOAuthRedirect', () => {
         linkedin: 'connected',
         flow: 'connect-pages',
       }),
-    ).toBe(
-      'https://app.test/dashboard?linkedin=connected&flow=connect-pages',
-    );
+    ).toBe('https://app.test/dashboard?linkedin=connected&flow=connect-pages');
   });
 
   it('uses sanitized path on unsafe returnTo', () => {

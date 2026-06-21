@@ -96,7 +96,7 @@ export class SeoAiFillService {
       }
 
       const str = (k: string): string =>
-        typeof parsed[k] === 'string' ? (parsed[k] as string).trim() : '';
+        typeof parsed[k] === 'string' ? parsed[k].trim() : '';
 
       return {
         meta_title: str('meta_title'),

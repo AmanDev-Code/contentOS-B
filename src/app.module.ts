@@ -45,12 +45,27 @@ import { CareersController } from './controllers/careers.controller';
 import { AdminCareersController } from './controllers/admin-careers.controller';
 import { BlogController } from './controllers/blog.controller';
 import { AdminBlogController } from './controllers/admin-blog.controller';
+import { ContentEngineController } from './controllers/content-engine.controller';
+import {
+  NewsletterController,
+  AdminNewsletterController,
+} from './controllers/newsletter.controller';
 import { AdminSeoPagesController } from './controllers/admin-seo-pages.controller';
 import { AdminSeoAiFillController } from './controllers/admin-seo-ai-fill.controller';
 import { AdminAiModelsController } from './controllers/admin-ai-models.controller';
-import { AdminSeoKeywordsController, AdminSeoAssignmentsController } from './controllers/admin-seo-keywords.controller';
+import {
+  AdminSeoKeywordsController,
+  AdminSeoAssignmentsController,
+} from './controllers/admin-seo-keywords.controller';
+import { ContentEngineService } from './services/content-engine.service';
+import { ListmonkService } from './services/listmonk.service';
+import { NewsletterService } from './services/newsletter.service';
+import { PlatformPublishersService } from './services/platform-publishers.service';
 import { SeoKeywordsService } from './services/seo-keywords.service';
-import { ReferralController, PublicReferralController } from './controllers/referral.controller';
+import {
+  ReferralController,
+  PublicReferralController,
+} from './controllers/referral.controller';
 import { AdminReferralController } from './controllers/admin-referral.controller';
 import { AdminMediaController } from './controllers/admin-media.controller';
 import { AdminSubscriptionPlansController } from './controllers/admin-subscription-plans.controller';
@@ -256,6 +271,9 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     AdminCareersController,
     BlogController,
     AdminBlogController,
+    ContentEngineController,
+    NewsletterController,
+    AdminNewsletterController,
     AdminSeoPagesController,
     AdminSeoAiFillController,
     AdminAiModelsController,
@@ -329,6 +347,10 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     CareersJobCopyAiService,
     SeoAiFillService,
     BlogService,
+    ContentEngineService,
+    ListmonkService,
+    NewsletterService,
+    PlatformPublishersService,
     SeoKeywordsService,
     BlogManagementGuard,
     FeedbackService,

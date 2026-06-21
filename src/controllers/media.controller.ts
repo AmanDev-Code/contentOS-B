@@ -855,10 +855,7 @@ export class MediaController {
 
   @Post('upload-pdf')
   @UseGuards(AuthGuard)
-  async uploadPdf(
-    @Request() req: AuthenticatedRequest,
-    @Body() body: any,
-  ) {
+  async uploadPdf(@Request() req: AuthenticatedRequest, @Body() body: any) {
     try {
       const userId = req.user.id;
 
@@ -871,10 +868,7 @@ export class MediaController {
 
       const fileField = body?.file;
       if (!fileField) {
-        throw new HttpException(
-          'No PDF file provided',
-          HttpStatus.BAD_REQUEST,
-        );
+        throw new HttpException('No PDF file provided', HttpStatus.BAD_REQUEST);
       }
 
       if (
@@ -898,10 +892,7 @@ export class MediaController {
         pdfBuffer = Buffer.from(fileField.buffer);
         originalFilename = fileField.originalname || originalFilename;
       } else {
-        throw new HttpException(
-          'Invalid file format',
-          HttpStatus.BAD_REQUEST,
-        );
+        throw new HttpException('Invalid file format', HttpStatus.BAD_REQUEST);
       }
 
       // Reject obviously wrong client-declared content types early.
@@ -925,10 +916,7 @@ export class MediaController {
       // Validate PDF magic bytes (defence-in-depth in case mimetype is spoofed).
       const pdfMagic = pdfBuffer.subarray(0, 5).toString('ascii');
       if (!pdfMagic.startsWith('%PDF-')) {
-        throw new HttpException(
-          'Invalid PDF file',
-          HttpStatus.BAD_REQUEST,
-        );
+        throw new HttpException('Invalid PDF file', HttpStatus.BAD_REQUEST);
       }
 
       // Generate filename

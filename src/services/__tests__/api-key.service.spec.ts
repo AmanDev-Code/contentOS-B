@@ -1,8 +1,5 @@
 import { createHash } from 'crypto';
-import {
-  ApiKeyService,
-  API_KEY_PLAINTEXT_PREFIX,
-} from '../api-key.service';
+import { ApiKeyService, API_KEY_PLAINTEXT_PREFIX } from '../api-key.service';
 
 /**
  * Minimal in-memory fake of the Supabase query builder covering only the calls

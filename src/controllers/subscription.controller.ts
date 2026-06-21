@@ -199,9 +199,11 @@ export class SubscriptionController {
   }
 
   @Post('cancel')
-  async cancelSubscription(
-    @Req() req: any,
-  ): Promise<{ success: boolean; message: string; cancelledViaPolar?: boolean }> {
+  async cancelSubscription(@Req() req: any): Promise<{
+    success: boolean;
+    message: string;
+    cancelledViaPolar?: boolean;
+  }> {
     const userId = req.user?.id;
     if (!userId) {
       throw new HttpException(
@@ -220,10 +222,14 @@ export class SubscriptionController {
     } catch (error) {
       console.error('Error cancelling subscription:', error);
 
-      const errorMessage = error instanceof Error ? error.message : 'Failed to cancel subscription';
-      const statusCode = typeof (error as { getStatus?: () => number })?.getStatus === 'function'
-        ? (error as { getStatus: () => number }).getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Failed to cancel subscription';
+      const statusCode =
+        typeof (error as { getStatus?: () => number })?.getStatus === 'function'
+          ? (error as { getStatus: () => number }).getStatus()
+          : HttpStatus.INTERNAL_SERVER_ERROR;
 
       throw new HttpException(
         {
@@ -403,7 +409,8 @@ export class SubscriptionController {
     }
 
     try {
-      const synced = await this.subscriptionService.syncBillingFromPolar(userId);
+      const synced =
+        await this.subscriptionService.syncBillingFromPolar(userId);
       return { synced };
     } catch (error) {
       const message =

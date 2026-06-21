@@ -19,9 +19,9 @@ function fakeResponse(status: number, body: unknown) {
 function buildService(token: string | null) {
   const configService = { get: () => undefined } as any;
   const profileRepository = {
-    findById: jest.fn().mockResolvedValue(
-      token ? { linkedin_access_token: token } : null,
-    ),
+    findById: jest
+      .fn()
+      .mockResolvedValue(token ? { linkedin_access_token: token } : null),
   } as any;
   const generatedContentRepository = {} as any;
   const scraperCredentialsService = {} as any;

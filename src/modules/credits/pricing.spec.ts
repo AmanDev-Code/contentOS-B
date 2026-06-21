@@ -9,7 +9,11 @@ describe('custom topic pricing', () => {
     expect(calculateTotalCredits('text')).toBe(2);
     expect(calculateTotalHalfCredits('text')).toBe(4);
     expect(buildCreditSlices('text')).toEqual([
-      expect.objectContaining({ subtaskKey: 'text', credits: 2, halfCredits: 4 }),
+      expect.objectContaining({
+        subtaskKey: 'text',
+        credits: 2,
+        halfCredits: 4,
+      }),
     ]);
   });
 

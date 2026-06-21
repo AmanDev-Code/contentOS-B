@@ -61,20 +61,32 @@ export class AdminSeoKeywordsController {
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
   @Post()
   @ApiOperation({ summary: 'Create a new keyword' })
-  async create(@Body() body: Record<string, unknown>, @Req() req: AuthenticatedRequest) {
+  async create(
+    @Body() body: Record<string, unknown>,
+    @Req() req: AuthenticatedRequest,
+  ) {
     try {
       const actorId = req.user?.id;
-      return await this.seoKeywordsService.createKeyword({ ...(body as unknown as CreateKeywordDto), actorId });
+      return await this.seoKeywordsService.createKeyword({
+        ...(body as unknown as CreateKeywordDto),
+        actorId,
+      });
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
@@ -87,11 +99,17 @@ export class AdminSeoKeywordsController {
   ) {
     try {
       const actorId = req.user?.id;
-      return await this.seoKeywordsService.updateKeyword(id, { ...(body as unknown as UpdateKeywordDto), actorId });
+      return await this.seoKeywordsService.updateKeyword(id, {
+        ...(body as unknown as UpdateKeywordDto),
+        actorId,
+      });
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
@@ -105,7 +123,10 @@ export class AdminSeoKeywordsController {
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
@@ -142,7 +163,10 @@ export class AdminSeoKeywordsController {
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
@@ -154,31 +178,55 @@ export class AdminSeoKeywordsController {
   ) {
     try {
       if (!Array.isArray(body.ids) || body.ids.length === 0) {
-        throw new HttpException('ids must be a non-empty array', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'ids must be a non-empty array',
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const actorId = req.user?.id;
-      const count = await this.seoKeywordsService.bulkUpdateStatus(body.ids, body.status, actorId);
+      const count = await this.seoKeywordsService.bulkUpdateStatus(
+        body.ids,
+        body.status,
+        actorId,
+      );
       return { success: true, updated: count };
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
   @Post('bulk-delete')
-  @ApiOperation({ summary: 'Permanently delete selected keywords (assignments cascade)' })
-  async bulkDelete(@Body() body: { ids: string[] }, @Req() req: AuthenticatedRequest) {
+  @ApiOperation({
+    summary: 'Permanently delete selected keywords (assignments cascade)',
+  })
+  async bulkDelete(
+    @Body() body: { ids: string[] },
+    @Req() req: AuthenticatedRequest,
+  ) {
     try {
       if (!Array.isArray(body.ids) || body.ids.length === 0) {
-        throw new HttpException('ids must be a non-empty array', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'ids must be a non-empty array',
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const actorId = req.user?.id;
-      return await this.seoKeywordsService.bulkPermanentDelete(body.ids, actorId);
+      return await this.seoKeywordsService.bulkPermanentDelete(
+        body.ids,
+        actorId,
+      );
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
@@ -190,7 +238,10 @@ export class AdminSeoKeywordsController {
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 }
@@ -212,13 +263,22 @@ export class AdminSeoAssignmentsController {
   ) {
     try {
       if (!targetType || !targetRef) {
-        throw new HttpException('target_type and target_ref are required', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'target_type and target_ref are required',
+          HttpStatus.BAD_REQUEST,
+        );
       }
-      return await this.seoKeywordsService.getAssignments(targetType, targetRef);
+      return await this.seoKeywordsService.getAssignments(
+        targetType,
+        targetRef,
+      );
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
@@ -226,17 +286,25 @@ export class AdminSeoAssignmentsController {
   @ApiOperation({ summary: 'Create or update an assignment' })
   async upsert(@Body() body: Record<string, unknown>) {
     try {
-      return await this.seoKeywordsService.upsertAssignment(body as unknown as UpsertAssignmentDto);
+      return await this.seoKeywordsService.upsertAssignment(
+        body as unknown as UpsertAssignmentDto,
+      );
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
   @Post('bulk')
   @ApiOperation({ summary: 'Bulk create or update assignments for one target' })
-  async bulkUpsert(@Body() body: Record<string, unknown>, @Req() req: AuthenticatedRequest) {
+  async bulkUpsert(
+    @Body() body: Record<string, unknown>,
+    @Req() req: AuthenticatedRequest,
+  ) {
     try {
       const actorId = req.user?.id;
       return await this.seoKeywordsService.bulkUpsertAssignments(
@@ -246,7 +314,10 @@ export class AdminSeoAssignmentsController {
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
@@ -259,7 +330,10 @@ export class AdminSeoAssignmentsController {
     } catch (e: unknown) {
       const err = e as Error & { status?: number };
       this.logger.error(err.message);
-      throw new HttpException(err.message || 'Failed', err.status || HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        err.message || 'Failed',
+        err.status || HttpStatus.BAD_REQUEST,
+      );
     }
   }
 }

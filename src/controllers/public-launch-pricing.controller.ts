@@ -12,7 +12,9 @@ export class PublicLaunchPricingController {
   ) {}
 
   @Get('active')
-  @ApiOperation({ summary: 'Get active launch pricing for marketing and billing UI' })
+  @ApiOperation({
+    summary: 'Get active launch pricing for marketing and billing UI',
+  })
   async getActive() {
     const plans = await this.subscriptionService.getSubscriptionPlans();
     const config = await this.launchPricingService.getPublicActiveConfig(plans);

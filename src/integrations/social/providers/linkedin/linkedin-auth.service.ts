@@ -1,5 +1,8 @@
 import { Logger } from '@nestjs/common';
-import type { PlatformAuth, AuthorizationUrlResult } from '../../platform-auth.interface';
+import type {
+  PlatformAuth,
+  AuthorizationUrlResult,
+} from '../../platform-auth.interface';
 import {
   AuthFailedError,
   type OAuthTokenSet,
@@ -51,7 +54,12 @@ export interface LinkedInOrgPage {
 
 // REQUIRED_SCOPES are the must-have set to publish as a personal profile —
 // `validateScopes` fails the connection if any are missing.
-const REQUIRED_SCOPES: readonly string[] = ['openid', 'profile', 'email', 'w_member_social'];
+const REQUIRED_SCOPES: readonly string[] = [
+  'openid',
+  'profile',
+  'email',
+  'w_member_social',
+];
 
 // UNIFIED_SCOPES: Single OAuth flow requesting ALL approved scopes at once.
 // This eliminates the "double OAuth" pattern where users had to re-authenticate
@@ -172,13 +180,17 @@ export class LinkedInAuthService implements PlatformAuth {
       });
     } catch (err) {
       // Best-effort per the PlatformAuth contract: never throw on revoke.
-      this.logger.warn(`LinkedIn token revoke failed (ignored): ${String(err)}`);
+      this.logger.warn(
+        `LinkedIn token revoke failed (ignored): ${String(err)}`,
+      );
     }
   }
 
   // Fetch the connected member's identity. Used by the connection bridge to set
   // `platform_account_id` and enforce global-unique ownership.
-  public async fetchUserIdentity(accessToken: string): Promise<LinkedInUserIdentity> {
+  public async fetchUserIdentity(
+    accessToken: string,
+  ): Promise<LinkedInUserIdentity> {
     const response = await this.fetchImpl(USERINFO_URL, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -194,9 +206,12 @@ export class LinkedInAuthService implements PlatformAuth {
       picture?: string;
     };
     if (!data.sub) {
-      throw new AuthFailedError('LinkedIn userinfo returned no member id (sub).', {
-        platform: 'linkedin',
-      });
+      throw new AuthFailedError(
+        'LinkedIn userinfo returned no member id (sub).',
+        {
+          platform: 'linkedin',
+        },
+      );
     }
     return {
       memberId: data.sub,
@@ -214,7 +229,9 @@ export class LinkedInAuthService implements PlatformAuth {
     return { ok: missing.length === 0, missing };
   }
 
-  public async fetchAdminOrgPages(accessToken: string): Promise<LinkedInOrgPage[]> {
+  public async fetchAdminOrgPages(
+    accessToken: string,
+  ): Promise<LinkedInOrgPage[]> {
     const url =
       'https://api.linkedin.com/v2/organizationAcls?q=roleAssignee&role=ADMINISTRATOR' +
       '&projection=(elements*(organization~(id,localizedName,vanityName,logoV2)))';
@@ -225,7 +242,9 @@ export class LinkedInAuthService implements PlatformAuth {
       },
     });
     if (!response.ok) {
-      this.logger.warn(`LinkedIn organizationAcls failed (HTTP ${response.status}).`);
+      this.logger.warn(
+        `LinkedIn organizationAcls failed (HTTP ${response.status}).`,
+      );
       return [];
     }
     const data = (await response.json()) as {
@@ -268,7 +287,10 @@ export class LinkedInAuthService implements PlatformAuth {
         continue;
       }
       const record = node as Record<string, unknown>;
-      if (typeof record.identifier === 'string' && record.identifier.startsWith('http')) {
+      if (
+        typeof record.identifier === 'string' &&
+        record.identifier.startsWith('http')
+      ) {
         return record.identifier;
       }
       for (const child of Object.values(record)) {
@@ -313,7 +335,9 @@ export class LinkedInAuthService implements PlatformAuth {
   }
 }
 
-async function safeText(response: { text: () => Promise<string> }): Promise<string> {
+async function safeText(response: {
+  text: () => Promise<string>;
+}): Promise<string> {
   try {
     return await response.text();
   } catch {

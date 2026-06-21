@@ -125,12 +125,12 @@ export class GenerationWorker extends WorkerHost {
       await job.updateProgress(10);
 
       // Build callback URL for n8n to call when job completes
-      const baseUrl =
-        this.configService.get<string>('app.baseUrl');
+      const baseUrl = this.configService.get<string>('app.baseUrl');
       if (!baseUrl) {
         throw new Error('BACKEND_URL env var is required for n8n callback');
       }
-      const webhookSecret = this.configService.get<string>('n8n.webhookSecret') || '';
+      const webhookSecret =
+        this.configService.get<string>('n8n.webhookSecret') || '';
       const callbackQuery = new URLSearchParams({ jobId });
       if (webhookSecret) {
         callbackQuery.set('secret', webhookSecret);
@@ -392,16 +392,31 @@ export class GenerationWorker extends WorkerHost {
 
     try {
       emitProgress('validating', 'running', 5);
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 10, 'validating');
+      await this.generationJobRepository.updateStatus(
+        jobId,
+        JobStatus.GENERATING,
+        10,
+        'validating',
+      );
       await job.updateProgress(10);
       emitProgress('validating', 'succeeded', 8);
 
       emitProgress('reserving_credits', 'running', 10);
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 15, 'reserving_credits');
+      await this.generationJobRepository.updateStatus(
+        jobId,
+        JobStatus.GENERATING,
+        15,
+        'reserving_credits',
+      );
       emitProgress('reserving_credits', 'succeeded', 15);
 
       emitProgress('researching_web', 'running', 18);
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 18, 'researching_web');
+      await this.generationJobRepository.updateStatus(
+        jobId,
+        JobStatus.GENERATING,
+        18,
+        'researching_web',
+      );
       await job.updateProgress(18);
 
       let textGenerationStarted = false;
@@ -422,7 +437,10 @@ export class GenerationWorker extends WorkerHost {
       // post-generate() emits below are idempotent (some recovery paths fire
       // onTextPrimaryReady but never onTextEnhancementComplete if a retry
       // throws — we still need a clean fallback when control returns here).
-      if (preferences.contentType === 'carousel' && preferences.trainingDataCaptureOptIn) {
+      if (
+        preferences.contentType === 'carousel' &&
+        preferences.trainingDataCaptureOptIn
+      ) {
         await this.carouselTrainingCaptureService.record({
           userId,
           generationJobId: jobId,
@@ -553,7 +571,10 @@ export class GenerationWorker extends WorkerHost {
         emitProgress('planning_slides', 'running', 52);
       }
 
-      if (preferences.contentType === 'carousel' && preferences.trainingDataCaptureOptIn) {
+      if (
+        preferences.contentType === 'carousel' &&
+        preferences.trainingDataCaptureOptIn
+      ) {
         await this.carouselTrainingCaptureService.record({
           userId,
           generationJobId: jobId,
@@ -562,12 +583,15 @@ export class GenerationWorker extends WorkerHost {
           payload: {
             topicPreview: String(preferences.topic || ''),
             slideCount: preferences.slideCount,
-            carouselPlanSummary: result.carouselGenerationMeta?.carouselIntentPlan
+            carouselPlanSummary: result.carouselGenerationMeta
+              ?.carouselIntentPlan
               ? {
                   inferredSubject:
-                    result.carouselGenerationMeta.carouselIntentPlan.inferredSubject,
+                    result.carouselGenerationMeta.carouselIntentPlan
+                      .inferredSubject,
                   slideCountPlanned:
-                    result.carouselGenerationMeta.carouselIntentPlan.slides.length,
+                    result.carouselGenerationMeta.carouselIntentPlan.slides
+                      .length,
                 }
               : {},
             programmingModeEffective:
@@ -582,20 +606,27 @@ export class GenerationWorker extends WorkerHost {
           eventType: 'carousel_text_ready',
           payload: {
             topicPreview: String(preferences.topic || ''),
-            slideTitlesSample: ('slides' in result.output
-              ? result.output.slides.slice(0, 5).map((s) => s.title)
-              : []) as string[],
-            slideTotal: ('slides' in result.output ? result.output.slides.length : 0) as number,
+            slideTitlesSample:
+              'slides' in result.output
+                ? result.output.slides.slice(0, 5).map((s) => s.title)
+                : [],
+            slideTotal:
+              'slides' in result.output ? result.output.slides.length : 0,
             noteDensity: result.carouselGenerationMeta?.noteDensity,
             programmingModeEffective:
               result.carouselGenerationMeta?.programmingModeEffective,
           },
         });
       }
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 50, 'composing_pages');
+      await this.generationJobRepository.updateStatus(
+        jobId,
+        JobStatus.GENERATING,
+        50,
+        'composing_pages',
+      );
       await job.updateProgress(50);
 
-      let mediaUrls: string[] = [];
+      const mediaUrls: string[] = [];
       let documentDeckPdfUrl: string | undefined;
       let usedImageModel: string | undefined;
 
@@ -610,13 +641,22 @@ export class GenerationWorker extends WorkerHost {
           const brand = await this.brandProfiles.getPrimaryForUser(userId);
           if (brand) {
             const refUrls = (brand.assets ?? [])
-              .filter((a) => a.url && (a.kind === 'reference' || a.kind === 'style' || !a.kind))
+              .filter(
+                (a) =>
+                  a.url &&
+                  (a.kind === 'reference' || a.kind === 'style' || !a.kind),
+              )
               .map((a) => a.url);
             let visionFragment: string | undefined;
             try {
-              const analysis = await this.brandVision.getOrAnalyze(userId, brand);
+              const analysis = await this.brandVision.getOrAnalyze(
+                userId,
+                brand,
+              );
               visionFragment = analysis?.compositePromptFragment || undefined;
-            } catch { /* vision is best-effort */ }
+            } catch {
+              /* vision is best-effort */
+            }
             brandVisual = {
               name: brand.name,
               primaryColor: brand.primary_color,
@@ -629,13 +669,17 @@ export class GenerationWorker extends WorkerHost {
             };
             debugLogWorkerBrandVisual(brandVisual, userId);
           } else {
-            debugLogBrandKitSkipped('no primary brand profile (worker image phase)');
+            debugLogBrandKitSkipped(
+              'no primary brand profile (worker image phase)',
+            );
           }
         } catch {
           /* brand kit optional — never block generation */
         }
       } else {
-        debugLogBrandKitSkipped('brand kit toggle OFF — skipping visual context');
+        debugLogBrandKitSkipped(
+          'brand kit toggle OFF — skipping visual context',
+        );
       }
 
       if (contentType === 'image' && 'imagePrompts' in result.output) {
@@ -649,21 +693,31 @@ export class GenerationWorker extends WorkerHost {
           CUSTOM_TOPIC_MEDIA_CONCURRENCY,
           async (prompt, i) => {
             const subtaskKey = `image_${i + 1}`;
-            emitProgress(subtaskKey, 'running', 50 + Math.round((i / imagePrompts.length) * 30));
-            const { buffer, model: imgModel } = await this.mediaGenerationService.generateSingleImage({
-              prompt,
-              size: '1024x1024',
-              quality: 'medium',
-              brandVisual,
-            });
-            if (!usedImageModel && imgModel !== 'cache') usedImageModel = imgModel;
+            emitProgress(
+              subtaskKey,
+              'running',
+              50 + Math.round((i / imagePrompts.length) * 30),
+            );
+            const { buffer, model: imgModel } =
+              await this.mediaGenerationService.generateSingleImage({
+                prompt,
+                size: '1024x1024',
+                quality: 'medium',
+                brandVisual,
+              });
+            if (!usedImageModel && imgModel !== 'cache')
+              usedImageModel = imgModel;
             const url = await this.mediaGenerationService.uploadToMinio(
               buffer,
               `custom-image-${Date.now()}-${i + 1}.png`,
               'image/png',
               userId,
             );
-            emitProgress(subtaskKey, 'succeeded', 50 + Math.round(((i + 1) / imagePrompts.length) * 30));
+            emitProgress(
+              subtaskKey,
+              'succeeded',
+              50 + Math.round(((i + 1) / imagePrompts.length) * 30),
+            );
             return url;
           },
         );
@@ -674,13 +728,19 @@ export class GenerationWorker extends WorkerHost {
           if (r.status === 'fulfilled') {
             mediaUrls.push(r.value);
           } else {
-            this.logger.error(`Image ${i + 1} generation failed: ${r.reason?.message || r.reason}`);
+            this.logger.error(
+              `Image ${i + 1} generation failed: ${r.reason?.message || r.reason}`,
+            );
             emitProgress(`image_${i + 1}`, 'failed');
             failedIndices.push(i + 1);
           }
         }
         if (failedIndices.length > 0) {
-          await this.customTopicCreditService.refundImageFail(userId, jobId, failedIndices);
+          await this.customTopicCreditService.refundImageFail(
+            userId,
+            jobId,
+            failedIndices,
+          );
         }
       }
 
@@ -691,59 +751,74 @@ export class GenerationWorker extends WorkerHost {
         const docTheme: CarouselDocumentTheme | undefined =
           result.carouselGenerationMeta?.documentTheme;
         const usingDocumentDeck =
-          (docMode === 'handwritten_notes' || docMode === 'structured_document') &&
+          (docMode === 'handwritten_notes' ||
+            docMode === 'structured_document') &&
           (docTheme === 'notebook' || docTheme === 'clean_document');
 
         if (usingDocumentDeck) {
           this.logger.log(
             `Rendering document deck (mode=${docMode} theme=${docTheme}) ${slides.length} slides for job ${jobId} — skipping LLM image API.`,
           );
-          const tocEntries: TocEntry[] = (result.output as { tocEntries?: TocEntry[] }).tocEntries ?? [];
+          const tocEntries: TocEntry[] =
+            (result.output as { tocEntries?: TocEntry[] }).tocEntries ?? [];
           const rawAuthor =
             (result.output as { author?: string }).author ||
             result.carouselGenerationMeta?.documentAuthor ||
             undefined;
-          const isGenericPlaceholder = /^(your\s*name|author|name|placeholder)$/i.test(
-            String(rawAuthor || '').trim(),
-          );
+          const isGenericPlaceholder =
+            /^(your\s*name|author|name|placeholder)$/i.test(
+              String(rawAuthor || '').trim(),
+            );
           const meta = {
             coverTitle:
               (result.output as { coverTitle?: string }).coverTitle ||
               slides[0]?.title ||
               String(preferences.topic || ''),
             coverSubtitle:
-              (result.output as { coverSubtitle?: string }).coverSubtitle || undefined,
+              (result.output as { coverSubtitle?: string }).coverSubtitle ||
+              undefined,
             author: isGenericPlaceholder ? 'Trndinn' : rawAuthor,
             brand: 'Trndinn',
           };
           const totalPages = slides.length;
           const docSlideResults = await mapWithConcurrency(
-            slides as CarouselSlideOutput[],
+            slides,
             CUSTOM_TOPIC_MEDIA_CONCURRENCY,
             async (slide, i) => {
               const subtaskKey = `slide_${i + 1}`;
-              emitProgress(subtaskKey, 'running', 50 + Math.round((i / slides.length) * 30), {
-                documentMode: docMode,
-                documentTheme: docTheme,
-              });
-              const buffer = await this.mediaGenerationService.generateDocumentDeckSlide({
-                slide,
-                pageNumber: slide.pageNumber ?? i + 1,
-                totalPages,
-                theme: docTheme!,
-                meta,
-                tocEntries,
-              });
+              emitProgress(
+                subtaskKey,
+                'running',
+                50 + Math.round((i / slides.length) * 30),
+                {
+                  documentMode: docMode,
+                  documentTheme: docTheme,
+                },
+              );
+              const buffer =
+                await this.mediaGenerationService.generateDocumentDeckSlide({
+                  slide,
+                  pageNumber: slide.pageNumber ?? i + 1,
+                  totalPages,
+                  theme: docTheme,
+                  meta,
+                  tocEntries,
+                });
               const url = await this.mediaGenerationService.uploadToMinio(
                 buffer,
                 `custom-doc-slide-${Date.now()}-${i + 1}.jpg`,
                 'image/jpeg',
                 userId,
               );
-              emitProgress(subtaskKey, 'succeeded', 50 + Math.round(((i + 1) / slides.length) * 30), {
-                documentMode: docMode,
-                documentTheme: docTheme,
-              });
+              emitProgress(
+                subtaskKey,
+                'succeeded',
+                50 + Math.round(((i + 1) / slides.length) * 30),
+                {
+                  documentMode: docMode,
+                  documentTheme: docTheme,
+                },
+              );
               return url;
             },
           );
@@ -753,14 +828,19 @@ export class GenerationWorker extends WorkerHost {
             if (r.status === 'fulfilled') {
               mediaUrls.push(r.value);
             } else {
-              this.logger.error(`Document-deck slide ${i + 1} failed: ${r.reason?.message || r.reason}`);
+              this.logger.error(
+                `Document-deck slide ${i + 1} failed: ${r.reason?.message || r.reason}`,
+              );
               emitProgress(`slide_${i + 1}`, 'failed');
               docFailed.push(i + 1);
             }
           }
           if (docFailed.length > 0) {
             await this.customTopicCreditService.refundSlideFail(
-              userId, jobId, docFailed, true,
+              userId,
+              jobId,
+              docFailed,
+              true,
             );
           }
           if (
@@ -776,10 +856,10 @@ export class GenerationWorker extends WorkerHost {
               payload: {
                 topicPreview: String(preferences.topic || ''),
                 slideCount: slides.length,
-                slideTitlesSample: (slides as CarouselSlideOutput[])
-                  .slice(0, 5)
-                  .map((s) => s.title),
-                carouselVisualStyle: result.carouselGenerationMeta?.documentTheme ?? 'document_deck',
+                slideTitlesSample: slides.slice(0, 5).map((s) => s.title),
+                carouselVisualStyle:
+                  result.carouselGenerationMeta?.documentTheme ??
+                  'document_deck',
                 outputMeta: {
                   renderedSlides: mediaUrls.length,
                   documentMode: docMode,
@@ -793,14 +873,18 @@ export class GenerationWorker extends WorkerHost {
           // (legacy carousels lazily build PDF on publish in post-scheduling.service.ts).
           if (mediaUrls.length > 0) {
             try {
-              const pdfBuffer = await this.mediaGenerationService.createCarouselPdfFromImageUrls(mediaUrls);
+              const pdfBuffer =
+                await this.mediaGenerationService.createCarouselPdfFromImageUrls(
+                  mediaUrls,
+                );
               const pdfFileName = `custom-doc-${Date.now()}.pdf`;
-              documentDeckPdfUrl = await this.mediaGenerationService.uploadToMinio(
-                pdfBuffer,
-                pdfFileName,
-                'application/pdf',
-                userId,
-              );
+              documentDeckPdfUrl =
+                await this.mediaGenerationService.uploadToMinio(
+                  pdfBuffer,
+                  pdfFileName,
+                  'application/pdf',
+                  userId,
+                );
             } catch (e) {
               this.logger.warn(
                 `Document deck PDF assembly failed (will rebuild on publish): ${(e as Error).message}`,
@@ -810,140 +894,168 @@ export class GenerationWorker extends WorkerHost {
           // Skip the legacy carousel render branch entirely for document-deck decks.
           // Continue to the saving phase.
         } else {
-
-        const fallbackStyle: CarouselVisualStyle =
-          preferences.carouselVisualStyle &&
-          preferences.carouselVisualStyle !== 'auto'
-            ? (preferences.carouselVisualStyle as CarouselVisualStyle)
-            : inferCarouselVisualStyleFromTopic(String(preferences.topic || '').toLowerCase());
-
-        const visualStyle: CarouselVisualStyle =
-          result.carouselGenerationMeta?.resolvedVisualStyle ?? fallbackStyle;
-
-        const nativeHandwritingInImage = Boolean(
-          result.carouselGenerationMeta?.nativeHandwritingInImage,
-        );
-
-        this.logger.log(
-          `Generating ${slides.length} carousel slides (visualStyle=${visualStyle}, concurrency=${CUSTOM_TOPIC_MEDIA_CONCURRENCY}, nativeRasterHandwriting=${nativeHandwritingInImage}) for job ${jobId}`,
-        );
-
-        const slideResults = await mapWithConcurrency(
-          slides,
-          CUSTOM_TOPIC_MEDIA_CONCURRENCY,
-          async (slide, i) => {
-            const subtaskKey = `slide_${i + 1}`;
-            emitProgress(subtaskKey, 'running', 50 + Math.round((i / slides.length) * 30), {
-              carouselVisualStyle: visualStyle,
-            });
-
-            const handwrittenLike =
-              visualStyle === 'handwritten_notebook' ||
-              visualStyle === 'handwritten_notebook_dense' ||
-              visualStyle === 'whiteboard_notes';
-
-            let buffer: Buffer | undefined;
-            let lastErr: Error | undefined;
-            for (let attempt = 0; attempt < 2; attempt++) {
-              try {
-                const gen = await this.mediaGenerationService.generateCustomTopicCarouselSlide(
-                  {
-                    title: slide.title,
-                    body: slide.body,
-                    bullets: slide.bullets,
-                    denseBullets: slide.denseBullets,
-                    codeSnippets: slide.codeSnippets,
-                    imagePrompt: slide.imagePrompt,
-                    notebookSections: slide.notebookSections,
-                    marginNotes: slide.marginNotes,
-                  },
-                  {
-                    visualStyle,
-                    strictRetry: attempt > 0,
-                    size: '1024x1024',
-                    quality: 'medium',
-                    noteDensity: result.carouselGenerationMeta?.noteDensity,
-                    slideIndex: i,
-                    skipTextOverlay: nativeHandwritingInImage,
-                  },
+          const fallbackStyle: CarouselVisualStyle =
+            preferences.carouselVisualStyle &&
+            preferences.carouselVisualStyle !== 'auto'
+              ? (preferences.carouselVisualStyle as CarouselVisualStyle)
+              : inferCarouselVisualStyleFromTopic(
+                  String(preferences.topic || '').toLowerCase(),
                 );
-                if (handwrittenLike && !gen.overlayApplied && !nativeHandwritingInImage) {
-                  throw new Error(
-                    'Carousel text overlay pipeline did not complete (notes-style decks require composited typography).',
+
+          const visualStyle: CarouselVisualStyle =
+            result.carouselGenerationMeta?.resolvedVisualStyle ?? fallbackStyle;
+
+          const nativeHandwritingInImage = Boolean(
+            result.carouselGenerationMeta?.nativeHandwritingInImage,
+          );
+
+          this.logger.log(
+            `Generating ${slides.length} carousel slides (visualStyle=${visualStyle}, concurrency=${CUSTOM_TOPIC_MEDIA_CONCURRENCY}, nativeRasterHandwriting=${nativeHandwritingInImage}) for job ${jobId}`,
+          );
+
+          const slideResults = await mapWithConcurrency(
+            slides,
+            CUSTOM_TOPIC_MEDIA_CONCURRENCY,
+            async (slide, i) => {
+              const subtaskKey = `slide_${i + 1}`;
+              emitProgress(
+                subtaskKey,
+                'running',
+                50 + Math.round((i / slides.length) * 30),
+                {
+                  carouselVisualStyle: visualStyle,
+                },
+              );
+
+              const handwrittenLike =
+                visualStyle === 'handwritten_notebook' ||
+                visualStyle === 'handwritten_notebook_dense' ||
+                visualStyle === 'whiteboard_notes';
+
+              let buffer: Buffer | undefined;
+              let lastErr: Error | undefined;
+              for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                  const gen =
+                    await this.mediaGenerationService.generateCustomTopicCarouselSlide(
+                      {
+                        title: slide.title,
+                        body: slide.body,
+                        bullets: slide.bullets,
+                        denseBullets: slide.denseBullets,
+                        codeSnippets: slide.codeSnippets,
+                        imagePrompt: slide.imagePrompt,
+                        notebookSections: slide.notebookSections,
+                        marginNotes: slide.marginNotes,
+                      },
+                      {
+                        visualStyle,
+                        strictRetry: attempt > 0,
+                        size: '1024x1024',
+                        quality: 'medium',
+                        noteDensity: result.carouselGenerationMeta?.noteDensity,
+                        slideIndex: i,
+                        skipTextOverlay: nativeHandwritingInImage,
+                      },
+                    );
+                  if (
+                    handwrittenLike &&
+                    !gen.overlayApplied &&
+                    !nativeHandwritingInImage
+                  ) {
+                    throw new Error(
+                      'Carousel text overlay pipeline did not complete (notes-style decks require composited typography).',
+                    );
+                  }
+                  buffer = gen.buffer;
+                  break;
+                } catch (e) {
+                  lastErr = e instanceof Error ? e : new Error(String(e));
+                  this.logger.warn(
+                    `Slide ${i + 1} render attempt ${attempt + 1} failed: ${lastErr.message}`,
                   );
                 }
-                buffer = gen.buffer;
-                break;
-              } catch (e) {
-                lastErr = e instanceof Error ? e : new Error(String(e));
-                this.logger.warn(
-                  `Slide ${i + 1} render attempt ${attempt + 1} failed: ${lastErr.message}`,
+              }
+
+              if (!buffer) {
+                throw (
+                  lastErr ??
+                  new Error(
+                    `Carousel slide ${i + 1} failed after strict regeneration retry`,
+                  )
                 );
               }
-            }
 
-            if (!buffer) {
-              throw (
-                lastErr ??
-                new Error(`Carousel slide ${i + 1} failed after strict regeneration retry`)
+              const url = await this.mediaGenerationService.uploadToMinio(
+                buffer,
+                `custom-slide-${Date.now()}-${i + 1}.jpg`,
+                'image/jpeg',
+                userId,
               );
-            }
-
-            const url = await this.mediaGenerationService.uploadToMinio(
-              buffer,
-              `custom-slide-${Date.now()}-${i + 1}.jpg`,
-              'image/jpeg',
-              userId,
-            );
-            emitProgress(subtaskKey, 'succeeded', 50 + Math.round(((i + 1) / slides.length) * 30), {
-              carouselVisualStyle: visualStyle,
-            });
-            return url;
-          },
-        );
-
-        const failedSlides: number[] = [];
-        for (let i = 0; i < slideResults.length; i++) {
-          const r = slideResults[i];
-          if (r.status === 'fulfilled') {
-            mediaUrls.push(r.value);
-          } else {
-            this.logger.error(`Slide ${i + 1} generation failed: ${r.reason?.message || r.reason}`);
-            emitProgress(`slide_${i + 1}`, 'failed');
-            failedSlides.push(i + 1);
-          }
-        }
-        if (failedSlides.length > 0) {
-          await this.customTopicCreditService.refundSlideFail(
-            userId, jobId, failedSlides, true,
-          );
-        }
-        if (
-          preferences.trainingDataCaptureOptIn &&
-          failedSlides.length === 0 &&
-          mediaUrls.length === slides.length
-        ) {
-          await this.carouselTrainingCaptureService.record({
-            userId,
-            generationJobId: jobId,
-            consentOptIn: true,
-            eventType: 'carousel_render_complete',
-            payload: {
-              topicPreview: String(preferences.topic || ''),
-              slideCount: slides.length,
-              carouselVisualStyle: visualStyle,
-              outputMeta: {
-                renderedSlides: mediaUrls.length,
-                noteDensity: result.carouselGenerationMeta?.noteDensity,
-              },
+              emitProgress(
+                subtaskKey,
+                'succeeded',
+                50 + Math.round(((i + 1) / slides.length) * 30),
+                {
+                  carouselVisualStyle: visualStyle,
+                },
+              );
+              return url;
             },
-          });
-        }
+          );
+
+          const failedSlides: number[] = [];
+          for (let i = 0; i < slideResults.length; i++) {
+            const r = slideResults[i];
+            if (r.status === 'fulfilled') {
+              mediaUrls.push(r.value);
+            } else {
+              this.logger.error(
+                `Slide ${i + 1} generation failed: ${r.reason?.message || r.reason}`,
+              );
+              emitProgress(`slide_${i + 1}`, 'failed');
+              failedSlides.push(i + 1);
+            }
+          }
+          if (failedSlides.length > 0) {
+            await this.customTopicCreditService.refundSlideFail(
+              userId,
+              jobId,
+              failedSlides,
+              true,
+            );
+          }
+          if (
+            preferences.trainingDataCaptureOptIn &&
+            failedSlides.length === 0 &&
+            mediaUrls.length === slides.length
+          ) {
+            await this.carouselTrainingCaptureService.record({
+              userId,
+              generationJobId: jobId,
+              consentOptIn: true,
+              eventType: 'carousel_render_complete',
+              payload: {
+                topicPreview: String(preferences.topic || ''),
+                slideCount: slides.length,
+                carouselVisualStyle: visualStyle,
+                outputMeta: {
+                  renderedSlides: mediaUrls.length,
+                  noteDensity: result.carouselGenerationMeta?.noteDensity,
+                },
+              },
+            });
+          }
         }
       }
 
       emitProgress('saving', 'running', 85);
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 85, 'saving');
+      await this.generationJobRepository.updateStatus(
+        jobId,
+        JobStatus.GENERATING,
+        85,
+        'saving',
+      );
 
       const generationMeta = {
         ...result.generationMeta,
@@ -967,24 +1079,30 @@ export class GenerationWorker extends WorkerHost {
           carouselSubjectMode: preferences.carouselSubjectMode,
           carouselDocumentModeRequested: preferences.carouselDocumentMode,
           carouselDocumentAuthor: preferences.carouselDocumentAuthor,
-          carouselVisualStyleResolved: result.carouselGenerationMeta?.resolvedVisualStyle,
+          carouselVisualStyleResolved:
+            result.carouselGenerationMeta?.resolvedVisualStyle,
           carouselStyleSource: result.carouselGenerationMeta?.styleSource,
           carouselNoteDensity: result.carouselGenerationMeta?.noteDensity,
           carouselProgrammingModeEffective:
             result.carouselGenerationMeta?.programmingModeEffective,
           carouselDocumentMode: result.carouselGenerationMeta?.documentMode,
-          carouselDocumentModeSource: result.carouselGenerationMeta?.documentModeSource,
+          carouselDocumentModeSource:
+            result.carouselGenerationMeta?.documentModeSource,
           carouselDocumentTheme: result.carouselGenerationMeta?.documentTheme,
           trainingDataCaptureOptIn: preferences.trainingDataCaptureOptIn,
           bullets: result.output.bullets,
           cta: result.output.cta,
           imagePrompts:
-            'imagePrompts' in result.output ? result.output.imagePrompts : undefined,
+            'imagePrompts' in result.output
+              ? result.output.imagePrompts
+              : undefined,
           slides: 'slides' in result.output ? result.output.slides : undefined,
         },
       };
 
-      const replaceContentId = preferences.replaceContentId as string | undefined;
+      const replaceContentId = preferences.replaceContentId as
+        | string
+        | undefined;
       let contentRecordId: string;
 
       if (replaceContentId) {
@@ -1007,7 +1125,8 @@ export class GenerationWorker extends WorkerHost {
               contentType === 'image' && mediaUrls.length > 0
                 ? mediaUrls[0]
                 : undefined,
-            pdf_url: contentType === 'carousel' ? documentDeckPdfUrl : undefined,
+            pdf_url:
+              contentType === 'carousel' ? documentDeckPdfUrl : undefined,
           },
         );
         contentRecordId = updated.id;
@@ -1019,7 +1138,8 @@ export class GenerationWorker extends WorkerHost {
           {
             jobId,
             hashtags: result.output.hashtags,
-            visualType: contentType !== 'text' ? (contentType as any) : undefined,
+            visualType:
+              contentType !== 'text' ? (contentType as any) : undefined,
             visualUrl:
               contentType === 'image' && mediaUrls.length > 0
                 ? mediaUrls[0]
@@ -1042,7 +1162,12 @@ export class GenerationWorker extends WorkerHost {
 
       emitProgress('saving', 'succeeded', 95);
 
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 95, 'done');
+      await this.generationJobRepository.updateStatus(
+        jobId,
+        JobStatus.GENERATING,
+        95,
+        'done',
+      );
 
       await this.generationJobRepository.updateWithContent(
         jobId,
@@ -1065,11 +1190,17 @@ export class GenerationWorker extends WorkerHost {
           caption: result.output.caption,
           hashtags: result.output.hashtags,
           imageUrls:
-            contentType === 'image' && mediaUrls.length > 0 ? mediaUrls : undefined,
+            contentType === 'image' && mediaUrls.length > 0
+              ? mediaUrls
+              : undefined,
           carouselUrls:
-            contentType === 'carousel' && mediaUrls.length > 0 ? mediaUrls : undefined,
+            contentType === 'carousel' && mediaUrls.length > 0
+              ? mediaUrls
+              : undefined,
           visualUrl:
-            contentType === 'image' && mediaUrls.length > 0 ? mediaUrls[0] : undefined,
+            contentType === 'image' && mediaUrls.length > 0
+              ? mediaUrls[0]
+              : undefined,
           pdfUrl: contentType === 'carousel' ? documentDeckPdfUrl : undefined,
         });
       } else {
@@ -1088,14 +1219,21 @@ export class GenerationWorker extends WorkerHost {
 
       // Process referral completion if this is the user's first generation
       try {
-        const referralResult = await this.referralService.processReferralCompletion(userId);
-        if (referralResult.success && referralResult.creditsAwarded && referralResult.creditsAwarded > 0) {
+        const referralResult =
+          await this.referralService.processReferralCompletion(userId);
+        if (
+          referralResult.success &&
+          referralResult.creditsAwarded &&
+          referralResult.creditsAwarded > 0
+        ) {
           this.logger.log(
             `Referral completed for user ${userId}: referrer ${referralResult.referrerId} earned ${referralResult.creditsAwarded} credits`,
           );
         }
       } catch (referralError) {
-        this.logger.warn(`Referral processing failed for user ${userId}: ${(referralError as Error).message}`);
+        this.logger.warn(
+          `Referral processing failed for user ${userId}: ${(referralError as Error).message}`,
+        );
       }
 
       try {
@@ -1108,7 +1246,9 @@ export class GenerationWorker extends WorkerHost {
           `Custom-topic job ${jobId} succeeded contentType=${contentType} reservedTotal=${reservedTotal} remainingCredits=${quotaAfter.remainingCredits}`,
         );
       } catch (e) {
-        this.logger.warn(`Post-success quota log failed for ${jobId}: ${(e as Error).message}`);
+        this.logger.warn(
+          `Post-success quota log failed for ${jobId}: ${(e as Error).message}`,
+        );
       }
 
       emitProgress('done', 'succeeded', 100);
@@ -1121,7 +1261,6 @@ export class GenerationWorker extends WorkerHost {
           ? 'Custom topic post regenerated'
           : 'Custom topic generation completed',
       };
-
     } catch (error) {
       const err = error as Error;
       this.logger.error(`Custom-topic job ${jobId} failed: ${err.message}`);
@@ -1129,13 +1268,23 @@ export class GenerationWorker extends WorkerHost {
       emitProgress('error', 'failed');
 
       if (err instanceof OffTopicError) {
-        await this.customTopicCreditService.refundAllSlices(userId, jobId, creditSlices);
+        await this.customTopicCreditService.refundAllSlices(
+          userId,
+          jobId,
+          creditSlices,
+        );
       } else {
-        await this.customTopicCreditService.refundTextFail(userId, jobId, creditSlices);
+        await this.customTopicCreditService.refundTextFail(
+          userId,
+          jobId,
+          creditSlices,
+        );
       }
 
       await this.notificationService.notifyGenerationFailed(
-        userId, jobId, err.message,
+        userId,
+        jobId,
+        err.message,
         creditSlices.reduce((sum, s) => sum + s.credits, 0),
       );
 
@@ -1164,7 +1313,9 @@ export class GenerationWorker extends WorkerHost {
       totalCost,
     } = job.data;
 
-    this.logger.log(`Processing carousel regeneration job ${jobId} for content ${originalContentId}`);
+    this.logger.log(
+      `Processing carousel regeneration job ${jobId} for content ${originalContentId}`,
+    );
 
     const emitProgress = (
       subtaskKey: string,
@@ -1185,15 +1336,22 @@ export class GenerationWorker extends WorkerHost {
       // Set user context for rate limiting
       this.mediaGenerationService.setCurrentUserId(userId);
 
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 10, 'Starting carousel regeneration');
+      await this.generationJobRepository.updateStatus(
+        jobId,
+        JobStatus.GENERATING,
+        10,
+        'Starting carousel regeneration',
+      );
       await job.updateProgress(10);
 
       emitProgress('regenerating', 'running', 15);
 
       const mediaUrls: string[] = [];
       const usingDocumentDeck =
-        (carouselDocumentMode === 'handwritten_notes' || carouselDocumentMode === 'structured_document') &&
-        (carouselDocumentTheme === 'notebook' || carouselDocumentTheme === 'clean_document');
+        (carouselDocumentMode === 'handwritten_notes' ||
+          carouselDocumentMode === 'structured_document') &&
+        (carouselDocumentTheme === 'notebook' ||
+          carouselDocumentTheme === 'clean_document');
 
       if (usingDocumentDeck) {
         const tocEntries: TocEntry[] = [];
@@ -1210,22 +1368,31 @@ export class GenerationWorker extends WorkerHost {
           CUSTOM_TOPIC_MEDIA_CONCURRENCY,
           async (slide, i) => {
             const subtaskKey = `slide_${i + 1}`;
-            emitProgress(subtaskKey, 'running', 20 + Math.round((i / slides.length) * 60));
-            const buffer = await this.mediaGenerationService.generateDocumentDeckSlide({
-              slide,
-              pageNumber: slide.pageNumber ?? i + 1,
-              totalPages,
-              theme: carouselDocumentTheme!,
-              meta,
-              tocEntries,
-            });
+            emitProgress(
+              subtaskKey,
+              'running',
+              20 + Math.round((i / slides.length) * 60),
+            );
+            const buffer =
+              await this.mediaGenerationService.generateDocumentDeckSlide({
+                slide,
+                pageNumber: slide.pageNumber ?? i + 1,
+                totalPages,
+                theme: carouselDocumentTheme!,
+                meta,
+                tocEntries,
+              });
             const url = await this.mediaGenerationService.uploadToMinio(
               buffer,
               `regen-doc-slide-${Date.now()}-${i + 1}.jpg`,
               'image/jpeg',
               userId,
             );
-            emitProgress(subtaskKey, 'succeeded', 20 + Math.round(((i + 1) / slides.length) * 60));
+            emitProgress(
+              subtaskKey,
+              'succeeded',
+              20 + Math.round(((i + 1) / slides.length) * 60),
+            );
             return url;
           },
         );
@@ -1235,7 +1402,9 @@ export class GenerationWorker extends WorkerHost {
           if (r.status === 'fulfilled') {
             mediaUrls.push(r.value);
           } else {
-            this.logger.error(`Regeneration slide ${i + 1} failed: ${r.reason?.message || r.reason}`);
+            this.logger.error(
+              `Regeneration slide ${i + 1} failed: ${r.reason?.message || r.reason}`,
+            );
             emitProgress(`slide_${i + 1}`, 'failed');
           }
         }
@@ -1245,31 +1414,40 @@ export class GenerationWorker extends WorkerHost {
           CUSTOM_TOPIC_MEDIA_CONCURRENCY,
           async (slide: any, i: number) => {
             const subtaskKey = `slide_${i + 1}`;
-            emitProgress(subtaskKey, 'running', 20 + Math.round((i / slides.length) * 60));
-            const { buffer } = await this.mediaGenerationService.generateCustomTopicCarouselSlide(
-              {
-                title: slide.title || '',
-                body: slide.body || '',
-                bullets: slide.bullets,
-                denseBullets: slide.denseBullets,
-                codeSnippets: slide.codeSnippets,
-                notebookSections: slide.notebookSections,
-                marginNotes: slide.marginNotes,
-                imagePrompt: slide.imagePrompt || slide.title || '',
-              },
-              {
-                visualStyle: carouselVisualStyle as CarouselVisualStyle,
-                noteDensity: carouselNoteDensity,
-                slideIndex: i,
-              },
+            emitProgress(
+              subtaskKey,
+              'running',
+              20 + Math.round((i / slides.length) * 60),
             );
+            const { buffer } =
+              await this.mediaGenerationService.generateCustomTopicCarouselSlide(
+                {
+                  title: slide.title || '',
+                  body: slide.body || '',
+                  bullets: slide.bullets,
+                  denseBullets: slide.denseBullets,
+                  codeSnippets: slide.codeSnippets,
+                  notebookSections: slide.notebookSections,
+                  marginNotes: slide.marginNotes,
+                  imagePrompt: slide.imagePrompt || slide.title || '',
+                },
+                {
+                  visualStyle: carouselVisualStyle as CarouselVisualStyle,
+                  noteDensity: carouselNoteDensity,
+                  slideIndex: i,
+                },
+              );
             const url = await this.mediaGenerationService.uploadToMinio(
               buffer,
               `regen-slide-${Date.now()}-${i + 1}.jpg`,
               'image/jpeg',
               userId,
             );
-            emitProgress(subtaskKey, 'succeeded', 20 + Math.round(((i + 1) / slides.length) * 60));
+            emitProgress(
+              subtaskKey,
+              'succeeded',
+              20 + Math.round(((i + 1) / slides.length) * 60),
+            );
             return url;
           },
         );
@@ -1279,7 +1457,9 @@ export class GenerationWorker extends WorkerHost {
           if (r.status === 'fulfilled') {
             mediaUrls.push(r.value);
           } else {
-            this.logger.error(`Regeneration slide ${i + 1} failed: ${r.reason?.message || r.reason}`);
+            this.logger.error(
+              `Regeneration slide ${i + 1} failed: ${r.reason?.message || r.reason}`,
+            );
             emitProgress(`slide_${i + 1}`, 'failed');
           }
         }
@@ -1294,7 +1474,10 @@ export class GenerationWorker extends WorkerHost {
       let pdfUrl: string | undefined;
       if (mediaUrls.length > 0) {
         try {
-          const pdfBuffer = await this.mediaGenerationService.createCarouselPdfFromImageUrls(mediaUrls);
+          const pdfBuffer =
+            await this.mediaGenerationService.createCarouselPdfFromImageUrls(
+              mediaUrls,
+            );
           pdfUrl = await this.mediaGenerationService.uploadToMinio(
             pdfBuffer,
             `regen-carousel-${Date.now()}.pdf`,
@@ -1302,7 +1485,9 @@ export class GenerationWorker extends WorkerHost {
             userId,
           );
         } catch (pdfErr) {
-          this.logger.warn(`PDF generation failed during regeneration: ${(pdfErr as Error).message}`);
+          this.logger.warn(
+            `PDF generation failed during regeneration: ${(pdfErr as Error).message}`,
+          );
         }
       }
 
@@ -1339,14 +1524,23 @@ export class GenerationWorker extends WorkerHost {
       };
     } catch (error) {
       const err = error as Error;
-      this.logger.error(`Carousel regeneration job ${jobId} failed: ${err.message}`);
+      this.logger.error(
+        `Carousel regeneration job ${jobId} failed: ${err.message}`,
+      );
 
       emitProgress('error', 'failed');
 
-      await this.customTopicCreditService.refundAllSlices(userId, jobId, creditSlices);
+      await this.customTopicCreditService.refundAllSlices(
+        userId,
+        jobId,
+        creditSlices,
+      );
 
       await this.notificationService.notifyGenerationFailed(
-        userId, jobId, err.message, totalCost,
+        userId,
+        jobId,
+        err.message,
+        totalCost,
       );
 
       await this.generationJobRepository.updateError(jobId, err.message, 0);
@@ -1370,7 +1564,9 @@ export class GenerationWorker extends WorkerHost {
       totalCost,
     } = job.data;
 
-    this.logger.log(`Processing image regeneration job ${jobId} for content ${originalContentId}`);
+    this.logger.log(
+      `Processing image regeneration job ${jobId} for content ${originalContentId}`,
+    );
 
     const emitProgress = (
       subtaskKey: string,
@@ -1389,7 +1585,12 @@ export class GenerationWorker extends WorkerHost {
       // Set user context for rate limiting
       this.mediaGenerationService.setCurrentUserId(userId);
 
-      await this.generationJobRepository.updateStatus(jobId, JobStatus.GENERATING, 10, 'Starting image regeneration');
+      await this.generationJobRepository.updateStatus(
+        jobId,
+        JobStatus.GENERATING,
+        10,
+        'Starting image regeneration',
+      );
       await job.updateProgress(10);
 
       emitProgress('regenerating', 'running', 15);
@@ -1401,19 +1602,28 @@ export class GenerationWorker extends WorkerHost {
         CUSTOM_TOPIC_MEDIA_CONCURRENCY,
         async (prompt: string, i: number) => {
           const subtaskKey = `image_${i + 1}`;
-          emitProgress(subtaskKey, 'running', 20 + Math.round((i / imagePrompts.length) * 60));
-          const { buffer } = await this.mediaGenerationService.generateSingleImage({
-            prompt,
-            size: '1024x1024',
-            quality: 'medium',
-          });
+          emitProgress(
+            subtaskKey,
+            'running',
+            20 + Math.round((i / imagePrompts.length) * 60),
+          );
+          const { buffer } =
+            await this.mediaGenerationService.generateSingleImage({
+              prompt,
+              size: '1024x1024',
+              quality: 'medium',
+            });
           const url = await this.mediaGenerationService.uploadToMinio(
             buffer,
             `regen-image-${Date.now()}-${i + 1}.png`,
             'image/png',
             userId,
           );
-          emitProgress(subtaskKey, 'succeeded', 20 + Math.round(((i + 1) / imagePrompts.length) * 60));
+          emitProgress(
+            subtaskKey,
+            'succeeded',
+            20 + Math.round(((i + 1) / imagePrompts.length) * 60),
+          );
           return url;
         },
       );
@@ -1423,7 +1633,9 @@ export class GenerationWorker extends WorkerHost {
         if (r.status === 'fulfilled') {
           mediaUrls.push(r.value);
         } else {
-          this.logger.error(`Regeneration image ${i + 1} failed: ${r.reason?.message || r.reason}`);
+          this.logger.error(
+            `Regeneration image ${i + 1} failed: ${r.reason?.message || r.reason}`,
+          );
           emitProgress(`image_${i + 1}`, 'failed');
         }
       }
@@ -1467,14 +1679,23 @@ export class GenerationWorker extends WorkerHost {
       };
     } catch (error) {
       const err = error as Error;
-      this.logger.error(`Image regeneration job ${jobId} failed: ${err.message}`);
+      this.logger.error(
+        `Image regeneration job ${jobId} failed: ${err.message}`,
+      );
 
       emitProgress('error', 'failed');
 
-      await this.customTopicCreditService.refundAllSlices(userId, jobId, creditSlices);
+      await this.customTopicCreditService.refundAllSlices(
+        userId,
+        jobId,
+        creditSlices,
+      );
 
       await this.notificationService.notifyGenerationFailed(
-        userId, jobId, err.message, totalCost,
+        userId,
+        jobId,
+        err.message,
+        totalCost,
       );
 
       await this.generationJobRepository.updateError(jobId, err.message, 0);
@@ -1556,15 +1777,16 @@ export class GenerationWorker extends WorkerHost {
 
       let scenePrompt: string;
       if (regenContext) {
-        scenePrompt = await this.customTopicGenerationService.composeImageRegenerationPrompt(
-          {
-            userId,
-            platform: regenContext.platform,
-            topic: regenContext.topic,
-            caption: regenContext.caption,
-            variationNonce: regenContext.variationNonce,
-          },
-        );
+        scenePrompt =
+          await this.customTopicGenerationService.composeImageRegenerationPrompt(
+            {
+              userId,
+              platform: regenContext.platform,
+              topic: regenContext.topic,
+              caption: regenContext.caption,
+              variationNonce: regenContext.variationNonce,
+            },
+          );
       } else if (typeof legacyPrompt === 'string' && legacyPrompt.trim()) {
         scenePrompt = legacyPrompt.trim();
       } else {
@@ -1759,7 +1981,7 @@ export class GenerationWorker extends WorkerHost {
                 slide,
                 pageNumber: slide.pageNumber ?? i + 1,
                 totalPages,
-                theme: carouselDocumentTheme as CarouselDocumentTheme,
+                theme: carouselDocumentTheme,
                 meta,
                 tocEntries,
               });

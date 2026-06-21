@@ -38,7 +38,9 @@ export class WebhookController {
     // Create Redis client for signaling job completion to workers
     // Port comes from REDIS_PORT env var via config service (DragonflyDB uses 6380)
     const redisPort = this.configService.get<number>('redis.port') || 6379;
-    this.logger.log(`WebhookController: Connecting to Redis on port ${redisPort}`);
+    this.logger.log(
+      `WebhookController: Connecting to Redis on port ${redisPort}`,
+    );
     this.redis = new Redis({
       host: this.configService.get<string>('redis.host') || 'localhost',
       port: redisPort,
@@ -145,11 +147,12 @@ export class WebhookController {
         queryJobId: (req.query as any)?.jobId || '(none)',
         hasBody: body !== undefined && body !== null,
         bodyType: Array.isArray(body) ? 'array' : typeof body,
-        bodyKeys: body && typeof body === 'object' && !Array.isArray(body)
-          ? Object.keys(body as Record<string, unknown>).slice(0, 10)
-          : [],
+        bodyKeys:
+          body && typeof body === 'object' && !Array.isArray(body)
+            ? Object.keys(body).slice(0, 10)
+            : [],
         contentType: req.headers['content-type'] || '(none)',
-        hasSecretHeader: !!(req.headers['x-n8n-webhook-secret']),
+        hasSecretHeader: !!req.headers['x-n8n-webhook-secret'],
         hasSecretQuery: !!(req.query as any)?.secret,
       }),
     );
@@ -163,7 +166,8 @@ export class WebhookController {
 
       // Best-effort recovery: if jobId is present in raw body, mark the job failed
       // and signal workers, so UI doesn't remain "processing" until timeout.
-      const raw = Array.isArray(body) && body.length > 0 ? (body[0] as any) : (body as any);
+      const raw =
+        Array.isArray(body) && body.length > 0 ? body[0] : (body as any);
       const rawJobId =
         raw && typeof raw === 'object' && typeof raw.jobId === 'string'
           ? String(raw.jobId).trim()
@@ -395,14 +399,19 @@ export class WebhookController {
       );
       // Ensure jobs don't stay stuck in generating when callback handling crashes.
       try {
-        const raw = Array.isArray(body) && body.length > 0 ? (body[0] as any) : (body as any);
+        const raw =
+          Array.isArray(body) && body.length > 0 ? body[0] : (body as any);
         const rawJobId =
           raw && typeof raw === 'object' && typeof raw.jobId === 'string'
             ? String(raw.jobId).trim()
             : '';
         if (rawJobId) {
           const job = await this.generationJobRepository.findById(rawJobId);
-          if (job && job.status !== JobStatus.FAILED && job.status !== JobStatus.READY) {
+          if (
+            job &&
+            job.status !== JobStatus.FAILED &&
+            job.status !== JobStatus.READY
+          ) {
             await this.generationJobRepository.updateError(
               rawJobId,
               `n8n callback processing error: ${(error as Error).message}`,

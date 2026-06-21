@@ -37,7 +37,10 @@ describe('custom-topic LLM normalization and parse', () => {
   });
 
   it('parses off_topic without union ambiguity', () => {
-    const parsed = safeParseCustomTopicPostOutput({ error: 'off_topic' }, 'text');
+    const parsed = safeParseCustomTopicPostOutput(
+      { error: 'off_topic' },
+      'text',
+    );
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data).toEqual({ error: 'off_topic' });
@@ -54,7 +57,7 @@ describe('custom-topic LLM normalization and parse', () => {
     const parsed = safeParseCustomTopicPostOutput(raw, 'image');
     expect(parsed.success).toBe(true);
     if (parsed.success && !('error' in parsed.data)) {
-      expect(parsed.data.imagePrompts).toEqual([]);
+      expect((parsed.data as any).imagePrompts).toEqual([]);
     }
   });
 });

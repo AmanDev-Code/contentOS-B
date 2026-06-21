@@ -11,7 +11,15 @@ import {
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
-import { IsArray, IsBoolean, IsNumber, IsObject, IsOptional, IsString, Matches } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
 
 import { SubscriptionService } from '../services/subscription.service';
 import type { PlanDisplayPricingMap } from '../services/subscription.service';
@@ -92,7 +100,9 @@ export class AdminSubscriptionPlansController {
     const ok = await this.subscriptionService.upsertPricingDisplayMeta(
       {
         defaultCurrency: dto.defaultCurrency.toUpperCase(),
-        supportedCurrencies: dto.supportedCurrencies.map((c) => c.toUpperCase()),
+        supportedCurrencies: dto.supportedCurrencies.map((c) =>
+          c.toUpperCase(),
+        ),
       },
       req.user?.id,
     );
@@ -139,6 +149,9 @@ export class AdminSubscriptionPlansController {
           dto.displayPricing === undefined ? undefined : dto.displayPricing,
       },
     );
-    return { ok: true as const, billingCatalogSynced: result.billingCatalogSynced };
+    return {
+      ok: true as const,
+      billingCatalogSynced: result.billingCatalogSynced,
+    };
   }
 }

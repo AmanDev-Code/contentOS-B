@@ -23,7 +23,9 @@ export class FeedbackQueueBootstrapService implements OnModuleInit {
           removeOnComplete: true,
         },
       );
-      this.logger.log('Registered repeatable feedback reminder sweep (08:00 UTC daily)');
+      this.logger.log(
+        'Registered repeatable feedback reminder sweep (08:00 UTC daily)',
+      );
     } catch (e) {
       this.logger.warn(
         `Could not register feedback reminder repeat: ${(e as Error).message}`,

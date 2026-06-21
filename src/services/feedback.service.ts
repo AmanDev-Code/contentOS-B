@@ -36,14 +36,14 @@ export class FeedbackService {
     private readonly rewardQueue: Queue,
   ) {}
 
-  async recordFirstAction(userId: string): Promise<{ promptSuggested: boolean }> {
+  async recordFirstAction(
+    userId: string,
+  ): Promise<{ promptSuggested: boolean }> {
     const client = this.supabaseService.getServiceClient();
 
     const { data: existing } = await client
       .from('feedback_eligibility')
-      .select(
-        'user_id, first_action_completed_at, feedback_submitted_at',
-      )
+      .select('user_id, first_action_completed_at, feedback_submitted_at')
       .eq('user_id', userId)
       .maybeSingle();
 
@@ -107,8 +107,7 @@ export class FeedbackService {
       };
     }
 
-    const nextMs =
-      new Date(row.last_feedback_prompt_at).getTime() + MS_24H;
+    const nextMs = new Date(row.last_feedback_prompt_at).getTime() + MS_24H;
     if (Date.now() >= nextMs) {
       return {
         showPopup: true,
@@ -216,17 +215,15 @@ export class FeedbackService {
       throw new BadRequestException(insertErr.message);
     }
 
-    const { error: upErr } = await client
-      .from('feedback_eligibility')
-      .upsert(
-        {
-          user_id: userId,
-          feedback_submitted_at: now,
-          feedback_pending: false,
-          last_feedback_prompt_at: now,
-        },
-        { onConflict: 'user_id' },
-      );
+    const { error: upErr } = await client.from('feedback_eligibility').upsert(
+      {
+        user_id: userId,
+        feedback_submitted_at: now,
+        feedback_pending: false,
+        last_feedback_prompt_at: now,
+      },
+      { onConflict: 'user_id' },
+    );
 
     if (upErr) {
       this.logger.error(`submitFeedback eligibility: ${upErr.message}`);
@@ -332,9 +329,12 @@ export class FeedbackService {
 
     let q = client
       .from('product_feedback')
-      .select('id, user_id, rating, message, rewarded, first_action_at, created_at', {
-        count: 'exact',
-      })
+      .select(
+        'id, user_id, rating, message, rewarded, first_action_at, created_at',
+        {
+          count: 'exact',
+        },
+      )
       .order('created_at', { ascending: false })
       .range(offset, offset + params.limit - 1);
 

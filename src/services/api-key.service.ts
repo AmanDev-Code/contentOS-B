@@ -206,7 +206,7 @@ export class ApiKeyService {
     }
     if (!data) return null;
 
-    const row = data as ApiKeyRow;
+    const row = data;
 
     if (!this.constantTimeEquals(this.hashKey(rawKey), row.key_hash)) {
       return null;
@@ -274,10 +274,7 @@ export class ApiKeyService {
     lastUsedAt: string | null,
   ): Promise<void> {
     try {
-      if (
-        lastUsedAt &&
-        Date.now() - new Date(lastUsedAt).getTime() < 60_000
-      ) {
+      if (lastUsedAt && Date.now() - new Date(lastUsedAt).getTime() < 60_000) {
         return; // throttle: at most one write per minute
       }
       await this.supabase

@@ -9,7 +9,12 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiTags,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
 import { ReferralService } from '../services/referral.service';
@@ -26,7 +31,7 @@ export class ReferralController {
   ) {}
 
   @Get('my-code')
-  @ApiOperation({ summary: 'Get or generate user\'s referral code' })
+  @ApiOperation({ summary: "Get or generate user's referral code" })
   async getMyCode(@Req() req: any) {
     const userId = req.user?.id;
     if (!userId) {
@@ -38,7 +43,10 @@ export class ReferralController {
       const profile = await this.profileRepository.findById(userId);
       const username = profile?.username || undefined;
 
-      const code = await this.referralService.getOrCreateReferralCode(userId, username);
+      const code = await this.referralService.getOrCreateReferralCode(
+        userId,
+        username,
+      );
       const settings = await this.referralService.getSettings();
 
       return {
@@ -61,7 +69,7 @@ export class ReferralController {
   }
 
   @Get('my-referrals')
-  @ApiOperation({ summary: 'List users I\'ve referred with status' })
+  @ApiOperation({ summary: "List users I've referred with status" })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   async getMyReferrals(
@@ -176,15 +184,22 @@ export class ReferralController {
     }
 
     try {
-      const result = await this.referralService.validateReferralCode(code.trim());
+      const result = await this.referralService.validateReferralCode(
+        code.trim(),
+      );
 
       return {
         success: true,
         data: {
           valid: result.valid,
-          referrer: result.referrer ? {
-            name: result.referrer.full_name || result.referrer.username || 'A Trndinn user',
-          } : undefined,
+          referrer: result.referrer
+            ? {
+                name:
+                  result.referrer.full_name ||
+                  result.referrer.username ||
+                  'A Trndinn user',
+              }
+            : undefined,
           message: result.message,
         },
       };
@@ -219,15 +234,22 @@ export class PublicReferralController {
     }
 
     try {
-      const result = await this.referralService.validateReferralCode(code.trim());
+      const result = await this.referralService.validateReferralCode(
+        code.trim(),
+      );
 
       return {
         success: true,
         data: {
           valid: result.valid,
-          referrer: result.referrer ? {
-            name: result.referrer.full_name || result.referrer.username || 'A Trndinn user',
-          } : undefined,
+          referrer: result.referrer
+            ? {
+                name:
+                  result.referrer.full_name ||
+                  result.referrer.username ||
+                  'A Trndinn user',
+              }
+            : undefined,
           message: result.message,
         },
       };

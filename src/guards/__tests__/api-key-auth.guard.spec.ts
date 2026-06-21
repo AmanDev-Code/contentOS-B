@@ -87,7 +87,10 @@ describe('ApiKeyAuthGuard — accounts:write scope enforcement', () => {
   it('allows accounts:read endpoints for a read-only key (no accounts:write needed)', async () => {
     const required = ['accounts:read'];
     const { context } = makeContext(required);
-    const { guard, reflector } = makeGuard(baseKey(['accounts:read']), required);
+    const { guard, reflector } = makeGuard(
+      baseKey(['accounts:read']),
+      required,
+    );
     (reflector.getAllAndOverride as jest.Mock).mockReturnValue(required);
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
@@ -103,9 +106,7 @@ describe('ApiKeyAuthGuard — accounts:write scope enforcement', () => {
     (reflector.getAllAndOverride as jest.Mock).mockReturnValue(required);
 
     await guard.canActivate(context);
-    const req = context.switchToHttp().getRequest() as {
-      user?: { id: string };
-    };
+    const req = context.switchToHttp().getRequest();
     expect(req.user?.id).toBe('user-1');
   });
 });

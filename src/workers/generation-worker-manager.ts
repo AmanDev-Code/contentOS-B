@@ -1,4 +1,10 @@
-import { Injectable, Logger, OnModuleInit, forwardRef, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  forwardRef,
+  Inject,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Worker, Job } from 'bullmq';
 import Redis from 'ioredis';
@@ -9,7 +15,10 @@ import { GeneratedContentRepository } from '../repositories/generated-content.re
 import { GenerationWorker } from './generation.worker';
 import { QUEUE_NAMES, JOB_STAGES } from '../common/constants';
 import { JobStatus, ContentStatus, VisualType } from '../common/types';
-import { MediaPostType, N8nGeneratedContentDto } from '../common/dto/media-intent.dto';
+import {
+  MediaPostType,
+  N8nGeneratedContentDto,
+} from '../common/dto/media-intent.dto';
 import { mergePerformancePredictionWithRefinementApplied } from '../common/utils/merge-performance-prediction';
 import { isViralTopicsN8nPayload } from '../common/utils/viral-topics-detect';
 
@@ -36,7 +45,9 @@ export class GenerationWorkerManager implements OnModuleInit {
     // Create Redis client for job completion signaling
     // Port comes from REDIS_PORT env var via config service (DragonflyDB uses 6380)
     const redisPort = this.configService.get<number>('redis.port') || 6379;
-    this.logger.log(`GenerationWorkerManager: Connecting to Redis on port ${redisPort}`);
+    this.logger.log(
+      `GenerationWorkerManager: Connecting to Redis on port ${redisPort}`,
+    );
     this.redis = new Redis({
       host: this.configService.get<string>('redis.host') || 'localhost',
       port: redisPort,
@@ -81,15 +92,18 @@ export class GenerationWorkerManager implements OnModuleInit {
 
     try {
       // Find all active jobs older than the threshold
-      const staleJobs = await this.generationJobRepository.findStaleActiveJobs(
-        staleThresholdMs,
-      );
+      const staleJobs =
+        await this.generationJobRepository.findStaleActiveJobs(
+          staleThresholdMs,
+        );
 
       let markedCount = 0;
       let racedCount = 0;
       for (const job of staleJobs) {
-        const updatedAtMs = new Date((job.updatedAt || job.createdAt) as any).getTime();
-        const ageMs = Number.isFinite(updatedAtMs) ? Date.now() - updatedAtMs : 0;
+        const updatedAtMs = new Date(job.updatedAt || job.createdAt).getTime();
+        const ageMs = Number.isFinite(updatedAtMs)
+          ? Date.now() - updatedAtMs
+          : 0;
 
         // Atomic guard: if the worker wrote `ready`/`failed` between the SELECT
         // above and this UPDATE, the row is no longer in an active status and
@@ -97,11 +111,12 @@ export class GenerationWorkerManager implements OnModuleInit {
         // from overwriting a freshly-completed job with `status=failed`, which
         // previously surfaced to users as ghost "failed" notifications next to
         // a successfully-generated post.
-        const updated = await this.generationJobRepository.updateErrorIfStillActive(
-          job.id,
-          `Auto-failed stale job after ${Math.round(ageMs / 1000)}s without completion`,
-          job.retryCount || 0,
-        );
+        const updated =
+          await this.generationJobRepository.updateErrorIfStillActive(
+            job.id,
+            `Auto-failed stale job after ${Math.round(ageMs / 1000)}s without completion`,
+            job.retryCount || 0,
+          );
         if (updated) {
           markedCount += 1;
           this.logger.warn(
@@ -277,12 +292,12 @@ export class GenerationWorkerManager implements OnModuleInit {
       );
 
       // Build callback URL for n8n to call when job completes
-      const baseUrl =
-        this.configService.get<string>('app.baseUrl');
+      const baseUrl = this.configService.get<string>('app.baseUrl');
       if (!baseUrl) {
         throw new Error('BACKEND_URL env var is required for n8n callback');
       }
-      const webhookSecret = this.configService.get<string>('n8n.webhookSecret') || '';
+      const webhookSecret =
+        this.configService.get<string>('n8n.webhookSecret') || '';
       const callbackQuery = new URLSearchParams({ jobId });
       if (webhookSecret) {
         callbackQuery.set('secret', webhookSecret);
@@ -333,11 +348,10 @@ export class GenerationWorkerManager implements OnModuleInit {
           event: 'generation.n8n.trigger_result',
           jobId,
           hasData: trigger?.data !== undefined && trigger?.data !== null,
-          dataType:
-            trigger?.data === null ? 'null' : typeof trigger?.data,
+          dataType: trigger?.data === null ? 'null' : typeof trigger?.data,
           dataKeys:
             trigger?.data && typeof trigger.data === 'object'
-              ? Object.keys(trigger.data as Record<string, unknown>).slice(0, 15)
+              ? Object.keys(trigger.data).slice(0, 15)
               : [],
         }),
       );
@@ -410,7 +424,7 @@ export class GenerationWorkerManager implements OnModuleInit {
         }
         const responseKeys =
           trigger.data && typeof trigger.data === 'object'
-            ? Object.keys(trigger.data as Record<string, unknown>).slice(0, 15)
+            ? Object.keys(trigger.data).slice(0, 15)
             : [];
         this.logger.warn(
           `Topic job ${jobId} received direct n8n response without parsable topics. ` +
@@ -661,8 +675,8 @@ export class GenerationWorkerManager implements OnModuleInit {
                   : MediaPostType.SINGLE,
             },
             sourceUrl:
-              (latest.performance_prediction as any)?.postMeta?.link ||
-              (latest.performance_prediction as any)?.sourceLink ||
+              latest.performance_prediction?.postMeta?.link ||
+              latest.performance_prediction?.sourceLink ||
               undefined,
           });
 
@@ -670,9 +684,10 @@ export class GenerationWorkerManager implements OnModuleInit {
             title: refined.title,
             content: refined.content,
             hashtags: refined.hashtags,
-            performance_prediction: mergePerformancePredictionWithRefinementApplied(
-              latest.performance_prediction,
-            ),
+            performance_prediction:
+              mergePerformancePredictionWithRefinementApplied(
+                latest.performance_prediction,
+              ),
           });
 
           await this.generationJobRepository.updateWithContent(
@@ -742,7 +757,9 @@ export class GenerationWorkerManager implements OnModuleInit {
                 {
                   title: String(adopted.title || 'Viral Topic Ideas'),
                   content: String(adopted.content || '').slice(0, 5000),
-                  hashtags: Array.isArray(adopted.hashtags) ? adopted.hashtags : [],
+                  hashtags: Array.isArray(adopted.hashtags)
+                    ? adopted.hashtags
+                    : [],
                   source: 'db-unlinked-adopted-topics',
                 },
               );
@@ -769,8 +786,8 @@ export class GenerationWorkerManager implements OnModuleInit {
                     : MediaPostType.SINGLE,
               },
               sourceUrl:
-                (adopted.performance_prediction as any)?.postMeta?.link ||
-                (adopted.performance_prediction as any)?.sourceLink ||
+                adopted.performance_prediction?.postMeta?.link ||
+                adopted.performance_prediction?.sourceLink ||
                 undefined,
             });
 
@@ -778,9 +795,10 @@ export class GenerationWorkerManager implements OnModuleInit {
               title: refined.title,
               content: refined.content,
               hashtags: refined.hashtags,
-              performance_prediction: mergePerformancePredictionWithRefinementApplied(
-                adopted.performance_prediction,
-              ),
+              performance_prediction:
+                mergePerformancePredictionWithRefinementApplied(
+                  adopted.performance_prediction,
+                ),
             });
             await this.generationJobRepository.updateWithContent(
               jobId,
@@ -891,7 +909,9 @@ export class GenerationWorkerManager implements OnModuleInit {
     if (!root || typeof root !== 'object') return [];
 
     const directTopics =
-      (Array.isArray((root as any).topics) ? (root as any).topics : undefined) ||
+      (Array.isArray((root as any).topics)
+        ? (root as any).topics
+        : undefined) ||
       (Array.isArray((root as any)?.data?.topics)
         ? (root as any).data.topics
         : undefined) ||
@@ -903,7 +923,9 @@ export class GenerationWorkerManager implements OnModuleInit {
       topicsRaw
         .map((topic: any) => {
           if (typeof topic === 'string') return topic.trim();
-          const title = String(topic?.title || topic?.topic || topic?.name || '').trim();
+          const title = String(
+            topic?.title || topic?.topic || topic?.name || '',
+          ).trim();
           const reason = String(topic?.reason || topic?.why || '').trim();
           if (title && reason) return `${title} — ${reason}`;
           return title;
@@ -971,7 +993,9 @@ export class GenerationWorkerManager implements OnModuleInit {
     return [];
   }
 
-  private extractDirectGeneratedPost(data: unknown): DirectGeneratedPost | null {
+  private extractDirectGeneratedPost(
+    data: unknown,
+  ): DirectGeneratedPost | null {
     const root =
       Array.isArray(data) && data.length > 0
         ? (data[0] as Record<string, unknown>)
@@ -984,8 +1008,12 @@ export class GenerationWorkerManager implements OnModuleInit {
     if (!post || typeof post !== 'object') {
       return null;
     }
-    const title = String(post.title ?? '').trim().slice(0, 180);
-    const content = String(post.content ?? '').trim().slice(0, 5000);
+    const title = String(post.title ?? '')
+      .trim()
+      .slice(0, 180);
+    const content = String(post.content ?? '')
+      .trim()
+      .slice(0, 5000);
     if (!title || !content) {
       return null;
     }
@@ -998,17 +1026,25 @@ export class GenerationWorkerManager implements OnModuleInit {
       : undefined;
 
     const visual = root.visual as Record<string, unknown> | undefined;
-    const visualType = String(visual?.type || '').trim().toLowerCase();
+    const visualType = String(visual?.type || '')
+      .trim()
+      .toLowerCase();
     const isCarousel = visualType === 'carousel';
     const slides =
       isCarousel && Array.isArray(visual?.carouselSlides)
-        ? (visual.carouselSlides as Array<Record<string, unknown>>).map((s) => ({
-            headline: String(s.headline ?? '').trim().slice(0, 200),
-            body: String(s.body ?? '').trim().slice(0, 500),
-            imagePrompt: String(s.imagePrompt ?? '')
-              .trim()
-              .slice(0, 1500),
-          }))
+        ? (visual.carouselSlides as Array<Record<string, unknown>>).map(
+            (s) => ({
+              headline: String(s.headline ?? '')
+                .trim()
+                .slice(0, 200),
+              body: String(s.body ?? '')
+                .trim()
+                .slice(0, 500),
+              imagePrompt: String(s.imagePrompt ?? '')
+                .trim()
+                .slice(0, 1500),
+            }),
+          )
         : undefined;
 
     const dto: DirectGeneratedPost = {
@@ -1028,13 +1064,16 @@ export class GenerationWorkerManager implements OnModuleInit {
             ? post.aiScore
             : undefined,
       aiReasoning:
-        typeof post.reason === 'string' ? String(post.reason).trim() : undefined,
+        typeof post.reason === 'string'
+          ? String(post.reason).trim()
+          : undefined,
       performancePrediction: {
         source: 'n8n-direct-post-response',
         postMeta: {
           link: typeof post.link === 'string' ? post.link : undefined,
           source: typeof post.source === 'string' ? post.source : undefined,
-          category: typeof post.category === 'string' ? post.category : undefined,
+          category:
+            typeof post.category === 'string' ? post.category : undefined,
           originalScore: post.originalScore,
           finalScore: post.finalScore,
         },
@@ -1070,7 +1109,7 @@ export class GenerationWorkerManager implements OnModuleInit {
 
     const currentText = String(existing.content || '');
     const refinementDone =
-      (existing.performance_prediction as any)?.postRefinement?.applied === true;
+      existing.performance_prediction?.postRefinement?.applied === true;
     if (refinementDone) {
       this.logger.log(
         JSON.stringify({
@@ -1096,8 +1135,8 @@ export class GenerationWorkerManager implements OnModuleInit {
             : MediaPostType.SINGLE,
       },
       sourceUrl:
-        (existing.performance_prediction as any)?.postMeta?.link ||
-        (existing.performance_prediction as any)?.sourceLink ||
+        existing.performance_prediction?.postMeta?.link ||
+        existing.performance_prediction?.sourceLink ||
         undefined,
     });
 
@@ -1139,12 +1178,15 @@ export class GenerationWorkerManager implements OnModuleInit {
     const title = String(record?.title || '').toLowerCase();
     const body = String(record?.content || '').toLowerCase();
     const visualType = String(record?.visual_type || '').toLowerCase();
-    const hashtagCount = Array.isArray(record?.hashtags) ? record.hashtags.length : 0;
+    const hashtagCount = Array.isArray(record?.hashtags)
+      ? record.hashtags.length
+      : 0;
     const looksLikeTopicTitle = title.includes('viral topic');
     const looksLikeTopicBody =
       body.startsWith('here are current viral topic ideas') ||
       body.includes('topic ideas');
-    const hasLikelyPostVisual = visualType === 'image' || visualType === 'carousel';
+    const hasLikelyPostVisual =
+      visualType === 'image' || visualType === 'carousel';
     if (hasLikelyPostVisual) return false;
     if (looksLikeTopicTitle || looksLikeTopicBody) return true;
     return hashtagCount === 0 && /\n\d+\.\s/.test(body);

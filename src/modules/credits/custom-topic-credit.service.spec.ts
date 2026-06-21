@@ -6,10 +6,7 @@ import { buildCreditSlices } from './pricing';
 describe('CustomTopicCreditService', () => {
   let service: CustomTopicCreditService;
   let quota: jest.Mocked<
-    Pick<
-      QuotaService,
-      'debitOnce' | 'refundOnce' | 'getUserQuota'
-    >
+    Pick<QuotaService, 'debitOnce' | 'refundOnce' | 'getUserQuota'>
   >;
   let notifications: jest.Mocked<
     Pick<NotificationService, 'emitCreditBalanceChanged'>

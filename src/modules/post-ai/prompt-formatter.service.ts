@@ -117,7 +117,7 @@ export class PromptFormatterService {
 
   private systemPrompt(): string {
     return [
-      'You are a PROMPT FORMATTER. You receive a user\'s raw content request and',
+      "You are a PROMPT FORMATTER. You receive a user's raw content request and",
       'return a cleaned, well-structured version of THE SAME request.',
       '',
       'STRICT RULES:',
@@ -150,7 +150,12 @@ export class PromptFormatterService {
   }
 
   private coerceFreshness(value: unknown): TavilyFreshness | undefined {
-    if (value === 'day' || value === 'week' || value === 'month' || value === 'year') {
+    if (
+      value === 'day' ||
+      value === 'week' ||
+      value === 'month' ||
+      value === 'year'
+    ) {
       return value;
     }
     return undefined;

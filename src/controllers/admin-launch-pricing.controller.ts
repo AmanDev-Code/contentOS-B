@@ -205,7 +205,9 @@ export class AdminLaunchPricingController {
    * Push active launch USD prices to Polar products (manual retry).
    */
   @Post(':id/sync-polar')
-  @ApiOperation({ summary: 'Sync launch pricing amounts to Polar catalog products' })
+  @ApiOperation({
+    summary: 'Sync launch pricing amounts to Polar catalog products',
+  })
   async syncPolar(@Param('id') id: string) {
     try {
       const config = await this.launchPricingService.getById(id);
@@ -234,8 +236,7 @@ export class AdminLaunchPricingController {
       if (error instanceof HttpException) throw error;
       return {
         success: false,
-        message:
-          error instanceof Error ? error.message : 'Polar sync failed',
+        message: error instanceof Error ? error.message : 'Polar sync failed',
       };
     }
   }
@@ -249,7 +250,10 @@ export class AdminLaunchPricingController {
   @ApiOperation({ summary: 'Toggle active status (enable/disable) a config' })
   async toggle(@Param('id') id: string, @Body() dto: ToggleActiveDto) {
     try {
-      const config = await this.launchPricingService.toggleActive(id, dto.isActive);
+      const config = await this.launchPricingService.toggleActive(
+        id,
+        dto.isActive,
+      );
       return {
         success: true,
         data: config,
@@ -282,7 +286,9 @@ export class AdminLaunchPricingController {
       return { success: true, data: config };
     } catch (error) {
       throw new HttpException(
-        error instanceof Error ? error.message : 'Failed to fetch active config',
+        error instanceof Error
+          ? error.message
+          : 'Failed to fetch active config',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

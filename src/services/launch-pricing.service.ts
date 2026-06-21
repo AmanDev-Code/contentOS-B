@@ -148,7 +148,13 @@ export class LaunchPricingService {
     yearlyDiscountPercent: number,
   ): Omit<
     LaunchPricingConfig,
-    'id' | 'label' | 'is_active' | 'base_currency' | 'created_at' | 'updated_at' | 'created_by'
+    | 'id'
+    | 'label'
+    | 'is_active'
+    | 'base_currency'
+    | 'created_at'
+    | 'updated_at'
+    | 'created_by'
   > {
     // Calculate USD monthly prices
     const standardMonthlyUsd = parseFloat(
@@ -266,7 +272,11 @@ export class LaunchPricingService {
     const yearlyDiscountPercent = input.yearlyDiscountPercent ?? 17.0;
 
     // Validate inputs
-    if (input.standardMonthlyInr <= 0 || input.proMonthlyInr <= 0 || input.ultimateMonthlyInr <= 0) {
+    if (
+      input.standardMonthlyInr <= 0 ||
+      input.proMonthlyInr <= 0 ||
+      input.ultimateMonthlyInr <= 0
+    ) {
       throw new BadRequestException('All INR prices must be positive');
     }
 
@@ -275,7 +285,9 @@ export class LaunchPricingService {
     }
 
     if (yearlyDiscountPercent < 0 || yearlyDiscountPercent > 100) {
-      throw new BadRequestException('Yearly discount must be between 0 and 100');
+      throw new BadRequestException(
+        'Yearly discount must be between 0 and 100',
+      );
     }
 
     const payload = {
@@ -320,18 +332,27 @@ export class LaunchPricingService {
     const patch: Record<string, unknown> = {};
 
     if (input.label !== undefined) patch.label = input.label.trim();
-    if (input.standardMonthlyInr !== undefined) patch.standard_monthly_inr = input.standardMonthlyInr;
-    if (input.proMonthlyInr !== undefined) patch.pro_monthly_inr = input.proMonthlyInr;
-    if (input.ultimateMonthlyInr !== undefined) patch.ultimate_monthly_inr = input.ultimateMonthlyInr;
-    if (input.usdConversionRate !== undefined) patch.usd_conversion_rate = input.usdConversionRate;
-    if (input.yearlyDiscountPercent !== undefined) patch.yearly_discount_percent = input.yearlyDiscountPercent;
+    if (input.standardMonthlyInr !== undefined)
+      patch.standard_monthly_inr = input.standardMonthlyInr;
+    if (input.proMonthlyInr !== undefined)
+      patch.pro_monthly_inr = input.proMonthlyInr;
+    if (input.ultimateMonthlyInr !== undefined)
+      patch.ultimate_monthly_inr = input.ultimateMonthlyInr;
+    if (input.usdConversionRate !== undefined)
+      patch.usd_conversion_rate = input.usdConversionRate;
+    if (input.yearlyDiscountPercent !== undefined)
+      patch.yearly_discount_percent = input.yearlyDiscountPercent;
 
     // Validate numeric inputs
-    const standardInr = input.standardMonthlyInr ?? existing.standard_monthly_inr;
+    const standardInr =
+      input.standardMonthlyInr ?? existing.standard_monthly_inr;
     const proInr = input.proMonthlyInr ?? existing.pro_monthly_inr;
-    const ultimateInr = input.ultimateMonthlyInr ?? existing.ultimate_monthly_inr;
-    const conversionRate = input.usdConversionRate ?? existing.usd_conversion_rate;
-    const discount = input.yearlyDiscountPercent ?? existing.yearly_discount_percent;
+    const ultimateInr =
+      input.ultimateMonthlyInr ?? existing.ultimate_monthly_inr;
+    const conversionRate =
+      input.usdConversionRate ?? existing.usd_conversion_rate;
+    const discount =
+      input.yearlyDiscountPercent ?? existing.yearly_discount_percent;
 
     if (standardInr <= 0 || proInr <= 0 || ultimateInr <= 0) {
       throw new BadRequestException('All INR prices must be positive');
@@ -342,7 +363,9 @@ export class LaunchPricingService {
     }
 
     if (discount < 0 || discount > 100) {
-      throw new BadRequestException('Yearly discount must be between 0 and 100');
+      throw new BadRequestException(
+        'Yearly discount must be between 0 and 100',
+      );
     }
 
     const { data, error } = await this.db()
@@ -381,7 +404,10 @@ export class LaunchPricingService {
    * Toggle the active status of a config
    * Only one config can be active at a time
    */
-  async toggleActive(id: string, isActive: boolean): Promise<LaunchPricingConfig> {
+  async toggleActive(
+    id: string,
+    isActive: boolean,
+  ): Promise<LaunchPricingConfig> {
     const config = await this.getById(id);
 
     if (isActive && !config.is_active) {
@@ -419,9 +445,7 @@ export class LaunchPricingService {
   /**
    * Manually push active launch USD amounts to Polar products (admin action).
    */
-  async syncPolarForConfig(
-    config: LaunchPricingConfig,
-  ): Promise<{
+  async syncPolarForConfig(config: LaunchPricingConfig): Promise<{
     synced: number;
     skipped: string[];
     success: boolean;
@@ -473,7 +497,10 @@ export class LaunchPricingService {
       const payload = await this.subscriptionService.getPublicPlansPayload();
       defaultCurrency = payload.pricingDisplay?.defaultCurrency || 'USD';
     } catch (e) {
-      this.logger.warn('Could not load pricing display settings for Polar revert', e);
+      this.logger.warn(
+        'Could not load pricing display settings for Polar revert',
+        e,
+      );
     }
 
     const plans = await this.subscriptionService.getSubscriptionPlans();
@@ -491,7 +518,9 @@ export class LaunchPricingService {
         this.logger.warn(`Polar catalog revert failed for ${planType}`, e);
       }
     }
-    this.logger.log('Polar catalog reverted from subscription plan display_pricing');
+    this.logger.log(
+      'Polar catalog reverted from subscription plan display_pricing',
+    );
   }
 
   /**
@@ -507,7 +536,12 @@ export class LaunchPricingService {
     const planTypes = ['standard', 'pro', 'ultimate'] as const;
     const offerByType: Record<
       (typeof planTypes)[number],
-      { inrMonthly: number; inrYearly: number; usdMonthly: number; usdYearly: number }
+      {
+        inrMonthly: number;
+        inrYearly: number;
+        usdMonthly: number;
+        usdYearly: number;
+      }
     > = {
       standard: {
         inrMonthly: config.standard_monthly_inr,
@@ -532,8 +566,16 @@ export class LaunchPricingService {
     const plans: PublicLaunchPricingPlan[] = planTypes.map((planType) => {
       const subPlan = subscriptionPlans.find((p) => p.planType === planType);
       const offer = offerByType[planType];
-      const inrList = this.resolveListPrices(subPlan, 'INR', config.usd_conversion_rate);
-      const usdList = this.resolveListPrices(subPlan, 'USD', config.usd_conversion_rate);
+      const inrList = this.resolveListPrices(
+        subPlan,
+        'INR',
+        config.usd_conversion_rate,
+      );
+      const usdList = this.resolveListPrices(
+        subPlan,
+        'USD',
+        config.usd_conversion_rate,
+      );
 
       return {
         planType,
@@ -603,8 +645,14 @@ export class LaunchPricingService {
     return {
       plans: {
         standard: {
-          monthly: { inr: config.standard_monthly_inr, usd: config.standard_monthly_usd },
-          yearly: { inr: config.standard_yearly_inr, usd: config.standard_yearly_usd },
+          monthly: {
+            inr: config.standard_monthly_inr,
+            usd: config.standard_monthly_usd,
+          },
+          yearly: {
+            inr: config.standard_yearly_inr,
+            usd: config.standard_yearly_usd,
+          },
           monthlyLabel: this.formatPrice(config.standard_monthly_inr, 'INR'),
           yearlyLabel: this.formatPrice(config.standard_yearly_inr, 'INR'),
         },
@@ -615,8 +663,14 @@ export class LaunchPricingService {
           yearlyLabel: this.formatPrice(config.pro_yearly_inr, 'INR'),
         },
         ultimate: {
-          monthly: { inr: config.ultimate_monthly_inr, usd: config.ultimate_monthly_usd },
-          yearly: { inr: config.ultimate_yearly_inr, usd: config.ultimate_yearly_usd },
+          monthly: {
+            inr: config.ultimate_monthly_inr,
+            usd: config.ultimate_monthly_usd,
+          },
+          yearly: {
+            inr: config.ultimate_yearly_inr,
+            usd: config.ultimate_yearly_usd,
+          },
           monthlyLabel: this.formatPrice(config.ultimate_monthly_inr, 'INR'),
           yearlyLabel: this.formatPrice(config.ultimate_yearly_inr, 'INR'),
         },

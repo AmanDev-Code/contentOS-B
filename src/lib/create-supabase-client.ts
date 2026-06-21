@@ -1,7 +1,4 @@
-import {
-  createClient,
-  type SupabaseClient,
-} from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 type CreateSupabaseClientOptions = NonNullable<
   Parameters<typeof createClient>[2]

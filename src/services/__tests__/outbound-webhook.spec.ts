@@ -9,7 +9,10 @@ describe('OutboundWebhookService', () => {
     });
 
     it('produces deterministic HMAC-SHA256 signatures', () => {
-      const payload = JSON.stringify({ event: 'post.published', data: { id: '123' } });
+      const payload = JSON.stringify({
+        event: 'post.published',
+        data: { id: '123' },
+      });
       const secret = 'test-secret-key';
       const sig1 = service.signPayload(payload, secret);
       const sig2 = service.signPayload(payload, secret);
@@ -49,7 +52,9 @@ describe('OutboundWebhookService', () => {
     it('returns false for tampered payload', () => {
       const secret = 'verify-test';
       const sig = service.signPayload('{"event":"original"}', secret);
-      expect(service.verifySignature('{"event":"tampered"}', secret, sig)).toBe(false);
+      expect(service.verifySignature('{"event":"tampered"}', secret, sig)).toBe(
+        false,
+      );
     });
 
     it('returns false for wrong secret', () => {
@@ -68,7 +73,11 @@ describe('OutboundWebhookService', () => {
             insert: jest.fn().mockReturnValue({
               select: jest.fn().mockReturnValue({
                 single: jest.fn().mockResolvedValue({
-                  data: { id: 'wh-1', url: 'http://localhost:3000', events: [] },
+                  data: {
+                    id: 'wh-1',
+                    url: 'http://localhost:3000',
+                    events: [],
+                  },
                   error: null,
                 }),
               }),

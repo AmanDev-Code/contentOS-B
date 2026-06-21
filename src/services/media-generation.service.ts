@@ -380,17 +380,25 @@ export class MediaGenerationService {
     slide: CarouselSlide,
     baseImage: Buffer,
     style: CarouselGenerationRequest['style'] = 'professional',
-    overlayProfile: 'linkedin_panel' | 'notebook_paper' | 'whiteboard' = 'linkedin_panel',
+    overlayProfile:
+      | 'linkedin_panel'
+      | 'notebook_paper'
+      | 'whiteboard' = 'linkedin_panel',
   ): Promise<Buffer> {
     const headline = this.sanitizeOverlayText(slide.headline || '');
     const body = this.sanitizeOverlayText(slide.body || '');
     const bullets = Array.isArray(slide.bullets)
-      ? slide.bullets.map((b) => this.sanitizeOverlayText(String(b))).filter(Boolean)
+      ? slide.bullets
+          .map((b) => this.sanitizeOverlayText(String(b)))
+          .filter(Boolean)
       : [];
 
     const CANVAS = 1024;
 
-    if (overlayProfile === 'notebook_paper' || overlayProfile === 'whiteboard') {
+    if (
+      overlayProfile === 'notebook_paper' ||
+      overlayProfile === 'whiteboard'
+    ) {
       return this.renderNotesStyleCarouselSlide({
         baseImage,
         headline,
@@ -413,7 +421,13 @@ export class MediaGenerationService {
     const BODY_LINE_H = 38;
 
     const headLines = this.wrapSvgText(headline, HEAD_FONT, TEXT_W, 2);
-    const bodyLines = this.flattenBulletOrBodyLines(body, bullets, BODY_FONT, TEXT_W, 9);
+    const bodyLines = this.flattenBulletOrBodyLines(
+      body,
+      bullets,
+      BODY_FONT,
+      TEXT_W,
+      9,
+    );
 
     const GAP = 16;
     const contentH =
@@ -473,7 +487,9 @@ export class MediaGenerationService {
           if (lines.length >= maxTotalLines) return lines;
         }
       }
-      return lines.length > 0 ? lines : this.wrapSvgText(body, fontSize, maxWidth, maxTotalLines);
+      return lines.length > 0
+        ? lines
+        : this.wrapSvgText(body, fontSize, maxWidth, maxTotalLines);
     }
     return this.wrapSvgText(body, fontSize, maxWidth, maxTotalLines);
   }
@@ -507,7 +523,13 @@ export class MediaGenerationService {
     const BODY_LINE_H = 34;
 
     const headLines = this.wrapSvgText(headline, HEAD_FONT, TEXT_W, 3);
-    const bodyLines = this.flattenBulletOrBodyLines(body, bullets, BODY_FONT, TEXT_W, 11);
+    const bodyLines = this.flattenBulletOrBodyLines(
+      body,
+      bullets,
+      BODY_FONT,
+      TEXT_W,
+      11,
+    );
 
     const GAP = 18;
     const contentTop = paperY + 36;
@@ -749,16 +771,26 @@ export class MediaGenerationService {
       yFree += HEAD_FONT + 12;
     }
 
-    let baseline = ruleStartY + LINE_STEP + Math.ceil((yFree - ruleStartY) / LINE_STEP) * LINE_STEP;
+    let baseline =
+      ruleStartY +
+      LINE_STEP +
+      Math.ceil((yFree - ruleStartY) / LINE_STEP) * LINE_STEP;
     baseline = Math.max(baseline, ruleStartY + LINE_STEP * 2);
 
     let globalLineIdx = 0;
 
-    const pushInkOrMono = (viz: Viz, x: number, baseY: number, colKey: number) => {
+    const pushInkOrMono = (
+      viz: Viz,
+      x: number,
+      baseY: number,
+      colKey: number,
+    ) => {
       const nudge = viz.code
         ? { dx: 0, dy: 0 }
         : this.handwritingNudge(slideIndex, globalLineIdx, colKey);
-      const rot = viz.code ? 0 : this.handwritingRotateDeg(slideIndex, globalLineIdx);
+      const rot = viz.code
+        ? 0
+        : this.handwritingRotateDeg(slideIndex, globalLineIdx);
       const fam = viz.code ? monoFont : inkFont;
       const weight = viz.bold ? '700' : '500';
       const fill = viz.code ? '#0f172a' : viz.bold ? headlineFill : '#1e293b';
@@ -821,13 +853,18 @@ export class MediaGenerationService {
     const leftMarginalia = sidebarLabels.slice(0, 2);
     const rightMarginalia = sidebarLabels.slice(2);
 
-    let mx = paperX + 8;
+    const mx = paperX + 8;
     let my = ruleStartY + LINE_STEP;
     for (const note of leftMarginalia) {
       if (my > ruleEndY - LINE_STEP * 5) break;
       const small = BODY_FONT - 6;
       const rot = -2.4 + (slideIndex % 3) * 0.35;
-      const noteLines = this.wrapSvgText(note, small, RED_MARGIN_X - mx - 10, 5);
+      const noteLines = this.wrapSvgText(
+        note,
+        small,
+        RED_MARGIN_X - mx - 10,
+        5,
+      );
       for (const nl of noteLines) {
         textNodes.push(
           `<text transform="translate(${mx},${Math.round(
@@ -970,10 +1007,9 @@ ${defs}
     lessonTextInRaster = false,
   ): string {
     const brief = sceneBrief.trim();
-    const clamp =
-      strictRetry
-        ? ' CRITICAL: Fill the entire square with flat study-surface only (paper/board). No food, dinner plates, trophies, or unrelated lifestyle stock props.'
-        : '';
+    const clamp = strictRetry
+      ? ' CRITICAL: Fill the entire square with flat study-surface only (paper/board). No food, dinner plates, trophies, or unrelated lifestyle stock props.'
+      : '';
 
     switch (style) {
       case 'handwritten_notebook':
@@ -1309,7 +1345,10 @@ ${defs}
       if (logoUrl.startsWith('/minio/') || logoUrl.includes('/minio/')) {
         const match = logoUrl.match(/\/minio\/([^/]+)\/(.+)/);
         if (match) {
-          const stream = await this.minioService.getFileStream(match[1], match[2]);
+          const stream = await this.minioService.getFileStream(
+            match[1],
+            match[2],
+          );
           const chunks: Buffer[] = [];
           for await (const chunk of stream) chunks.push(Buffer.from(chunk));
           logoBuf = Buffer.concat(chunks);
@@ -1328,7 +1367,11 @@ ${defs}
 
       const targetW = Math.round(width * 0.12);
       const logoResized = await sharp(logoBuf)
-        .resize({ width: Math.max(40, targetW), fit: 'inside', withoutEnlargement: true })
+        .resize({
+          width: Math.max(40, targetW),
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
         .ensureAlpha()
         .modulate({ brightness: 1 })
         .png()

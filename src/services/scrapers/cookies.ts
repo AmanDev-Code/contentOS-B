@@ -1,8 +1,13 @@
-export function parseCookieString(raw: string): Array<{ name: string; value: string }> {
+export function parseCookieString(
+  raw: string,
+): Array<{ name: string; value: string }> {
   const input = String(raw || '').trim();
   if (!input) return [];
 
-  const parts = input.split(';').map((p) => p.trim()).filter(Boolean);
+  const parts = input
+    .split(';')
+    .map((p) => p.trim())
+    .filter(Boolean);
   const out: Array<{ name: string; value: string }> = [];
   for (const part of parts) {
     const eq = part.indexOf('=');
@@ -36,4 +41,3 @@ export async function addCookieStringToDomains(
 
   await context.addCookies(cookies);
 }
-

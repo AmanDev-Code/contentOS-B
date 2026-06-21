@@ -44,10 +44,21 @@ const DEFAULT_LINKEDIN_API_VERSION = '202604';
       provide: LinkedInPublisherService,
       useFactory: (config: ConfigService, byteReader: MinioMediaByteReader) => {
         const apiVersion =
-          config.get<string>('LINKEDIN_API_VERSION') ?? DEFAULT_LINKEDIN_API_VERSION;
-        const httpClient = new SocialHttpClient({ errorMap: LINKEDIN_ERROR_MAP });
-        const mediaService = new LinkedInMediaService(httpClient, apiVersion, byteReader);
-        return new LinkedInPublisherService(httpClient, mediaService, apiVersion);
+          config.get<string>('LINKEDIN_API_VERSION') ??
+          DEFAULT_LINKEDIN_API_VERSION;
+        const httpClient = new SocialHttpClient({
+          errorMap: LINKEDIN_ERROR_MAP,
+        });
+        const mediaService = new LinkedInMediaService(
+          httpClient,
+          apiVersion,
+          byteReader,
+        );
+        return new LinkedInPublisherService(
+          httpClient,
+          mediaService,
+          apiVersion,
+        );
       },
       inject: [ConfigService, MinioMediaByteReader],
     },
@@ -79,6 +90,8 @@ export class LinkedinModule implements OnModuleInit {
       publisher: this.publisher,
       capabilities: this.capabilities.getCapabilities(),
     });
-    this.logger.log('LinkedIn provider registered into social provider registry.');
+    this.logger.log(
+      'LinkedIn provider registered into social provider registry.',
+    );
   }
 }

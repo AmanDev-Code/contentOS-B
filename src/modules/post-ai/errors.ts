@@ -32,9 +32,7 @@ export class ProviderError extends Error {
 
 export class CarouselQualityError extends Error {
   readonly errorCode = 'carousel_quality' as const;
-  constructor(
-    readonly issues: Array<{ code: string; detail: string }>,
-  ) {
+  constructor(readonly issues: Array<{ code: string; detail: string }>) {
     const codes = issues.map((i) => i.code).join(', ');
     const lead = issues[0]?.detail?.slice(0, 220) ?? '';
     super(

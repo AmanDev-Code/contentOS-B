@@ -21,7 +21,9 @@ describe('LINKEDIN_ERROR_MAP', () => {
   });
 
   it('maps 403 with expired-token code to RefreshRequiredError', () => {
-    expect(classify(403, 'EXPIRED_ACCESS_TOKEN')).toBeInstanceOf(RefreshRequiredError);
+    expect(classify(403, 'EXPIRED_ACCESS_TOKEN')).toBeInstanceOf(
+      RefreshRequiredError,
+    );
   });
 
   it('maps generic 403 to AuthFailedError (terminal)', () => {

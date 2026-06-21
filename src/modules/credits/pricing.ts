@@ -17,8 +17,12 @@ export const CUSTOM_TOPIC_PRICING = {
   SLIDE_PER_UNIT_CREDITS: CREDIT_COSTS.generate.slidePerUnit,
 
   TEXT_HALF_CREDITS: Math.round(CREDIT_COSTS.generate.textBase * 2),
-  IMAGE_PER_UNIT_HALF_CREDITS: Math.round(CREDIT_COSTS.generate.imagePerUnit * 2),
-  SLIDE_PER_UNIT_HALF_CREDITS: Math.round(CREDIT_COSTS.generate.slidePerUnit * 2),
+  IMAGE_PER_UNIT_HALF_CREDITS: Math.round(
+    CREDIT_COSTS.generate.imagePerUnit * 2,
+  ),
+  SLIDE_PER_UNIT_HALF_CREDITS: Math.round(
+    CREDIT_COSTS.generate.slidePerUnit * 2,
+  ),
 } as const;
 
 export interface CreditSlice {
@@ -46,9 +50,13 @@ export function calculateTotalCredits(
   const text = CUSTOM_TOPIC_PRICING.TEXT_CREDITS;
   if (contentType === 'text') return text;
   if (contentType === 'image')
-    return text + CUSTOM_TOPIC_PRICING.IMAGE_PER_UNIT_CREDITS * (imageCount ?? 1);
+    return (
+      text + CUSTOM_TOPIC_PRICING.IMAGE_PER_UNIT_CREDITS * (imageCount ?? 1)
+    );
   if (contentType === 'carousel')
-    return text + CUSTOM_TOPIC_PRICING.SLIDE_PER_UNIT_CREDITS * (slideCount ?? 2);
+    return (
+      text + CUSTOM_TOPIC_PRICING.SLIDE_PER_UNIT_CREDITS * (slideCount ?? 2)
+    );
   return text;
 }
 
@@ -57,7 +65,9 @@ export function calculateTotalHalfCredits(
   imageCount?: number,
   slideCount?: number,
 ): number {
-  return Math.round(calculateTotalCredits(contentType, imageCount, slideCount) * 2);
+  return Math.round(
+    calculateTotalCredits(contentType, imageCount, slideCount) * 2,
+  );
 }
 
 export function buildCreditSlices(

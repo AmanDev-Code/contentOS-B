@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { SupabaseService } from './supabase.service';
 import { QuotaService } from './quota.service';
 import { NotificationService } from './notification.service';
@@ -94,7 +99,10 @@ export class ReferralService {
   /**
    * Get or create a referral code for a user
    */
-  async getOrCreateReferralCode(userId: string, username?: string): Promise<ReferralCode> {
+  async getOrCreateReferralCode(
+    userId: string,
+    username?: string,
+  ): Promise<ReferralCode> {
     const client = this.supabaseService.getServiceClient();
 
     // First, try to get existing code
@@ -122,7 +130,7 @@ export class ReferralService {
           .select('*')
           .eq('user_id', userId)
           .single();
-        
+
         if (retryCode) {
           return retryCode as ReferralCode;
         }
@@ -143,7 +151,11 @@ export class ReferralService {
    */
   async validateReferralCode(code: string): Promise<{
     valid: boolean;
-    referrer?: { id: string; username: string | null; full_name: string | null };
+    referrer?: {
+      id: string;
+      username: string | null;
+      full_name: string | null;
+    };
     message?: string;
   }> {
     const client = this.supabaseService.getServiceClient();
@@ -151,7 +163,10 @@ export class ReferralService {
     // Check if program is active
     const settings = await this.getSettings();
     if (!settings.is_program_active) {
-      return { valid: false, message: 'Referral program is currently inactive' };
+      return {
+        valid: false,
+        message: 'Referral program is currently inactive',
+      };
     }
 
     // Find the code
@@ -166,7 +181,10 @@ export class ReferralService {
     }
 
     if (!codeData.is_active) {
-      return { valid: false, message: 'This referral code is no longer active' };
+      return {
+        valid: false,
+        message: 'This referral code is no longer active',
+      };
     }
 
     // Get referrer info
@@ -178,18 +196,23 @@ export class ReferralService {
 
     return {
       valid: true,
-      referrer: profile ? {
-        id: profile.id,
-        username: profile.username,
-        full_name: profile.full_name,
-      } : undefined,
+      referrer: profile
+        ? {
+            id: profile.id,
+            username: profile.username,
+            full_name: profile.full_name,
+          }
+        : undefined,
     };
   }
 
   /**
    * Record a referral when a new user signs up with a code
    */
-  async recordReferral(referredUserId: string, referralCode: string): Promise<boolean> {
+  async recordReferral(
+    referredUserId: string,
+    referralCode: string,
+  ): Promise<boolean> {
     const client = this.supabaseService.getServiceClient();
 
     // Validate the code first
@@ -241,7 +264,9 @@ export class ReferralService {
       return false;
     }
 
-    this.logger.log(`Referral recorded: ${referredUserId} referred by ${codeRecord.user_id}`);
+    this.logger.log(
+      `Referral recorded: ${referredUserId} referred by ${codeRecord.user_id}`,
+    );
     return true;
   }
 
@@ -261,7 +286,9 @@ export class ReferralService {
     });
 
     if (error) {
-      this.logger.error(`Failed to process referral completion: ${error.message}`);
+      this.logger.error(
+        `Failed to process referral completion: ${error.message}`,
+      );
       return { success: false, message: 'Failed to process referral' };
     }
 
@@ -376,17 +403,23 @@ export class ReferralService {
 
     // Fetch profiles for referred users separately
     const referredUserIds = (data || []).map((r) => r.referred_user_id);
-    let profilesMap = new Map<string, { username: string | null; full_name: string | null }>();
-    
+    const profilesMap = new Map<
+      string,
+      { username: string | null; full_name: string | null }
+    >();
+
     if (referredUserIds.length > 0) {
       const { data: profiles } = await client
         .from('profiles')
         .select('id, username, full_name')
         .in('id', referredUserIds);
-      
+
       if (profiles) {
         for (const p of profiles) {
-          profilesMap.set(p.id, { username: p.username, full_name: p.full_name });
+          profilesMap.set(p.id, {
+            username: p.username,
+            full_name: p.full_name,
+          });
         }
       }
     }
@@ -396,13 +429,15 @@ export class ReferralService {
       const profile = profilesMap.get(r.referred_user_id);
       return {
         ...r,
-        referred_user: profile ? {
-          username: profile.username,
-          full_name: profile.full_name
-            ? this.maskName(profile.full_name)
-            : null,
-          email: null,
-        } : undefined,
+        referred_user: profile
+          ? {
+              username: profile.username,
+              full_name: profile.full_name
+                ? this.maskName(profile.full_name)
+                : null,
+              email: null,
+            }
+          : undefined,
       };
     });
 
@@ -440,7 +475,9 @@ export class ReferralService {
   /**
    * Update referral settings (admin only)
    */
-  async updateSettings(updates: Partial<Omit<ReferralSettings, 'id' | 'updated_at'>>): Promise<ReferralSettings> {
+  async updateSettings(
+    updates: Partial<Omit<ReferralSettings, 'id' | 'updated_at'>>,
+  ): Promise<ReferralSettings> {
     const client = this.supabaseService.getServiceClient();
 
     // Get current settings to get the ID
@@ -503,7 +540,9 @@ export class ReferralService {
   /**
    * Create a banner (admin)
    */
-  async createBanner(banner: Omit<ReferralBanner, 'id' | 'created_at' | 'updated_at'>): Promise<ReferralBanner> {
+  async createBanner(
+    banner: Omit<ReferralBanner, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ReferralBanner> {
     const client = this.supabaseService.getServiceClient();
 
     const { data, error } = await client
@@ -523,7 +562,10 @@ export class ReferralService {
   /**
    * Update a banner (admin)
    */
-  async updateBanner(id: string, updates: Partial<Omit<ReferralBanner, 'id' | 'created_at' | 'updated_at'>>): Promise<ReferralBanner> {
+  async updateBanner(
+    id: string,
+    updates: Partial<Omit<ReferralBanner, 'id' | 'created_at' | 'updated_at'>>,
+  ): Promise<ReferralBanner> {
     const client = this.supabaseService.getServiceClient();
 
     const { data, error } = await client
@@ -561,7 +603,9 @@ export class ReferralService {
   /**
    * Reorder banners (admin)
    */
-  async reorderBanners(orders: { id: string; display_order: number }[]): Promise<void> {
+  async reorderBanners(
+    orders: { id: string; display_order: number }[],
+  ): Promise<void> {
     const client = this.supabaseService.getServiceClient();
 
     for (const order of orders) {
@@ -571,7 +615,9 @@ export class ReferralService {
         .eq('id', order.id);
 
       if (error) {
-        this.logger.error(`Failed to reorder banner ${order.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to reorder banner ${order.id}: ${error.message}`,
+        );
       }
     }
   }
@@ -624,14 +670,17 @@ export class ReferralService {
     }
 
     // Aggregate by referrer
-    const referrerMap = new Map<string, {
-      user_id: string;
-      username: string | null;
-      full_name: string | null;
-      total_referred: number;
-      completed_referrals: number;
-      total_credits_earned: number;
-    }>();
+    const referrerMap = new Map<
+      string,
+      {
+        user_id: string;
+        username: string | null;
+        full_name: string | null;
+        total_referred: number;
+        completed_referrals: number;
+        total_credits_earned: number;
+      }
+    >();
 
     for (const ref of allReferrals) {
       const existing = referrerMap.get(ref.referrer_id);
@@ -647,7 +696,8 @@ export class ReferralService {
           username: null,
           full_name: null,
           total_referred: 1,
-          completed_referrals: (ref.status === 'completed' || ref.status === 'credited') ? 1 : 0,
+          completed_referrals:
+            ref.status === 'completed' || ref.status === 'credited' ? 1 : 0,
           total_credits_earned: ref.credits_awarded || 0,
         });
       }
@@ -660,7 +710,7 @@ export class ReferralService {
         .from('profiles')
         .select('id, username, full_name')
         .in('id', referrerIds);
-      
+
       if (profiles) {
         for (const p of profiles) {
           const referrer = referrerMap.get(p.id);
@@ -682,7 +732,11 @@ export class ReferralService {
    * Get referral info for a specific user (admin view)
    */
   async getUserReferralInfo(userId: string): Promise<{
-    referredBy: { id: string; username: string | null; full_name: string | null } | null;
+    referredBy: {
+      id: string;
+      username: string | null;
+      full_name: string | null;
+    } | null;
     referralsMade: ReferralWithUser[];
     totalCreditsEarned: number;
   }> {
@@ -695,7 +749,11 @@ export class ReferralService {
       .eq('referred_user_id', userId)
       .single();
 
-    let referredBy: { id: string; username: string | null; full_name: string | null } | null = null;
+    let referredBy: {
+      id: string;
+      username: string | null;
+      full_name: string | null;
+    } | null = null;
     if (referralRecord) {
       // Fetch referrer profile separately
       const { data: referrerProfile } = await client
@@ -703,7 +761,7 @@ export class ReferralService {
         .select('id, username, full_name')
         .eq('id', referralRecord.referrer_id)
         .single();
-      
+
       if (referrerProfile) {
         referredBy = {
           id: referrerProfile.id,
@@ -717,7 +775,10 @@ export class ReferralService {
     const { referrals } = await this.getUserReferrals(userId, { limit: 100 });
 
     // Calculate total credits earned
-    const totalCreditsEarned = referrals.reduce((sum, r) => sum + (r.credits_awarded || 0), 0);
+    const totalCreditsEarned = referrals.reduce(
+      (sum, r) => sum + (r.credits_awarded || 0),
+      0,
+    );
 
     return {
       referredBy,
@@ -732,10 +793,12 @@ export class ReferralService {
   private maskName(name: string): string {
     if (!name || name.length < 2) return '***';
     const parts = name.split(' ');
-    return parts.map(part => {
-      if (part.length < 2) return '*';
-      return part[0] + '*'.repeat(Math.min(part.length - 1, 5));
-    }).join(' ');
+    return parts
+      .map((part) => {
+        if (part.length < 2) return '*';
+        return part[0] + '*'.repeat(Math.min(part.length - 1, 5));
+      })
+      .join(' ');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -751,7 +814,15 @@ export class ReferralService {
     search?: string;
     status?: 'active' | 'inactive' | 'all';
   }): Promise<{
-    codes: Array<ReferralCode & { user?: { username: string | null; email: string | null; full_name: string | null } }>;
+    codes: Array<
+      ReferralCode & {
+        user?: {
+          username: string | null;
+          email: string | null;
+          full_name: string | null;
+        };
+      }
+    >;
     total: number;
     page: number;
     limit: number;
@@ -763,9 +834,7 @@ export class ReferralService {
     const search = options?.search?.trim().toLowerCase();
     const status = options?.status || 'all';
 
-    let query = client
-      .from('referral_codes')
-      .select('*', { count: 'exact' });
+    let query = client.from('referral_codes').select('*', { count: 'exact' });
 
     if (status === 'active') {
       query = query.eq('is_active', true);
@@ -787,7 +856,14 @@ export class ReferralService {
     }
 
     const userIds = (data || []).map((c) => c.user_id);
-    let usersMap = new Map<string, { username: string | null; email: string | null; full_name: string | null }>();
+    const usersMap = new Map<
+      string,
+      {
+        username: string | null;
+        email: string | null;
+        full_name: string | null;
+      }
+    >();
 
     if (userIds.length > 0) {
       const { data: profiles } = await client
@@ -797,7 +873,11 @@ export class ReferralService {
 
       if (profiles) {
         for (const p of profiles) {
-          usersMap.set(p.id, { username: p.username, email: null, full_name: p.full_name });
+          usersMap.set(p.id, {
+            username: p.username,
+            email: null,
+            full_name: p.full_name,
+          });
         }
       }
 
@@ -808,7 +888,11 @@ export class ReferralService {
           if (existing) {
             existing.email = u.email || null;
           } else {
-            usersMap.set(u.id, { username: null, email: u.email || null, full_name: null });
+            usersMap.set(u.id, {
+              username: null,
+              email: u.email || null,
+              full_name: null,
+            });
           }
         }
       }
@@ -825,7 +909,10 @@ export class ReferralService {
   /**
    * Update a referral code (admin)
    */
-  async updateCode(id: string, updates: { is_active?: boolean }): Promise<ReferralCode> {
+  async updateCode(
+    id: string,
+    updates: { is_active?: boolean },
+  ): Promise<ReferralCode> {
     const client = this.supabaseService.getServiceClient();
 
     const { data, error } = await client
@@ -864,10 +951,7 @@ export class ReferralService {
       .update({ referral_code_id: null })
       .eq('referral_code_id', id);
 
-    const { error } = await client
-      .from('referral_codes')
-      .delete()
-      .eq('id', id);
+    const { error } = await client.from('referral_codes').delete().eq('id', id);
 
     if (error) {
       this.logger.error(`Failed to delete code: ${error.message}`);

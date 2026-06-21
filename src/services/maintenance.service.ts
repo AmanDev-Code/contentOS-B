@@ -42,7 +42,9 @@ export class MaintenanceService {
   }
 
   async getConfig(): Promise<MaintenanceConfig | null> {
-    return this.cacheService.get(MAINTENANCE_KEY) as Promise<MaintenanceConfig | null>;
+    return this.cacheService.get(
+      MAINTENANCE_KEY,
+    ) as Promise<MaintenanceConfig | null>;
   }
 
   async setConfig(
@@ -68,14 +70,18 @@ export class MaintenanceService {
       const start = new Date(updates.scheduledStart).getTime();
       const end = new Date(updates.scheduledEnd).getTime();
       if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
-        throw new BadRequestException('scheduledEnd must be after scheduledStart');
+        throw new BadRequestException(
+          'scheduledEnd must be after scheduledStart',
+        );
       }
     }
 
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     const requestedEnabled =
-      updates.enabled !== undefined ? updates.enabled : (existing?.enabled ?? false);
+      updates.enabled !== undefined
+        ? updates.enabled
+        : (existing?.enabled ?? false);
     const requestedStart =
       updates.scheduledStart !== undefined
         ? (updates.scheduledStart ?? undefined)
@@ -132,7 +138,11 @@ export class MaintenanceService {
         ? (updates.message ?? undefined)
         : existing?.message;
 
-    await this.cacheService.set(MAINTENANCE_KEY, config, MAINTENANCE_TTL_SECONDS);
+    await this.cacheService.set(
+      MAINTENANCE_KEY,
+      config,
+      MAINTENANCE_TTL_SECONDS,
+    );
     return config;
   }
 
@@ -146,7 +156,11 @@ export class MaintenanceService {
       updatedBy,
       scheduleVersion: undefined,
     };
-    await this.cacheService.set(MAINTENANCE_KEY, config, MAINTENANCE_TTL_SECONDS);
+    await this.cacheService.set(
+      MAINTENANCE_KEY,
+      config,
+      MAINTENANCE_TTL_SECONDS,
+    );
     return config;
   }
 
@@ -159,7 +173,9 @@ export class MaintenanceService {
     return {
       active,
       ...(config.message ? { message: config.message } : {}),
-      ...(config.scheduledStart ? { scheduledStart: config.scheduledStart } : {}),
+      ...(config.scheduledStart
+        ? { scheduledStart: config.scheduledStart }
+        : {}),
       ...(config.scheduledEnd ? { scheduledEnd: config.scheduledEnd } : {}),
     };
   }
@@ -201,7 +217,10 @@ export class MaintenanceService {
     );
   }
 
-  private async scheduleEnableJob(startTs: number, scheduleVersion: string): Promise<void> {
+  private async scheduleEnableJob(
+    startTs: number,
+    scheduleVersion: string,
+  ): Promise<void> {
     await this.maintenanceQueue.add(
       MAINTENANCE_JOB_NAMES.ENABLE,
       { scheduleVersion },
@@ -214,7 +233,10 @@ export class MaintenanceService {
     );
   }
 
-  private async scheduleDisableJob(endTs: number, scheduleVersion: string): Promise<void> {
+  private async scheduleDisableJob(
+    endTs: number,
+    scheduleVersion: string,
+  ): Promise<void> {
     await this.maintenanceQueue.add(
       MAINTENANCE_JOB_NAMES.DISABLE,
       { scheduleVersion },
@@ -258,7 +280,11 @@ export class MaintenanceService {
       updatedAt: new Date().toISOString(),
       updatedBy,
     };
-    await this.cacheService.set(MAINTENANCE_KEY, nextConfig, MAINTENANCE_TTL_SECONDS);
+    await this.cacheService.set(
+      MAINTENANCE_KEY,
+      nextConfig,
+      MAINTENANCE_TTL_SECONDS,
+    );
     return nextConfig;
   }
 }

@@ -14,10 +14,17 @@ import { ERROR_MESSAGES } from '../common/constants';
 import { ScraperCredentialsService } from './scrapers/scraper-credentials.service';
 import { SocialConnectionBridgeService } from '../integrations/social/social-connection-bridge.service';
 
-type InsightSource = 'linkedin_analytics' | 'organization_analytics' | 'published_posts';
+type InsightSource =
+  | 'linkedin_analytics'
+  | 'organization_analytics'
+  | 'published_posts';
 
 interface LinkedInInsightItem {
-  title: 'Best Posting Time' | 'Top Content Type' | 'Engagement Rate' | 'Growth Rate';
+  title:
+    | 'Best Posting Time'
+    | 'Top Content Type'
+    | 'Engagement Rate'
+    | 'Growth Rate';
   value: string;
   description: string;
   trend: string;
@@ -78,7 +85,8 @@ export class LinkedinService {
     private profileRepository: ProfileRepository,
     private generatedContentRepository: GeneratedContentRepository,
     private scraperCredentialsService: ScraperCredentialsService,
-    @Optional() @Inject(SocialConnectionBridgeService)
+    @Optional()
+    @Inject(SocialConnectionBridgeService)
     private readonly socialBridge?: SocialConnectionBridgeService,
   ) {
     this.clientId = this.configService.get<string>('linkedin.clientId') || '';
@@ -110,7 +118,9 @@ export class LinkedinService {
     return fallback;
   }
 
-  private sanitizeLinkedinVersion(version: string | undefined | null): string | null {
+  private sanitizeLinkedinVersion(
+    version: string | undefined | null,
+  ): string | null {
     if (!version) return null;
     const trimmed = String(version).trim();
     const yyyymm = trimmed.replace(/[^0-9]/g, '').slice(0, 6);
@@ -145,7 +155,8 @@ export class LinkedinService {
       const parsed = JSON.parse(rawBody) as Record<string, unknown>;
       const msg = parsed.message || parsed.errorDetails || parsed.code;
       if (msg !== undefined) {
-        summary = typeof msg === 'string' ? msg : JSON.stringify(msg).slice(0, 800);
+        summary =
+          typeof msg === 'string' ? msg : JSON.stringify(msg).slice(0, 800);
       } else {
         summary = JSON.stringify(parsed).slice(0, 800);
       }
@@ -278,7 +289,9 @@ export class LinkedinService {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 120_000);
     try {
-      const imageResponse = await fetch(assetUrl, { signal: controller.signal });
+      const imageResponse = await fetch(assetUrl, {
+        signal: controller.signal,
+      });
       if (!imageResponse.ok) {
         throw new Error(
           `HTTP ${imageResponse.status} downloading ${label} from origin`,
@@ -341,7 +354,10 @@ export class LinkedinService {
 
     return (
       lastResponse ||
-      new Response('LinkedIn request failed', { status: 400, statusText: 'Bad Request' })
+      new Response('LinkedIn request failed', {
+        status: 400,
+        statusText: 'Bad Request',
+      })
     );
   }
 
@@ -374,7 +390,9 @@ export class LinkedinService {
         );
       }
     }
-    throw lastError instanceof Error ? lastError : new Error('LinkedIn v2 request failed');
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('LinkedIn v2 request failed');
   }
 
   private findFirstIdentifierUrl(value: unknown): string | undefined {
@@ -420,7 +438,7 @@ export class LinkedinService {
 
     const best = [...artifacts]
       .filter((a) => a && typeof a.fileIdentifyingUrlPathSegment === 'string')
-      .sort((a: any, b: any) => (Number(b.width || 0) - Number(a.width || 0)))[0];
+      .sort((a: any, b: any) => Number(b.width || 0) - Number(a.width || 0))[0];
     if (!best?.fileIdentifyingUrlPathSegment) return undefined;
 
     return `${rootUrl}${best.fileIdentifyingUrlPathSegment}`;
@@ -471,11 +489,17 @@ export class LinkedinService {
 
     const consume = (stats: any) => {
       if (!stats || typeof stats !== 'object') return;
-      totals.impressions += Number(stats.impressionCount || stats.impressions || 0);
+      totals.impressions += Number(
+        stats.impressionCount || stats.impressions || 0,
+      );
       totals.clicks += Number(stats.clickCount || stats.clicks || 0);
-      totals.reactions += Number(stats.likeCount || stats.reactionCount || stats.reactions || 0);
+      totals.reactions += Number(
+        stats.likeCount || stats.reactionCount || stats.reactions || 0,
+      );
       totals.comments += Number(stats.commentCount || stats.comments || 0);
-      totals.shares += Number(stats.shareCount || stats.repostCount || stats.shares || 0);
+      totals.shares += Number(
+        stats.shareCount || stats.repostCount || stats.shares || 0,
+      );
     };
 
     if (payload?.totalShareStatistics) consume(payload.totalShareStatistics);
@@ -519,9 +543,7 @@ export class LinkedinService {
     return null;
   }
 
-  private extractShareStatisticsByShareUrn(
-    payload: any,
-  ): Map<
+  private extractShareStatisticsByShareUrn(payload: any): Map<
     string,
     {
       impressions: number;
@@ -684,7 +706,9 @@ export class LinkedinService {
   ): string | null {
     const str = (k: string): string | undefined => {
       const v = payload[k];
-      return typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined;
+      return typeof v === 'string' && v.trim().length > 0
+        ? v.trim()
+        : undefined;
     };
     const direct =
       str('vanity_name') ||
@@ -707,7 +731,9 @@ export class LinkedinService {
       if (ui.ok) {
         const j = (await ui.json()) as Record<string, unknown>;
         const fromInfo = this.vanityFromLinkedInUserinfo(j);
-        const normalized = fromInfo ? this.normalizeLinkedInProfileUrl(fromInfo) : null;
+        const normalized = fromInfo
+          ? this.normalizeLinkedInProfileUrl(fromInfo)
+          : null;
         if (normalized) return normalized;
       }
     } catch (e) {
@@ -890,7 +916,8 @@ export class LinkedinService {
           ? await v2PostsResponse.json().catch(() => ({ elements: [] }))
           : { elements: [] };
         const orgPostsData =
-          Array.isArray(restPostsData?.elements) && restPostsData.elements.length > 0
+          Array.isArray(restPostsData?.elements) &&
+          restPostsData.elements.length > 0
             ? restPostsData
             : v2PostsData;
 
@@ -898,27 +925,35 @@ export class LinkedinService {
           ? await restStatsResponse.json().catch(() => ({}))
           : {};
         const statsTotals = this.extractShareStatisticsTotals(statsData);
-        const statsByShareUrn = this.extractShareStatisticsByShareUrn(statsData);
+        const statsByShareUrn =
+          this.extractShareStatisticsByShareUrn(statsData);
         const totalImpressions = statsTotals.impressions;
         const totalClicks = statsTotals.clicks;
         const totalReactions = statsTotals.reactions;
         const totalComments = statsTotals.comments;
         const totalShares = statsTotals.shares;
 
-        const rows = Array.isArray(orgPostsData?.elements) ? orgPostsData.elements : [];
+        const rows = Array.isArray(orgPostsData?.elements)
+          ? orgPostsData.elements
+          : [];
         const distributedFallbackImpressions =
           rows.length > 0 ? Math.floor(totalImpressions / rows.length) : 0;
         const distributedFallbackClicks =
           rows.length > 0 ? Math.floor(totalClicks / rows.length) : 0;
         return rows.map((post: any, index: number) => {
           const likes = Number(post?.totalSocialActivityCounts?.numLikes || 0);
-          const comments = Number(post?.totalSocialActivityCounts?.numComments || 0);
-          const shares = Number(post?.totalSocialActivityCounts?.numShares || 0);
+          const comments = Number(
+            post?.totalSocialActivityCounts?.numComments || 0,
+          );
+          const shares = Number(
+            post?.totalSocialActivityCounts?.numShares || 0,
+          );
           const interactions = likes + comments + shares;
           const postId = post?.id || `org-post-${index}`;
           const postUrnKey = this.normalizeLinkedinUrn(postId);
           const postStats = statsByShareUrn.get(postUrnKey);
-          const postImpressions = postStats?.impressions ?? distributedFallbackImpressions;
+          const postImpressions =
+            postStats?.impressions ?? distributedFallbackImpressions;
           const postClicks = postStats?.clicks ?? distributedFallbackClicks;
           const postReactions = postStats?.reactions ?? likes;
           const postComments = postStats?.comments ?? comments;
@@ -930,8 +965,8 @@ export class LinkedinService {
             content:
               post?.commentary ||
               post?.text?.text ||
-              post?.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary
-                ?.text ||
+              post?.specificContent?.['com.linkedin.ugc.ShareContent']
+                ?.shareCommentary?.text ||
               'LinkedIn Company Page Post',
             publishedAt: new Date(
               post?.createdAt ||
@@ -1219,7 +1254,9 @@ export class LinkedinService {
       }
 
       const selectedOrg = organizationUrn
-        ? orgsData.elements.find((el: any) => el?.organization === organizationUrn)
+        ? orgsData.elements.find(
+            (el: any) => el?.organization === organizationUrn,
+          )
         : orgsData.elements[0];
       const firstOrg = selectedOrg || orgsData.elements[0];
       const orgId = firstOrg.organization;
@@ -1229,18 +1266,23 @@ export class LinkedinService {
       );
 
       // Prefer REST org follower/share stats (versioned, richer).
-      const followerStatsResponse = await this.fetchLinkedinRestWithVersionRetry(
-        `https://api.linkedin.com/rest/organizationalEntityFollowerStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(orgId)}`,
-        profile.linkedin_access_token,
-        { method: 'GET' },
-      );
+      const followerStatsResponse =
+        await this.fetchLinkedinRestWithVersionRetry(
+          `https://api.linkedin.com/rest/organizationalEntityFollowerStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(orgId)}`,
+          profile.linkedin_access_token,
+          { method: 'GET' },
+        );
 
       let followers = 0;
       if (followerStatsResponse.ok) {
-        const followerStats = await followerStatsResponse.json().catch(() => ({}));
+        const followerStats = await followerStatsResponse
+          .json()
+          .catch(() => ({}));
         followers =
-          Number(followerStats?.followerCountsByAssociationType?.organicFollowerCount || 0) ||
-          Number(followerStats?.firstDegreeSize || 0);
+          Number(
+            followerStats?.followerCountsByAssociationType
+              ?.organicFollowerCount || 0,
+          ) || Number(followerStats?.firstDegreeSize || 0);
       }
 
       const shareStatsResponse = await this.fetchLinkedinRestWithVersionRetry(
@@ -1269,7 +1311,9 @@ export class LinkedinService {
       const availableMetrics = new Set<string>();
       let source = 'rest';
       if (orgPostsResponse.ok) {
-        const orgPostsData = await orgPostsResponse.json().catch(() => ({ elements: [] }));
+        const orgPostsData = await orgPostsResponse
+          .json()
+          .catch(() => ({ elements: [] }));
         posts = orgPostsData.elements?.length || 0;
 
         totalEngagement =
@@ -1305,7 +1349,10 @@ export class LinkedinService {
           'views',
         ]);
         const pageClicks = this.deepFindNumber(pageStats, ['click']);
-        const pageReactions = this.deepFindNumber(pageStats, ['reaction', 'like']);
+        const pageReactions = this.deepFindNumber(pageStats, [
+          'reaction',
+          'like',
+        ]);
         const pageComments = this.deepFindNumber(pageStats, ['comment']);
         const pageReposts = this.deepFindNumber(pageStats, ['repost', 'share']);
 
@@ -1316,7 +1363,8 @@ export class LinkedinService {
           totalReactions = Math.max(totalReactions, pageReactions);
         if (pageComments != null)
           totalComments = Math.max(totalComments, pageComments);
-        if (pageReposts != null) totalReposts = Math.max(totalReposts, pageReposts);
+        if (pageReposts != null)
+          totalReposts = Math.max(totalReposts, pageReposts);
         totalEngagement = Math.max(
           totalEngagement,
           totalReactions + totalComments + totalReposts + totalClicks,
@@ -1554,24 +1602,26 @@ export class LinkedinService {
       {
         title: 'Engagement Rate',
         value: `${engagementRate.toFixed(1)}%`,
-        description:
-          !canViewEngagementMetrics
-            ? 'Company Page admin access is required for full LinkedIn engagement metrics.'
-            : totalImpressions > 0
+        description: !canViewEngagementMetrics
+          ? 'Company Page admin access is required for full LinkedIn engagement metrics.'
+          : totalImpressions > 0
             ? 'Calculated from LinkedIn interactions/impressions'
             : 'No impression data returned yet from LinkedIn',
-        trend:
-          !canViewEngagementMetrics
-            ? 'Unavailable for personal account analytics'
-            : totalImpressions > 0
+        trend: !canViewEngagementMetrics
+          ? 'Unavailable for personal account analytics'
+          : totalImpressions > 0
             ? 'Live from LinkedIn analytics'
             : 'Waiting for LinkedIn analytics',
         source:
-          totalImpressions > 0 ? 'linkedin_analytics' : 'organization_analytics',
+          totalImpressions > 0
+            ? 'linkedin_analytics'
+            : 'organization_analytics',
       },
       {
         title: 'Growth Rate',
-        value: hasGrowthBaseline ? `${growthRate.toFixed(1)}%` : 'Not enough baseline',
+        value: hasGrowthBaseline
+          ? `${growthRate.toFixed(1)}%`
+          : 'Not enough baseline',
         description: hasGrowthBaseline
           ? `Post output trend vs previous ${safePeriodDays}-day window`
           : `Need at least 3 posts in previous ${safePeriodDays}-day window for stable growth`,
@@ -1585,7 +1635,8 @@ export class LinkedinService {
     return {
       hasData,
       periodDays: safePeriodDays,
-      accountType: actorType === 'organization' ? 'organization_admin' : 'personal',
+      accountType:
+        actorType === 'organization' ? 'organization_admin' : 'personal',
       canViewEngagementMetrics,
       engagementMetricsMessage,
       bestPostingTime,
@@ -1608,17 +1659,22 @@ export class LinkedinService {
 
     let linkedMemberId: string | null = null;
     try {
-      const userInfoResponse = await fetch('https://api.linkedin.com/v2/userinfo', {
-        headers: {
-          Authorization: `Bearer ${profile.linkedin_access_token}`,
+      const userInfoResponse = await fetch(
+        'https://api.linkedin.com/v2/userinfo',
+        {
+          headers: {
+            Authorization: `Bearer ${profile.linkedin_access_token}`,
+          },
         },
-      });
+      );
       if (userInfoResponse.ok) {
         const userInfo = await userInfoResponse.json();
         linkedMemberId = userInfo?.sub || null;
       }
     } catch (error) {
-      this.logger.warn('Unable to fetch LinkedIn userinfo for account type context');
+      this.logger.warn(
+        'Unable to fetch LinkedIn userinfo for account type context',
+      );
     }
 
     try {
@@ -1645,7 +1701,9 @@ export class LinkedinService {
       }
 
       const orgsData = await orgsResponse.json();
-      const elements = Array.isArray(orgsData?.elements) ? orgsData.elements : [];
+      const elements = Array.isArray(orgsData?.elements)
+        ? orgsData.elements
+        : [];
       const organizationNames = elements
         .map((el: any) => el?.['organization~']?.name)
         .filter((v: any) => typeof v === 'string' && v.trim().length > 0);
@@ -1673,7 +1731,10 @@ export class LinkedinService {
             : 'Selected personal profile view has limited analytics. Choose a company page for richer metrics.',
       };
     } catch (error) {
-      this.logger.error('Error determining LinkedIn account type context:', error);
+      this.logger.error(
+        'Error determining LinkedIn account type context:',
+        error,
+      );
       return {
         accountType: 'personal',
         linkedMemberId,
@@ -1700,8 +1761,9 @@ export class LinkedinService {
     // Only return accounts the user explicitly connected via PagePickerModal.
     if (this.socialBridge) {
       try {
-        const connectedAccounts = await this.socialBridge.getConnectedLinkedInAccounts(userId);
-        
+        const connectedAccounts =
+          await this.socialBridge.getConnectedLinkedInAccounts(userId);
+
         for (const account of connectedAccounts) {
           if (account.accountType === 'personal') {
             identities.push({
@@ -1711,7 +1773,9 @@ export class LinkedinService {
               avatarUrl: account.avatarUrl ?? undefined,
             });
           } else if (account.accountType === 'organization') {
-            const organizationUrn = account.platformAccountId.startsWith('urn:li:organization:')
+            const organizationUrn = account.platformAccountId.startsWith(
+              'urn:li:organization:',
+            )
               ? account.platformAccountId
               : `urn:li:organization:${account.platformAccountId}`;
             identities.push({
@@ -1725,7 +1789,9 @@ export class LinkedinService {
           }
         }
       } catch (error) {
-        this.logger.warn(`Failed to fetch connected accounts from social_accounts: ${error}`);
+        this.logger.warn(
+          `Failed to fetch connected accounts from social_accounts: ${error}`,
+        );
       }
     }
 
@@ -1733,26 +1799,36 @@ export class LinkedinService {
     // use legacy behavior (fetch from LinkedIn API) for backward compatibility.
     // This ensures existing users who haven't re-connected still see their accounts.
     if (identities.length === 0) {
-      this.logger.debug('No accounts in social_accounts, falling back to LinkedIn API');
-      
+      this.logger.debug(
+        'No accounts in social_accounts, falling back to LinkedIn API',
+      );
+
       let linkedMemberId: string | null = null;
       let memberAvatarUrl: string | undefined;
 
       try {
-        const userInfoResponse = await fetch('https://api.linkedin.com/v2/userinfo', {
-          headers: {
-            Authorization: `Bearer ${profile.linkedin_access_token}`,
+        const userInfoResponse = await fetch(
+          'https://api.linkedin.com/v2/userinfo',
+          {
+            headers: {
+              Authorization: `Bearer ${profile.linkedin_access_token}`,
+            },
           },
-        });
+        );
         if (userInfoResponse.ok) {
           const userInfo = await userInfoResponse.json();
           linkedMemberId = userInfo?.sub || null;
-          if (typeof userInfo?.picture === 'string' && userInfo.picture.startsWith('http')) {
+          if (
+            typeof userInfo?.picture === 'string' &&
+            userInfo.picture.startsWith('http')
+          ) {
             memberAvatarUrl = userInfo.picture;
           }
         }
       } catch (error) {
-        this.logger.warn('Unable to fetch LinkedIn userinfo for posting identities');
+        this.logger.warn(
+          'Unable to fetch LinkedIn userinfo for posting identities',
+        );
       }
 
       const memberIdentityId = linkedMemberId
@@ -1778,7 +1854,9 @@ export class LinkedinService {
 
         if (orgsResponse.ok) {
           const orgsData = await orgsResponse.json();
-          const elements = Array.isArray(orgsData?.elements) ? orgsData.elements : [];
+          const elements = Array.isArray(orgsData?.elements)
+            ? orgsData.elements
+            : [];
           for (const element of elements) {
             const organizationUrn = element?.organization;
             if (!organizationUrn) continue;
@@ -1787,9 +1865,8 @@ export class LinkedinService {
               organizationUrn,
             );
             let avatarUrl =
-              this.findFirstIdentifierUrl(
-                element?.['organization~']?.logoV2,
-              ) || this.buildVectorImageUrl(element?.['organization~']?.logoV2);
+              this.findFirstIdentifierUrl(element?.['organization~']?.logoV2) ||
+              this.buildVectorImageUrl(element?.['organization~']?.logoV2);
 
             if (!avatarUrl) {
               const organizationId = String(organizationUrn).split(':').pop();
@@ -2081,21 +2158,22 @@ export class LinkedinService {
         putMime = 'image/jpeg';
       }
 
-      const initResponse = await this.fetchLinkedinRestMediaInitWithVersionFallback(
-        'https://api.linkedin.com/rest/images?action=initializeUpload',
-        accessToken,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            initializeUploadRequest: {
-              owner: ownerUrn,
+      const initResponse =
+        await this.fetchLinkedinRestMediaInitWithVersionFallback(
+          'https://api.linkedin.com/rest/images?action=initializeUpload',
+          accessToken,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
             },
-          }),
-        },
-      );
+            body: JSON.stringify({
+              initializeUploadRequest: {
+                owner: ownerUrn,
+              },
+            }),
+          },
+        );
 
       if (!initResponse.ok) {
         const errText = await initResponse.text().catch(() => '');
@@ -2117,7 +2195,9 @@ export class LinkedinService {
         this.logger.warn(
           `LinkedIn initializeUpload missing uploadUrl/image: ${JSON.stringify(initData).slice(0, 500)}`,
         );
-        throw new Error('LinkedIn initializeUpload returned an unexpected body');
+        throw new Error(
+          'LinkedIn initializeUpload returned an unexpected body',
+        );
       }
 
       const uploadBlob = new Blob([new Uint8Array(putBody)], { type: putMime });
@@ -2143,8 +2223,7 @@ export class LinkedinService {
       return imageUrn;
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
-      const message =
-        error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to upload image to LinkedIn: ${message}`);
       throw new BadRequestException(
         `Failed to upload image to LinkedIn: ${message}`,
@@ -2197,7 +2276,9 @@ export class LinkedinService {
       const uploadUrl = initData.value?.uploadUrl;
       const documentUrn = initData.value?.document;
       if (!uploadUrl || !documentUrn) {
-        throw new Error('LinkedIn document initializeUpload returned an unexpected body');
+        throw new Error(
+          'LinkedIn document initializeUpload returned an unexpected body',
+        );
       }
 
       const uploadResponse = await fetch(uploadUrl, {
@@ -2221,8 +2302,7 @@ export class LinkedinService {
       return documentUrn;
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
-      const message =
-        error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to upload document to LinkedIn: ${message}`);
       throw new BadRequestException(
         `Failed to upload document to LinkedIn: ${message}`,

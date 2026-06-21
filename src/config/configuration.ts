@@ -35,9 +35,9 @@ export default () => ({
 
   aiRefinement: {
     enabled: process.env.AI_REFINEMENT_ENABLED !== 'false',
-    baseUrl: process.env.AI_REFINEMENT_BASE_URL || 'https://openrouter.ai/api/v1',
-    model:
-      process.env.AI_REFINEMENT_MODEL || 'z-ai/glm-4.5-air:free',
+    baseUrl:
+      process.env.AI_REFINEMENT_BASE_URL || 'https://openrouter.ai/api/v1',
+    model: process.env.AI_REFINEMENT_MODEL || 'z-ai/glm-4.5-air:free',
     apiKey:
       process.env.AI_REFINEMENT_API_KEY ||
       process.env.OPENROUTER_API_KEY ||

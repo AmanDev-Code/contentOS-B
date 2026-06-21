@@ -130,7 +130,11 @@ export class ExchangeRateService {
       }));
 
       await this.upsertRates(records);
-      await this.cacheService.set(EXCHANGE_RATES_CACHE_KEY, records, EXCHANGE_RATES_CACHE_TTL);
+      await this.cacheService.set(
+        EXCHANGE_RATES_CACHE_KEY,
+        records,
+        EXCHANGE_RATES_CACHE_TTL,
+      );
 
       const inrEntry = data.rates.find((r) => r.code === 'INR');
       if (inrEntry && inrEntry.rate > 0) {
@@ -139,7 +143,9 @@ export class ExchangeRateService {
         this.logger.warn('INR rate not found in Forex API response');
       }
 
-      this.logger.log(`Exchange rates updated for ${today}: ${records.length} currencies`);
+      this.logger.log(
+        `Exchange rates updated for ${today}: ${records.length} currencies`,
+      );
       return records;
     } catch (error) {
       this.logger.error('Failed to fetch exchange rates:', error.message);
@@ -152,7 +158,9 @@ export class ExchangeRateService {
     baseUrl: string,
   ): Promise<ForexApiResponse> {
     const url = `${baseUrl.replace(/\/$/, '')}/rates`;
-    this.logger.log(`Fetching exchange rates from ${url} for base ${FOREX_BASE_CURRENCY}`);
+    this.logger.log(
+      `Fetching exchange rates from ${url} for base ${FOREX_BASE_CURRENCY}`,
+    );
 
     const response = await fetch(url, {
       method: 'POST',
@@ -171,7 +179,9 @@ export class ExchangeRateService {
     const data = (await response.json()) as ForexApiResponse;
 
     if (!Array.isArray(data.rates)) {
-      throw new Error('Forex API returned invalid rates payload (expected array)');
+      throw new Error(
+        'Forex API returned invalid rates payload (expected array)',
+      );
     }
 
     return data;
@@ -318,7 +328,8 @@ export class ExchangeRateService {
     const today = this.getTodayInIst();
     const rates = await this.getAllRates(today);
     const currencyData = await this.currencyService.getExchangeRate();
-    const cached = (await this.cacheService.get(`forex:all-rates:${today}`)) !== null;
+    const cached =
+      (await this.cacheService.get(`forex:all-rates:${today}`)) !== null;
     const inrRecord = rates.find((r) => r.target_currency === 'INR');
     const usdToInr = inrRecord?.rate ?? currencyData.usd_to_inr;
     const inrToUsd = usdToInr ? 1 / usdToInr : currencyData.inr_to_usd;
@@ -359,10 +370,20 @@ export class ExchangeRateService {
       return { amount: amount * rate, rate, date: rateDate };
     }
 
-    const fromRate = await this.getRate(fromCurrency, FOREX_BASE_CURRENCY, rateDate);
-    const toRate = await this.getRate(toCurrency, FOREX_BASE_CURRENCY, rateDate);
+    const fromRate = await this.getRate(
+      fromCurrency,
+      FOREX_BASE_CURRENCY,
+      rateDate,
+    );
+    const toRate = await this.getRate(
+      toCurrency,
+      FOREX_BASE_CURRENCY,
+      rateDate,
+    );
     if (!fromRate || !toRate) {
-      throw new Error(`Exchange rate not found for ${fromCurrency} -> ${toCurrency}`);
+      throw new Error(
+        `Exchange rate not found for ${fromCurrency} -> ${toCurrency}`,
+      );
     }
 
     const rate = toRate / fromRate;
@@ -371,7 +392,9 @@ export class ExchangeRateService {
 
   private getTodayInIst(): string {
     const now = new Date();
-    const istTime = new Date(now.toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
+    const istTime = new Date(
+      now.toLocaleString('en-US', { timeZone: IST_TIMEZONE }),
+    );
     return istTime.toISOString().split('T')[0];
   }
 }

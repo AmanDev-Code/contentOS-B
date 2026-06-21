@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { OutboundWebhookService, type WebhookEventType } from './outbound-webhook.service';
+import {
+  OutboundWebhookService,
+  type WebhookEventType,
+} from './outbound-webhook.service';
 import { QUEUE_NAMES } from '../common/constants';
 
 const MAX_ATTEMPTS = 3;
@@ -102,8 +105,7 @@ export class WebhookDeliveryService {
 
       succeeded = response.status >= 200 && response.status < 300;
     } catch (err) {
-      responseBody =
-        err instanceof Error ? err.message : 'Network error';
+      responseBody = err instanceof Error ? err.message : 'Network error';
       this.logger.warn(
         `Webhook delivery failed for ${data.webhookId}: ${responseBody}`,
       );
@@ -118,7 +120,9 @@ export class WebhookDeliveryService {
 
     const nextRetryAt =
       !succeeded && !isLastAttempt
-        ? new Date(Date.now() + (RETRY_DELAYS_MS[data.attempt - 1] ?? 1_800_000))
+        ? new Date(
+            Date.now() + (RETRY_DELAYS_MS[data.attempt - 1] ?? 1_800_000),
+          )
         : undefined;
 
     await this.webhookService.recordDelivery({
@@ -127,7 +131,7 @@ export class WebhookDeliveryService {
       payload: data.payload,
       signature,
       attempt: data.attempt,
-      status: status as 'pending' | 'succeeded' | 'failed' | 'dead_letter',
+      status: status,
       responseStatusCode: responseStatus,
       responseBodyTruncated: responseBody,
       nextRetryAt,
@@ -159,7 +163,10 @@ export class WebhookDeliveryService {
     }
   }
 
-  async testFire(userId: string, webhookId: string): Promise<{
+  async testFire(
+    userId: string,
+    webhookId: string,
+  ): Promise<{
     status: number | null;
     body: string;
   }> {

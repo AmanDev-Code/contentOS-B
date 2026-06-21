@@ -131,8 +131,8 @@ export class NotificationService {
 
   private pushToUser(userId: string, event: string, data: any): void {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    const matchingClients = this.sseClients.filter(c => c.userId === userId);
-    
+    const matchingClients = this.sseClients.filter((c) => c.userId === userId);
+
     if (matchingClients.length === 0) {
       this.logger.warn(
         `SSE pushToUser: No clients connected for user ${userId} (event=${event}, total clients=${this.sseClients.length})`,
@@ -142,12 +142,14 @@ export class NotificationService {
         `SSE pushToUser: Sending ${event} to ${matchingClients.length} client(s) for user ${userId}`,
       );
     }
-    
+
     for (const client of matchingClients) {
       try {
         client.res.write(payload);
       } catch (err) {
-        this.logger.warn(`SSE write failed for user ${userId}: ${(err as Error).message}`);
+        this.logger.warn(
+          `SSE write failed for user ${userId}: ${(err as Error).message}`,
+        );
       }
     }
   }

@@ -109,9 +109,18 @@ export class ScraperCredentialsService {
     const s = await this.getStored();
     return {
       instagram: {
-        sessionId: this.preview(s?.instagramSession, process.env.INSTAGRAM_SESSION),
-        csrftoken: this.preview(s?.instagramCsrfToken, process.env.INSTAGRAM_CSRFTOKEN),
-        dsUserId: this.preview(s?.instagramDsUserId, process.env.INSTAGRAM_DS_USER_ID),
+        sessionId: this.preview(
+          s?.instagramSession,
+          process.env.INSTAGRAM_SESSION,
+        ),
+        csrftoken: this.preview(
+          s?.instagramCsrfToken,
+          process.env.INSTAGRAM_CSRFTOKEN,
+        ),
+        dsUserId: this.preview(
+          s?.instagramDsUserId,
+          process.env.INSTAGRAM_DS_USER_ID,
+        ),
         igDid: this.preview(s?.instagramIgDid, process.env.INSTAGRAM_IG_DID),
         mid: this.preview(s?.instagramMid, process.env.INSTAGRAM_MID),
       },
@@ -138,10 +147,12 @@ export class ScraperCredentialsService {
         s?.instagramCsrfToken?.trim() || process.env.INSTAGRAM_CSRFTOKEN || '',
       instagramDsUserId:
         s?.instagramDsUserId?.trim() || process.env.INSTAGRAM_DS_USER_ID || '',
-      instagramIgDid: s?.instagramIgDid?.trim() || process.env.INSTAGRAM_IG_DID || '',
+      instagramIgDid:
+        s?.instagramIgDid?.trim() || process.env.INSTAGRAM_IG_DID || '',
       instagramMid: s?.instagramMid?.trim() || process.env.INSTAGRAM_MID || '',
       xAuthToken: s?.xAuthToken?.trim() || process.env.X_AUTH_TOKEN || '',
-      linkedinCookie: s?.linkedinCookie?.trim() || process.env.LINKEDIN_COOKIE || '',
+      linkedinCookie:
+        s?.linkedinCookie?.trim() || process.env.LINKEDIN_COOKIE || '',
       linkedinApiVersion:
         s?.linkedinApiVersion?.trim() || process.env.LINKEDIN_API_VERSION || '',
     };

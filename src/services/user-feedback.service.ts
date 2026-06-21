@@ -99,7 +99,11 @@ export class UserFeedbackService {
 
     const client = this.supabaseService.getServiceClient();
 
-    const { data: rows, error, count } = await client
+    const {
+      data: rows,
+      error,
+      count,
+    } = await client
       .from('user_feedback')
       .select('*', { count: 'exact' })
       .eq('user_id', userId)

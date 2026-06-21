@@ -39,7 +39,8 @@ export class PolarController {
       ? rawBodyBuffer.toString('utf8')
       : JSON.stringify(body ?? {});
 
-    const payloadForVerify = rawBodyBuffer ?? Buffer.from(rawBodyString, 'utf8');
+    const payloadForVerify =
+      rawBodyBuffer ?? Buffer.from(rawBodyString, 'utf8');
 
     const headers: Record<string, string> = {
       'webhook-id': webhookId || '',
@@ -58,11 +59,10 @@ export class PolarController {
     }
 
     try {
-      const event = validateEvent(
-        payloadForVerify,
-        headers,
-        webhookSecret,
-      ) as { type: string; data: Record<string, unknown> };
+      const event = validateEvent(payloadForVerify, headers, webhookSecret) as {
+        type: string;
+        data: Record<string, unknown>;
+      };
 
       await this.polarService.handleWebhook(event);
       return { success: true };

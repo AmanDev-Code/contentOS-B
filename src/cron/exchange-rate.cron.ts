@@ -42,7 +42,9 @@ export class ExchangeRateCronService {
     this.logger.log(`CRON Expression: 0 5 * * * (5 AM IST)`);
     this.logger.log(`Timezone: Asia/Kolkata (IST = UTC+5:30)`);
     this.logger.log(`UTC Time: ${new Date().toISOString()}`);
-    this.logger.log(`IST Time: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })}`);
+    this.logger.log(
+      `IST Time: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })}`,
+    );
 
     try {
       const startTime = Date.now();
@@ -52,12 +54,18 @@ export class ExchangeRateCronService {
       if (rates.length > 0) {
         // Find USD rate for logging
         const inrRate = rates.find((r) => r.target_currency === 'INR');
-        this.logger.log(`Successfully fetched ${rates.length} exchange rates in ${duration}ms`);
+        this.logger.log(
+          `Successfully fetched ${rates.length} exchange rates in ${duration}ms`,
+        );
         if (inrRate) {
-          this.logger.log(`USD/INR: 1 USD = ${inrRate.rate} INR (1 INR = ${(1 / inrRate.rate).toFixed(6)} USD)`);
+          this.logger.log(
+            `USD/INR: 1 USD = ${inrRate.rate} INR (1 INR = ${(1 / inrRate.rate).toFixed(6)} USD)`,
+          );
         }
       } else {
-        this.logger.warn('No exchange rates fetched - check FOREX_API_KEY configuration');
+        this.logger.warn(
+          'No exchange rates fetched - check FOREX_API_KEY configuration',
+        );
       }
     } catch (error) {
       this.logger.error('Failed to fetch daily exchange rates:', error.message);

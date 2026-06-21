@@ -91,7 +91,7 @@ export function debugLogCustomTopicPrompts(opts: {
         contentType: opts.contentType,
         textModel: opts.textModel,
         webResearch: opts.hasWebResearch
-          ? opts.webResearchMeta ?? { note: 'block present' }
+          ? (opts.webResearchMeta ?? { note: 'block present' })
           : null,
         systemChars: opts.system.length,
         userChars: opts.user.length,

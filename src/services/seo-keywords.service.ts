@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { SupabaseService } from './supabase.service';
 
 export interface SeoKeyword {
@@ -25,7 +30,10 @@ export interface SeoKeywordAssignment {
   weight: number;
   is_primary: boolean;
   created_at: string;
-  keyword?: Pick<SeoKeyword, 'id' | 'keyword' | 'normalized_keyword' | 'intent' | 'cluster' | 'status'>;
+  keyword?: Pick<
+    SeoKeyword,
+    'id' | 'keyword' | 'normalized_keyword' | 'intent' | 'cluster' | 'status'
+  >;
 }
 
 export interface CreateKeywordDto {
@@ -102,7 +110,12 @@ const INTENT_VALUES: SeoKeyword['intent'][] = [
   'transactional',
   'navigational',
 ];
-const STATUS_VALUES: SeoKeyword['status'][] = ['active', 'paused', 'archived', 'banned'];
+const STATUS_VALUES: SeoKeyword['status'][] = [
+  'active',
+  'paused',
+  'archived',
+  'banned',
+];
 
 function parseBulkIntent(v: unknown): SeoKeyword['intent'] {
   if (v === undefined || v === null || v === '') return 'informational';
@@ -150,7 +163,9 @@ export class SeoKeywordsService {
     return this.supabaseService.getServiceClient();
   }
 
-  async getAllKeywords(filters: KeywordFilters = {}): Promise<{ data: SeoKeyword[]; total: number }> {
+  async getAllKeywords(
+    filters: KeywordFilters = {},
+  ): Promise<{ data: SeoKeyword[]; total: number }> {
     const { status, cluster, intent, q, page = 1, limit = 50 } = filters;
     const offset = (page - 1) * limit;
 
@@ -196,12 +211,18 @@ export class SeoKeywordsService {
 
     if (error) {
       if (error.code === '23505') {
-        throw new BadRequestException(`Keyword already exists: "${normalized}"`);
+        throw new BadRequestException(
+          `Keyword already exists: "${normalized}"`,
+        );
       }
       throw new BadRequestException(error.message);
     }
 
-    await this.logChange('create', { keyword_id: data.id, keyword: data.keyword }, dto.actorId);
+    await this.logChange(
+      'create',
+      { keyword_id: data.id, keyword: data.keyword },
+      dto.actorId,
+    );
     return data;
   }
 
@@ -215,7 +236,8 @@ export class SeoKeywordsService {
       update['normalized_keyword'] = normalizeKeyword(cleaned);
     }
     if (dto.intent !== undefined) update['intent'] = dto.intent;
-    if (dto.cluster !== undefined) update['cluster'] = dto.cluster?.trim() || null;
+    if (dto.cluster !== undefined)
+      update['cluster'] = dto.cluster?.trim() || null;
     if (dto.priority !== undefined) update['priority'] = dto.priority;
     if (dto.language !== undefined) update['language'] = dto.language;
     if (dto.status !== undefined) update['status'] = dto.status;
@@ -229,12 +251,18 @@ export class SeoKeywordsService {
       .single();
 
     if (error) {
-      if (error.code === '23505') throw new BadRequestException('Keyword already exists');
-      if (error.code === 'PGRST116') throw new NotFoundException('Keyword not found');
+      if (error.code === '23505')
+        throw new BadRequestException('Keyword already exists');
+      if (error.code === 'PGRST116')
+        throw new NotFoundException('Keyword not found');
       throw new BadRequestException(error.message);
     }
 
-    await this.logChange('update', { keyword_id: id, changes: dto }, dto.actorId);
+    await this.logChange(
+      'update',
+      { keyword_id: id, changes: dto },
+      dto.actorId,
+    );
     return data;
   }
 
@@ -269,7 +297,8 @@ export class SeoKeywordsService {
     if (priority < 1) priority = 1;
     if (priority > 100) priority = 100;
     const language =
-      typeof options?.language === 'string' && options.language.trim().length > 0
+      typeof options?.language === 'string' &&
+      options.language.trim().length > 0
         ? options.language.trim()
         : 'en';
 
@@ -280,7 +309,11 @@ export class SeoKeywordsService {
         .filter((seg) => seg.length > 0),
     );
 
-    const resolved: { display: string; normalized: string; cluster: string | null }[] = [];
+    const resolved: {
+      display: string;
+      normalized: string;
+      cluster: string | null;
+    }[] = [];
     const seenNorm = new Set<string>();
     const errorsOut: string[] = [];
     let skippedInBatchDupes = 0;
@@ -301,7 +334,9 @@ export class SeoKeywordsService {
 
       let cluster: string | null;
       const lineSlug =
-        clusterSide !== undefined && clusterSide.length > 0 ? sanitizeClusterSlug(clusterSide) : null;
+        clusterSide !== undefined && clusterSide.length > 0
+          ? sanitizeClusterSlug(clusterSide)
+          : null;
       if (lineSlug) {
         cluster = lineSlug;
       } else {
@@ -361,7 +396,11 @@ export class SeoKeywordsService {
     return { created, skipped, errors: errorsOut };
   }
 
-  async bulkUpdateStatus(ids: string[], status: string, actorId?: string): Promise<number> {
+  async bulkUpdateStatus(
+    ids: string[],
+    status: string,
+    actorId?: string,
+  ): Promise<number> {
     const allowed = ['active', 'paused', 'archived', 'banned'];
     if (!allowed.includes(status)) {
       throw new BadRequestException(`Invalid status: ${status}`);
@@ -375,18 +414,29 @@ export class SeoKeywordsService {
 
     if (error) throw new BadRequestException(error.message);
 
-    await this.logChange('bulk_status', { ids, status, count: data?.length }, actorId);
+    await this.logChange(
+      'bulk_status',
+      { ids, status, count: data?.length },
+      actorId,
+    );
     return data?.length ?? 0;
   }
 
   /**
    * Permanently delete keywords (assignments cascade). Use with admin confirmation only.
    */
-  async bulkPermanentDelete(ids: string[], actorId?: string): Promise<{ deleted: number }> {
+  async bulkPermanentDelete(
+    ids: string[],
+    actorId?: string,
+  ): Promise<{ deleted: number }> {
     if (!Array.isArray(ids) || ids.length === 0) {
       throw new BadRequestException('ids must be a non-empty array');
     }
-    const { data, error } = await this.client.from('seo_keywords').delete().in('id', ids).select('id');
+    const { data, error } = await this.client
+      .from('seo_keywords')
+      .delete()
+      .in('id', ids)
+      .select('id');
     if (error) throw new BadRequestException(error.message);
     const deleted = data?.length ?? 0;
     await this.logChange('bulk_permanent_delete', { ids, deleted }, actorId);
@@ -409,7 +459,9 @@ export class SeoKeywordsService {
    * Public site metadata: first active keyword for this route, honoring primary/weight order.
    * Used by `/blog/page-seo` — no auth; only returns the cleaned phrase, not internal IDs.
    */
-  async getPublicPrimaryRouteKeyword(normalizedRoutePath: string): Promise<string | null> {
+  async getPublicPrimaryRouteKeyword(
+    normalizedRoutePath: string,
+  ): Promise<string | null> {
     const r = this.normalizeMarketingRoutePath(normalizedRoutePath);
     const { data, error } = await this.client
       .from('seo_keyword_assignments')
@@ -432,10 +484,15 @@ export class SeoKeywordsService {
     return null;
   }
 
-  async getAssignments(targetType: string, targetRef: string): Promise<SeoKeywordAssignment[]> {
+  async getAssignments(
+    targetType: string,
+    targetRef: string,
+  ): Promise<SeoKeywordAssignment[]> {
     const { data, error } = await this.client
       .from('seo_keyword_assignments')
-      .select('*, keyword:seo_keywords(id, keyword, normalized_keyword, intent, cluster, status)')
+      .select(
+        '*, keyword:seo_keywords(id, keyword, normalized_keyword, intent, cluster, status)',
+      )
       .eq('target_type', targetType)
       .eq('target_ref', targetRef)
       .order('is_primary', { ascending: false })
@@ -445,7 +502,9 @@ export class SeoKeywordsService {
     return (data ?? []) as SeoKeywordAssignment[];
   }
 
-  async upsertAssignment(dto: UpsertAssignmentDto): Promise<SeoKeywordAssignment> {
+  async upsertAssignment(
+    dto: UpsertAssignmentDto,
+  ): Promise<SeoKeywordAssignment> {
     const { data, error } = await this.client
       .from('seo_keyword_assignments')
       .upsert(
@@ -458,19 +517,26 @@ export class SeoKeywordsService {
         },
         { onConflict: 'keyword_id,target_type,target_ref' },
       )
-      .select('*, keyword:seo_keywords(id, keyword, normalized_keyword, intent, cluster, status)')
+      .select(
+        '*, keyword:seo_keywords(id, keyword, normalized_keyword, intent, cluster, status)',
+      )
       .single();
 
     if (error) throw new BadRequestException(error.message);
     return data as SeoKeywordAssignment;
   }
 
-  async bulkUpsertAssignments(dto: BulkUpsertAssignmentsDto, actorId?: string): Promise<{ upserted: number }> {
+  async bulkUpsertAssignments(
+    dto: BulkUpsertAssignmentsDto,
+    actorId?: string,
+  ): Promise<{ upserted: number }> {
     const rawIds = dto.keyword_ids;
     if (!Array.isArray(rawIds) || rawIds.length === 0) {
       throw new BadRequestException('keyword_ids must be a non-empty array');
     }
-    const keyword_ids = [...new Set(rawIds.map((id) => String(id).trim()).filter(Boolean))];
+    const keyword_ids = [
+      ...new Set(rawIds.map((id) => String(id).trim()).filter(Boolean)),
+    ];
     if (keyword_ids.length > 500) {
       throw new BadRequestException('Max 500 keywords per bulk assign');
     }
@@ -491,7 +557,9 @@ export class SeoKeywordsService {
 
     const primary = dto.primary_keyword_id?.trim() || null;
     if (primary && !keyword_ids.includes(primary)) {
-      throw new BadRequestException('primary_keyword_id must be included in keyword_ids');
+      throw new BadRequestException(
+        'primary_keyword_id must be included in keyword_ids',
+      );
     }
 
     const weight = dto.weight ?? 50;
@@ -514,15 +582,22 @@ export class SeoKeywordsService {
       is_primary: primary === keyword_id,
     }));
 
-    const { error } = await this.client.from('seo_keyword_assignments').upsert(rows, {
-      onConflict: 'keyword_id,target_type,target_ref',
-    });
+    const { error } = await this.client
+      .from('seo_keyword_assignments')
+      .upsert(rows, {
+        onConflict: 'keyword_id,target_type,target_ref',
+      });
 
     if (error) throw new BadRequestException(error.message);
 
     await this.logChange(
       'bulk_assign',
-      { target_type, target_ref, upserted: keyword_ids.length, primary_keyword_id: primary },
+      {
+        target_type,
+        target_ref,
+        upserted: keyword_ids.length,
+        primary_keyword_id: primary,
+      },
       actorId,
     );
 
@@ -538,7 +613,9 @@ export class SeoKeywordsService {
     if (error) throw new BadRequestException(error.message);
   }
 
-  async getClusters(): Promise<{ cluster: string; count: number; active: number; paused: number }[]> {
+  async getClusters(): Promise<
+    { cluster: string; count: number; active: number; paused: number }[]
+  > {
     const { data, error } = await this.client
       .from('seo_keywords')
       .select('cluster, status')
@@ -546,7 +623,10 @@ export class SeoKeywordsService {
 
     if (error) throw new BadRequestException(error.message);
 
-    const map = new Map<string, { count: number; active: number; paused: number }>();
+    const map = new Map<
+      string,
+      { count: number; active: number; paused: number }
+    >();
     for (const row of data ?? []) {
       if (!row.cluster) continue;
       const entry = map.get(row.cluster) ?? { count: 0, active: 0, paused: 0 };
@@ -561,7 +641,11 @@ export class SeoKeywordsService {
       .sort((a, b) => b.count - a.count);
   }
 
-  async logChange(action: string, payload: unknown, actorId?: string): Promise<void> {
+  async logChange(
+    action: string,
+    payload: unknown,
+    actorId?: string,
+  ): Promise<void> {
     const { error } = await this.client.from('seo_keyword_changes').insert({
       action,
       payload,

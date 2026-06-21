@@ -212,7 +212,10 @@ export class CustomTopicGenerationService {
     // Always best-effort; on any failure the original topic is used unchanged.
     const originalTopic = input.topic;
     const formattedPrompt = await this.promptFormatter.format(originalTopic);
-    if (formattedPrompt.formatted && formattedPrompt.cleaned !== originalTopic) {
+    if (
+      formattedPrompt.formatted &&
+      formattedPrompt.cleaned !== originalTopic
+    ) {
       input.topic = formattedPrompt.cleaned;
       this.logger.log(
         `Prompt formatted: "${originalTopic.slice(0, 60)}..." -> "${formattedPrompt.cleaned.slice(0, 60)}..."`,
@@ -767,9 +770,11 @@ export class CustomTopicGenerationService {
     if (paras.length <= 2) return paras.join('\n\n');
 
     const wordCount = (p: string) => p.split(/\s+/).filter(Boolean).length;
-    const sentenceCount = (p: string) => (p.match(/[.!?]+(\s|$)/g) || []).length || 1;
+    const sentenceCount = (p: string) =>
+      (p.match(/[.!?]+(\s|$)/g) || []).length || 1;
     // A paragraph is a candidate for merging only if it's a single short line.
-    const isShortSingle = (p: string) => !p.includes('\n') && wordCount(p) <= 18;
+    const isShortSingle = (p: string) =>
+      !p.includes('\n') && wordCount(p) <= 18;
     const endsWithQuestion = (p: string) => /\?\s*$/.test(p);
 
     const out: string[] = [];
@@ -995,7 +1000,10 @@ export class CustomTopicGenerationService {
       );
     }
 
-    const retryResult = safeParseCustomTopicPostOutput(retry.parsed, contentType);
+    const retryResult = safeParseCustomTopicPostOutput(
+      retry.parsed,
+      contentType,
+    );
 
     if (retryResult.success) {
       return { output: retryResult.data, model: retry.model };
@@ -1020,10 +1028,14 @@ export class CustomTopicGenerationService {
 
     const compressUser = `Previous output to compress:\n${JSON.stringify(current)}`;
 
-    const { parsed: rawJson } = await this.callOpenAI(compressSystem, compressUser, {
-      maxTokens: contentType === 'carousel' ? 8192 : 4096,
-      model: textModel,
-    });
+    const { parsed: rawJson } = await this.callOpenAI(
+      compressSystem,
+      compressUser,
+      {
+        maxTokens: contentType === 'carousel' ? 8192 : 4096,
+        model: textModel,
+      },
+    );
     if (rawJson === null) {
       throw new SchemaValidationError(
         'Compression retry returned invalid JSON',
@@ -1170,7 +1182,7 @@ export class CustomTopicGenerationService {
         programmingModeEffective,
         noteDensity,
         scaffoldFullNotebookPages,
-      }) as CarouselPostOutput['slides'];
+      });
       postOutput.slides = slides;
       issues = runAnalyze();
       if (issues.length === 0) {
@@ -1224,7 +1236,7 @@ export class CustomTopicGenerationService {
         programmingModeEffective,
         noteDensity,
         scaffoldFullNotebookPages,
-      }) as CarouselPostOutput['slides'];
+      });
       postOutput.slides = slides;
     }
 
@@ -1404,13 +1416,16 @@ export class CustomTopicGenerationService {
     });
 
     while (
-      linkedInCommentaryLength(formatted, hashtags) > LINKEDIN_MAX_TEXT_LENGTH &&
+      linkedInCommentaryLength(formatted, hashtags) >
+        LINKEDIN_MAX_TEXT_LENGTH &&
       formatted.length > 0
     ) {
       formatted = formatted.slice(0, -1).trimEnd();
     }
 
-    if (linkedInCommentaryLength(formatted, hashtags) > LINKEDIN_MAX_TEXT_LENGTH) {
+    if (
+      linkedInCommentaryLength(formatted, hashtags) > LINKEDIN_MAX_TEXT_LENGTH
+    ) {
       formatted = formatted.slice(0, 2997) + '...';
     }
 
@@ -1513,7 +1528,7 @@ export class CustomTopicGenerationService {
             '--- AUTHOR CONTEXT (from their published posts — mirror themes/mood, do not copy text) ---',
             raw.replace(
               'write the new post so it feels like the same',
-              'illustrate a scene that feels like the same author\'s world',
+              "illustrate a scene that feels like the same author's world",
             ),
             'Use this only to inform visual mood and subject matter for the image.',
             '--- END AUTHOR CONTEXT ---',
@@ -1536,7 +1551,10 @@ export class CustomTopicGenerationService {
         `- Variation nonce (force uniqueness): ${params.variationNonce}`,
       ].join('\n');
 
-      const userParts = [`TOPIC:\n${topic}`, `CAPTION:\n${caption.slice(0, 2200)}`];
+      const userParts = [
+        `TOPIC:\n${topic}`,
+        `CAPTION:\n${caption.slice(0, 2200)}`,
+      ];
       if (vocabularyBlock) userParts.push(vocabularyBlock);
       if (pastPostsBlock) userParts.push(pastPostsBlock);
 

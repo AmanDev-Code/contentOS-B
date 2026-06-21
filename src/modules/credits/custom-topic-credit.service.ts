@@ -1,10 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QuotaService } from '../../services/quota.service';
 import { NotificationService } from '../../services/notification.service';
-import {
-  CUSTOM_TOPIC_PRICING,
-  CreditSlice,
-} from './pricing';
+import { CUSTOM_TOPIC_PRICING, CreditSlice } from './pricing';
 
 @Injectable()
 export class CustomTopicCreditService {

@@ -14,11 +14,22 @@
 //     of secrets stays inside the token-vault service (Sprint 1.3) and out of
 //     the provider surface.
 
-export type Platform = 'linkedin' | 'x' | 'instagram' | 'threads' | 'facebook' | 'youtube' | 'tiktok';
+export type Platform =
+  | 'linkedin'
+  | 'x'
+  | 'instagram'
+  | 'threads'
+  | 'facebook'
+  | 'youtube'
+  | 'tiktok';
 
 export const SUPPORTED_PLATFORMS: readonly Platform[] = ['linkedin'] as const;
 
-export type IntegrationStatus = 'active' | 'reauth_required' | 'disabled' | 'deleted';
+export type IntegrationStatus =
+  | 'active'
+  | 'reauth_required'
+  | 'disabled'
+  | 'deleted';
 
 export type AccountType = 'personal' | 'organization';
 
@@ -129,7 +140,11 @@ export class AuthFailedError extends ProviderError {
 export class ScopeInsufficientError extends ProviderError {
   public readonly missingScopes: readonly string[];
 
-  public constructor(message: string, missingScopes: readonly string[], context: ProviderErrorContext = {}) {
+  public constructor(
+    message: string,
+    missingScopes: readonly string[],
+    context: ProviderErrorContext = {},
+  ) {
     super(message, context);
     this.missingScopes = Object.freeze([...missingScopes]);
   }
@@ -142,7 +157,10 @@ export class RateLimitError extends ProviderError {
 }
 
 export class RefreshRequiredError extends ProviderError {
-  public constructor(message: string = 'Access token expired or rejected; refresh required', context: ProviderErrorContext = {}) {
+  public constructor(
+    message: string = 'Access token expired or rejected; refresh required',
+    context: ProviderErrorContext = {},
+  ) {
     super(message, context);
   }
 }

@@ -228,7 +228,9 @@ export class CareersService {
       .select('id')
       .single();
     if (appErr || !appRow) {
-      throw new BadRequestException(appErr?.message || 'Failed to save application');
+      throw new BadRequestException(
+        appErr?.message || 'Failed to save application',
+      );
     }
     const applicationId = appRow.id as string;
 
@@ -250,20 +252,27 @@ export class CareersService {
         .slice(0, 120);
       const minioPath = `career-applications/${applicationId}/${Date.now()}-${safeName}`;
       const mime = att.mime_type || 'application/octet-stream';
-      await this.minioService.uploadFile(this.getBucket(), minioPath, buf, mime);
+      await this.minioService.uploadFile(
+        this.getBucket(),
+        minioPath,
+        buf,
+        mime,
+      );
       const publicUrl = await this.minioService.getPublicUrl(
         this.getBucket(),
         minioPath,
       );
-      const { error: fErr } = await client.from('job_application_files').insert({
-        application_id: applicationId,
-        purpose: att.purpose.slice(0, 120),
-        original_name: att.filename.slice(0, 240),
-        mime_type: mime,
-        size_bytes: buf.length,
-        minio_path: minioPath,
-        public_url: publicUrl,
-      });
+      const { error: fErr } = await client
+        .from('job_application_files')
+        .insert({
+          application_id: applicationId,
+          purpose: att.purpose.slice(0, 120),
+          original_name: att.filename.slice(0, 240),
+          mime_type: mime,
+          size_bytes: buf.length,
+          minio_path: minioPath,
+          public_url: publicUrl,
+        });
       if (fErr) {
         this.logger.error(`job_application_files insert: ${fErr.message}`);
         throw new BadRequestException('Failed to store attachment');
@@ -325,7 +334,7 @@ export class CareersService {
         equity_notes: input.equity_notes?.trim() || null,
         visa_sponsorship: Boolean(input.visa_sponsorship),
         application_deadline: input.application_deadline || null,
-        status: (input.status || 'draft') as JobStatus,
+        status: input.status || 'draft',
         scheduled_publish_at: input.scheduled_publish_at || null,
         display_order: input.display_order ?? 0,
         created_by: userId,
@@ -371,7 +380,8 @@ export class CareersService {
     if (input.title !== undefined) assign('title', input.title.trim());
     if (input.slug !== undefined) assign('slug', input.slug.trim());
     if (input.category !== undefined) assign('category', input.category.trim());
-    if (input.location !== undefined) assign('location', input.location?.trim() || null);
+    if (input.location !== undefined)
+      assign('location', input.location?.trim() || null);
     if (input.employment_type !== undefined)
       assign('employment_type', input.employment_type);
     if (input.remote_option !== undefined)
@@ -414,7 +424,10 @@ export class CareersService {
       assign('scheduled_publish_at', input.scheduled_publish_at || null);
     }
 
-    const { error } = await client.from('job_postings').update(patch).eq('id', id);
+    const { error } = await client
+      .from('job_postings')
+      .update(patch)
+      .eq('id', id);
     if (error) throw new BadRequestException(error.message);
 
     if (input.questions) {
@@ -452,20 +465,21 @@ export class CareersService {
 
   async listApplications(jobId: string) {
     const client = this.supabaseService.getServiceClient();
-    const [{ data: qrows, error: qErr }, { data: apps, error }] = await Promise.all([
-      client
-        .from('job_questions')
-        .select('id, sort_order, prompt, question_type, required, options')
-        .eq('job_id', jobId)
-        .order('sort_order', { ascending: true }),
-      client
-        .from('job_applications')
-        .select(
-          'id, full_name, email, phone, location, linkedin_url, portfolio_url, cover_letter, answers, status, created_at',
-        )
-        .eq('job_id', jobId)
-        .order('created_at', { ascending: false }),
-    ]);
+    const [{ data: qrows, error: qErr }, { data: apps, error }] =
+      await Promise.all([
+        client
+          .from('job_questions')
+          .select('id, sort_order, prompt, question_type, required, options')
+          .eq('job_id', jobId)
+          .order('sort_order', { ascending: true }),
+        client
+          .from('job_applications')
+          .select(
+            'id, full_name, email, phone, location, linkedin_url, portfolio_url, cover_letter, answers, status, created_at',
+          )
+          .eq('job_id', jobId)
+          .order('created_at', { ascending: false }),
+      ]);
     if (qErr) throw new BadRequestException(qErr.message);
     if (error) throw new BadRequestException(error.message);
     const questions = qrows || [];

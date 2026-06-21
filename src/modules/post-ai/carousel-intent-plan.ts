@@ -25,7 +25,9 @@ export function buildCarouselOutlineSystemPrompt(slideCount: number): string {
     'You ONLY output JSON for carousel lesson planning.',
     `The user carousel will contain exactly ${slideCount} slides.`,
     'Infer subject, intended audience, and depth from Topic line.',
-    'slides[] must have EXACTLY ' + `${slideCount} entries` + ', indices 1..N in order, unique titles.',
+    'slides[] must have EXACTLY ' +
+      `${slideCount} entries` +
+      ', indices 1..N in order, unique titles.',
     'Each learnerObjective names what the viewer should master on that slide (one sentence).',
     'pedagogicalArc: 2 sentences on how slides progress.',
     '',

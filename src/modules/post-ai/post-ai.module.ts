@@ -6,9 +6,7 @@ import { TrendingTagsService } from '../../services/trending-tags.service';
 
 @Module({
   imports: [ConfigModule],
-  providers: [
-    CustomTopicGenerationService,
-  ],
+  providers: [CustomTopicGenerationService],
   exports: [CustomTopicGenerationService],
 })
 export class PostAiModule {}

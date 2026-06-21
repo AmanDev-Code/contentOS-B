@@ -36,15 +36,24 @@ function padLine(seed: string, topicBits: string, minLen = 64): string {
   if (base.length >= minLen) return base;
   const filler = ` ${topicBits} — sketch a 2–3 line example, name the invariant, then check edge cases before coding.`;
   const out = (base + filler).replace(/\s+/g, ' ').trim();
-  return out.length >= minLen ? out.slice(0, 190) : (out + ' ' + topicBits).slice(0, 190);
+  return out.length >= minLen
+    ? out.slice(0, 190)
+    : (out + ' ' + topicBits).slice(0, 190);
 }
 
 function ensureProgrammingHeadings(
-  sections: Array<{ subheading?: string; lines: string[]; bulletItems?: string[] }>,
+  sections: Array<{
+    subheading?: string;
+    lines: string[];
+    bulletItems?: string[];
+  }>,
   slideTitle: string,
   topicBits: string,
 ): void {
-  const merged = sections.map((s) => `${s.subheading || ''}`).join(' ').toLowerCase();
+  const merged = sections
+    .map((s) => `${s.subheading || ''}`)
+    .join(' ')
+    .toLowerCase();
   const needConcept = !/\bconcept|definition|what\b/.test(merged);
   const needPitfall = !/\bpitfall|mistake|watch|gotcha|trap\b/.test(merged);
   const needComplexity = !/\bcomplexity|big-? ?o|perf|latency\b/.test(merged);
@@ -55,8 +64,10 @@ function ensureProgrammingHeadings(
     const sh = (sec.subheading || '').trim();
     if (!sh) {
       if (needConcept && i === 0) sec.subheading = 'Concept · what this means';
-      else if (needPitfall && i === 1) sec.subheading = 'Pitfalls · common mistakes';
-      else if (needComplexity && i % 2 === 0) sec.subheading = 'Complexity · Big-O interview cue';
+      else if (needPitfall && i === 1)
+        sec.subheading = 'Pitfalls · common mistakes';
+      else if (needComplexity && i % 2 === 0)
+        sec.subheading = 'Complexity · Big-O interview cue';
       else if (needJava) sec.subheading = 'Java / example sketch';
     }
     i++;
@@ -88,12 +99,15 @@ export function expandSparseCarouselSlides(
     scaffoldFullNotebookPages: boolean;
   },
 ): ExpandableCarouselSlide[] {
-  const topicBits = topicKeywords(opts.topicLower).join(' · ') || 'your study topic';
+  const topicBits =
+    topicKeywords(opts.topicLower).join(' · ') || 'your study topic';
   const dense = opts.noteDensity === 'dense';
   const scaffold = opts.scaffoldFullNotebookPages;
 
   return slides.map((slide, idx) => {
-    const s: ExpandableCarouselSlide = JSON.parse(JSON.stringify(slide)) as ExpandableCarouselSlide;
+    const s: ExpandableCarouselSlide = JSON.parse(
+      JSON.stringify(slide),
+    ) as ExpandableCarouselSlide;
     const slideTag = `slide ${idx + 1}`;
     const title = (s.title || `Slide ${idx + 1}`).trim();
     const body = (s.body || '').trim();
@@ -152,7 +166,11 @@ export function expandSparseCarouselSlides(
       }
     }
 
-    if (scaffold && opts.programmingModeEffective && s.notebookSections?.length) {
+    if (
+      scaffold &&
+      opts.programmingModeEffective &&
+      s.notebookSections?.length
+    ) {
       ensureProgrammingHeadings(s.notebookSections, title, topicBits);
       const hasCode = (s.codeSnippets || []).some((c) => c.trim().length > 6);
       if (!hasCode) {
@@ -163,7 +181,11 @@ export function expandSparseCarouselSlides(
       }
     }
 
-    const margin = [...((s.marginNotes as string[]) || []).map((m) => m.trim()).filter(Boolean)];
+    const margin = [
+      ...((s.marginNotes as string[]) || [])
+        .map((m) => m.trim())
+        .filter(Boolean),
+    ];
     const substantive = (m: string) => m.length > 12;
     if (scaffold) {
       while (margin.filter(substantive).length < 2) {
@@ -202,7 +224,11 @@ export function expandSparseCarouselSlides(
       s.body =
         padLine(body, topicBits, 100) +
         ' ' +
-        padLine(`Bridge (${slideTag}): connect this slide to the broader ${topicBits} arc.`, topicBits, 80);
+        padLine(
+          `Bridge (${slideTag}): connect this slide to the broader ${topicBits} arc.`,
+          topicBits,
+          80,
+        );
     }
 
     return s;

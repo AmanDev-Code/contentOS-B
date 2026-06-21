@@ -23,13 +23,11 @@ export class PlatformAdminFeedbackController {
     const p = page ? parseInt(page, 10) : 1;
     const l = limit ? parseInt(limit, 10) : 20;
     const r =
-      rating !== undefined && rating !== ''
-        ? parseInt(rating, 10)
-        : undefined;
+      rating !== undefined && rating !== '' ? parseInt(rating, 10) : undefined;
     return this.feedbackService.adminListFeedback({
       page: p,
       limit: l,
-      rating: Number.isFinite(r as number) ? r : undefined,
+      rating: Number.isFinite(r) ? r : undefined,
       cacheBuster: refresh === '1' || refresh === 'true',
     });
   }

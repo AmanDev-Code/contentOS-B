@@ -109,7 +109,7 @@ export class OpenAIRateLimiterService implements OnModuleInit {
       const request: QueuedRequest<T> = {
         userId,
         fn,
-        resolve: resolve as (value: unknown) => void,
+        resolve: resolve,
         reject,
         enqueuedAt: Date.now(),
         retryCount: 0,
@@ -137,10 +137,13 @@ export class OpenAIRateLimiterService implements OnModuleInit {
         lastError = error instanceof Error ? error : new Error(String(error));
 
         if (this.isRateLimitError(lastError)) {
-          const backoffMs = this.backoffDelays[Math.min(attempt, this.backoffDelays.length - 1)];
+          const backoffMs =
+            this.backoffDelays[
+              Math.min(attempt, this.backoffDelays.length - 1)
+            ];
           this.logger.warn(
             `OpenAI rate limit hit (attempt ${attempt + 1}/${this.maxRetries + 1}), ` +
-            `backing off ${backoffMs}ms. Context: ${context || 'unknown'}`,
+              `backing off ${backoffMs}ms. Context: ${context || 'unknown'}`,
           );
 
           // Set global backoff to help all users
@@ -197,7 +200,7 @@ export class OpenAIRateLimiterService implements OnModuleInit {
       userQueue = { requests: [], lastProcessedAt: 0 };
       this.userQueues.set(request.userId, userQueue);
     }
-    userQueue.requests.push(request as QueuedRequest<unknown>);
+    userQueue.requests.push(request);
   }
 
   private async processQueue(): Promise<void> {
@@ -220,7 +223,9 @@ export class OpenAIRateLimiterService implements OnModuleInit {
         const waitTime = now - request.enqueuedAt;
         if (waitTime > this.maxQueueTimeMs) {
           request.reject(
-            new Error(`OpenAI request timed out in queue after ${Math.round(waitTime / 1000)}s`),
+            new Error(
+              `OpenAI request timed out in queue after ${Math.round(waitTime / 1000)}s`,
+            ),
           );
           continue;
         }
@@ -283,11 +288,14 @@ export class OpenAIRateLimiterService implements OnModuleInit {
       if (this.isRateLimitError(err) && request.retryCount < this.maxRetries) {
         // Re-queue with backoff
         request.retryCount++;
-        const backoffMs = this.backoffDelays[Math.min(request.retryCount - 1, this.backoffDelays.length - 1)];
+        const backoffMs =
+          this.backoffDelays[
+            Math.min(request.retryCount - 1, this.backoffDelays.length - 1)
+          ];
 
         this.logger.warn(
           `OpenAI rate limit, re-queuing (retry ${request.retryCount}/${this.maxRetries}) ` +
-          `with ${backoffMs}ms delay. userId=${request.userId}`,
+            `with ${backoffMs}ms delay. userId=${request.userId}`,
         );
 
         // Set global backoff
@@ -331,7 +339,9 @@ export class OpenAIRateLimiterService implements OnModuleInit {
         const age = now - req.enqueuedAt;
         if (age > this.maxQueueTimeMs) {
           req.reject(
-            new Error(`OpenAI request expired in queue after ${Math.round(age / 1000)}s`),
+            new Error(
+              `OpenAI request expired in queue after ${Math.round(age / 1000)}s`,
+            ),
           );
           return false;
         }
@@ -345,7 +355,9 @@ export class OpenAIRateLimiterService implements OnModuleInit {
     }
 
     if (cleaned > 0) {
-      this.logger.warn(`Cleaned up ${cleaned} stale OpenAI requests from queue`);
+      this.logger.warn(
+        `Cleaned up ${cleaned} stale OpenAI requests from queue`,
+      );
     }
   }
 

@@ -47,7 +47,9 @@ export class ScraperEventLogService {
     let errors = 0;
     let lastErrorAt: string | undefined;
     for (const e of this.events) {
-      const bucket = byPlatform[e.platform] || (byPlatform[e.platform] = { ok: 0, errors: 0 });
+      const bucket =
+        byPlatform[e.platform] ||
+        (byPlatform[e.platform] = { ok: 0, errors: 0 });
       if (e.status === 'ok') {
         ok += 1;
         bucket.ok += 1;

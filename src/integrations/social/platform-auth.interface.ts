@@ -14,9 +14,15 @@ export interface AuthorizationUrlResult {
 }
 
 export interface PlatformAuth {
-  getAuthorizationUrl(state: string, scopes: readonly string[]): Promise<AuthorizationUrlResult>;
+  getAuthorizationUrl(
+    state: string,
+    scopes: readonly string[],
+  ): Promise<AuthorizationUrlResult>;
 
-  exchangeCodeForTokens(code: string, codeVerifier?: string): Promise<OAuthTokenSet>;
+  exchangeCodeForTokens(
+    code: string,
+    codeVerifier?: string,
+  ): Promise<OAuthTokenSet>;
 
   refreshTokens(refreshToken: string): Promise<OAuthTokenSet>;
 
@@ -24,7 +30,10 @@ export interface PlatformAuth {
   // Local revocation of stored tokens is the caller's responsibility.
   revokeTokens(accessToken: string): Promise<void>;
 
-  validateScopes(granted: readonly string[], required: readonly string[]): ScopeValidation;
+  validateScopes(
+    granted: readonly string[],
+    required: readonly string[],
+  ): ScopeValidation;
 
   getRequiredScopes(): readonly string[];
 }

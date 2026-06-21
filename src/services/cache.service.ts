@@ -15,9 +15,13 @@ export class CacheService implements OnModuleInit {
   async onModuleInit() {
     try {
       const redisPort = this.configService.get<number>('redis.port') || 6379;
-      const redisHost = this.configService.get<string>('redis.host') || 'localhost';
-      const redisPassword = this.configService.get<string>('redis.password') || undefined;
-      this.logger.log(`CacheService: Connecting to Redis at ${redisHost}:${redisPort}`);
+      const redisHost =
+        this.configService.get<string>('redis.host') || 'localhost';
+      const redisPassword =
+        this.configService.get<string>('redis.password') || undefined;
+      this.logger.log(
+        `CacheService: Connecting to Redis at ${redisHost}:${redisPort}`,
+      );
       this.redis = new Redis({
         host: redisHost,
         port: redisPort,

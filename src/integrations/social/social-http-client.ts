@@ -79,7 +79,9 @@ export class SocialHttpClient {
   private readonly maxBackoffMs: number;
 
   public constructor(private readonly options: SocialHttpClientOptions) {
-    this.logger = new Logger(`${SocialHttpClient.name}:${options.errorMap.platform}`);
+    this.logger = new Logger(
+      `${SocialHttpClient.name}:${options.errorMap.platform}`,
+    );
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.sleep = options.sleep ?? defaultSleep;
     this.maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
@@ -107,9 +109,15 @@ export class SocialHttpClient {
         throw handled.error;
       } catch (err) {
         lastError = err;
-        if (err instanceof RateLimitError || err instanceof PlatformInternalError) {
+        if (
+          err instanceof RateLimitError ||
+          err instanceof PlatformInternalError
+        ) {
           if (attempt < this.maxAttempts) {
-            const delay = this.backoffFor(attempt, err.context.retryAfterSeconds);
+            const delay = this.backoffFor(
+              attempt,
+              err.context.retryAfterSeconds,
+            );
             await this.sleep(delay);
             continue;
           }
@@ -158,7 +166,9 @@ export class SocialHttpClient {
   private async classify(
     response: HttpResponse,
     attempt: number,
-  ): Promise<{ kind: 'retry'; delayMs: number } | { kind: 'fail'; error: ProviderError }> {
+  ): Promise<
+    { kind: 'retry'; delayMs: number } | { kind: 'fail'; error: ProviderError }
+  > {
     let parsedBody: unknown;
     try {
       parsedBody = await response.json();
@@ -180,24 +190,40 @@ export class SocialHttpClient {
     };
 
     for (const entry of this.options.errorMap.entries) {
-      const mapped = entry.classify(response.status, platformErrorCode, parsedBody);
+      const mapped = entry.classify(
+        response.status,
+        platformErrorCode,
+        parsedBody,
+      );
       if (mapped) {
         return this.maybeRetry(mapped, attempt);
       }
     }
 
     if (response.status === 401) {
-      return this.maybeRetry(new RefreshRequiredError(undefined, context), attempt);
+      return this.maybeRetry(
+        new RefreshRequiredError(undefined, context),
+        attempt,
+      );
     }
     if (response.status === 403) {
-      return { kind: 'fail', error: new AuthFailedError(`Forbidden (HTTP 403)`, context) };
+      return {
+        kind: 'fail',
+        error: new AuthFailedError(`Forbidden (HTTP 403)`, context),
+      };
     }
     if (response.status === 429) {
-      return this.maybeRetry(new RateLimitError(`Rate limited (HTTP 429)`, context), attempt);
+      return this.maybeRetry(
+        new RateLimitError(`Rate limited (HTTP 429)`, context),
+        attempt,
+      );
     }
     if (response.status >= 500) {
       return this.maybeRetry(
-        new PlatformInternalError(`Upstream error (HTTP ${response.status})`, context),
+        new PlatformInternalError(
+          `Upstream error (HTTP ${response.status})`,
+          context,
+        ),
         attempt,
       );
     }
@@ -223,8 +249,11 @@ export class SocialHttpClient {
   private maybeRetry(
     error: ProviderError,
     attempt: number,
-  ): { kind: 'retry'; delayMs: number } | { kind: 'fail'; error: ProviderError } {
-    const isRetryable = error instanceof RateLimitError || error instanceof PlatformInternalError;
+  ):
+    | { kind: 'retry'; delayMs: number }
+    | { kind: 'fail'; error: ProviderError } {
+    const isRetryable =
+      error instanceof RateLimitError || error instanceof PlatformInternalError;
     if (isRetryable && attempt < this.maxAttempts) {
       return {
         kind: 'retry',
@@ -259,7 +288,8 @@ export class SocialHttpClient {
   private extractPlatformErrorCode(body: unknown): string | undefined {
     if (body == null || typeof body !== 'object') return undefined;
     const candidate = body as Record<string, unknown>;
-    const direct = candidate['code'] ?? candidate['errorCode'] ?? candidate['error_code'];
+    const direct =
+      candidate['code'] ?? candidate['errorCode'] ?? candidate['error_code'];
     if (typeof direct === 'string') return direct;
     if (typeof direct === 'number') return String(direct);
     const nested = candidate['error'];

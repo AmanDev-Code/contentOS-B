@@ -54,10 +54,7 @@ export class PostsV1Controller {
   @Post()
   @RequireApiScope('posts:write')
   @ApiOperation({ summary: 'Create a post (publish now or schedule)' })
-  async create(
-    @Request() req: ApiAuthedRequest,
-    @Body() body: CreatePostBody,
-  ) {
+  async create(@Request() req: ApiAuthedRequest, @Body() body: CreatePostBody) {
     try {
       return await this.postsService.createPost({
         userId: req.user.id,

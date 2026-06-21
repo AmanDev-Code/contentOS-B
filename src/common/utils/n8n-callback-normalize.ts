@@ -63,7 +63,9 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
   const hashtags = (root.hashtags as string[] | undefined) || undefined;
 
   if (post) {
-    const visualType = String(visual?.type ?? '').trim().toLowerCase();
+    const visualType = String(visual?.type ?? '')
+      .trim()
+      .toLowerCase();
     const rawSlides = Array.isArray(visual?.carouselSlides)
       ? (visual.carouselSlides as Array<Record<string, unknown>>)
       : [];
@@ -107,8 +109,7 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
     const performancePrediction: Record<string, unknown> = {
       source: 'n8n-post',
       visualType: visualType || undefined,
-      visualStyle:
-        typeof visual?.style === 'string' ? visual.style : undefined,
+      visualStyle: typeof visual?.style === 'string' ? visual.style : undefined,
       slides: slides.length > 0 ? slides : undefined,
       postMeta: {
         link: typeof post.link === 'string' ? post.link : undefined,
@@ -146,8 +147,12 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
     // Accept payloads where n8n returns topics list instead of content object.
     const topicsRaw =
       (Array.isArray(root.topics) ? root.topics : undefined) ||
-      (Array.isArray((root.data as any)?.topics) ? (root.data as any).topics : undefined) ||
-      (Array.isArray((root.output as any)?.topics) ? (root.output as any).topics : undefined);
+      (Array.isArray((root.data as any)?.topics)
+        ? (root.data as any).topics
+        : undefined) ||
+      (Array.isArray((root.output as any)?.topics)
+        ? (root.output as any).topics
+        : undefined);
 
     if (Array.isArray(topicsRaw) && topicsRaw.length > 0) {
       const topicLines = topicsRaw
@@ -156,7 +161,9 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
           if (typeof topic === 'string') {
             return `${idx + 1}. ${topic.trim()}`;
           }
-          const title = String(topic?.title || topic?.topic || topic?.name || '').trim();
+          const title = String(
+            topic?.title || topic?.topic || topic?.name || '',
+          ).trim();
           const reason = String(topic?.reason || topic?.why || '').trim();
           if (title && reason) return `${idx + 1}. ${title} — ${reason}`;
           if (title) return `${idx + 1}. ${title}`;
@@ -164,10 +171,8 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
         })
         .join('\n');
 
-      const synthesizedContent = `Here are current viral topic ideas:\n\n${topicLines}`.slice(
-        0,
-        5000,
-      );
+      const synthesizedContent =
+        `Here are current viral topic ideas:\n\n${topicLines}`.slice(0, 5000);
 
       return {
         jobId,
@@ -184,7 +189,9 @@ export function normalizeN8nCallbackBody(raw: unknown): NormalizedN8nCallback {
       };
     }
 
-    throw new Error('Invalid n8n callback: content or topics[] is required on success');
+    throw new Error(
+      'Invalid n8n callback: content or topics[] is required on success',
+    );
   }
 
   const title = String(contentRaw.title ?? '')

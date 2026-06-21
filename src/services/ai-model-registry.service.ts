@@ -38,7 +38,9 @@ export type AiModelCategory =
   | 'image'
   | 'image_context'
   | 'image_enhance'
-  | 'video';
+  | 'video'
+  | 'seo_generation'
+  | 'seo_analysis';
 export const AI_MODEL_CATEGORIES: AiModelCategory[] = [
   'text',
   'text_formatter',
@@ -47,6 +49,8 @@ export const AI_MODEL_CATEGORIES: AiModelCategory[] = [
   'image_context',
   'image_enhance',
   'video',
+  'seo_generation',
+  'seo_analysis',
 ];
 
 /** Provider prefixes Bifrost recognizes in `provider/model` (see core/schemas/bifrost.go). */
@@ -105,6 +109,8 @@ function emptyActive(): ActiveMap {
     image_context: null,
     image_enhance: null,
     video: null,
+    seo_generation: null,
+    seo_analysis: null,
   };
 }
 
@@ -116,7 +122,9 @@ function isCategory(value: unknown): value is AiModelCategory {
     value === 'image' ||
     value === 'image_context' ||
     value === 'image_enhance' ||
-    value === 'video'
+    value === 'video' ||
+    value === 'seo_generation' ||
+    value === 'seo_analysis'
   );
 }
 
@@ -134,7 +142,9 @@ export class AiModelRegistryService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.refresh().catch((e) =>
-      this.logger.warn(`AI model registry init failed: ${(e as Error).message}`),
+      this.logger.warn(
+        `AI model registry init failed: ${(e as Error).message}`,
+      ),
     );
     // Seed the text category from env on first boot so admins see a starting model.
     if (this.cache.models.length === 0) {
@@ -181,8 +191,8 @@ export class AiModelRegistryService implements OnModuleInit {
         .map((m) => ({
           id: m.id || randomUUID(),
           label: (m.label || m.model || '').toString().slice(0, 100),
-          model: (m.model as string).trim(),
-          provider: m.provider || providerOfModel(m.model as string),
+          model: m.model.trim(),
+          provider: m.provider || providerOfModel(m.model),
           category: isCategory(m.category) ? m.category : 'text',
           enabled: m.enabled !== false,
           addedAt: m.addedAt || new Date().toISOString(),
@@ -197,6 +207,8 @@ export class AiModelRegistryService implements OnModuleInit {
         image_context: storedActive.image_context ?? null,
         image_enhance: storedActive.image_enhance ?? null,
         video: storedActive.video ?? null,
+        seo_generation: storedActive.seo_generation ?? null,
+        seo_analysis: storedActive.seo_analysis ?? null,
       };
       this.cache = { models, active: this.normalizeActive(models, active) };
     }
@@ -204,12 +216,16 @@ export class AiModelRegistryService implements OnModuleInit {
   }
 
   /** Drop active ids that no longer exist / are disabled / changed category. */
-  private normalizeActive(models: AiModelEntry[], active: ActiveMap): ActiveMap {
+  private normalizeActive(
+    models: AiModelEntry[],
+    active: ActiveMap,
+  ): ActiveMap {
     const next = { ...active };
     for (const cat of AI_MODEL_CATEGORIES) {
       const id = next[cat];
       const ok =
-        id && models.some((m) => m.id === id && m.category === cat && m.enabled);
+        id &&
+        models.some((m) => m.id === id && m.category === cat && m.enabled);
       if (!ok) {
         const firstEnabled = models.find(
           (m) => m.category === cat && m.enabled,
@@ -231,7 +247,10 @@ export class AiModelRegistryService implements OnModuleInit {
   }
 
   private async persist(): Promise<void> {
-    this.cache.active = this.normalizeActive(this.cache.models, this.cache.active);
+    this.cache.active = this.normalizeActive(
+      this.cache.models,
+      this.cache.active,
+    );
     await this.appSettings.set(AI_MODELS_KEY, this.cache);
     this.cachedAt = Date.now();
   }
@@ -406,7 +425,10 @@ export class AiModelRegistryService implements OnModuleInit {
   }
 
   /** Reorder priority within a category (orderedIds = new front-to-back order). */
-  async reorder(category: AiModelCategory, orderedIds: string[]): Promise<void> {
+  async reorder(
+    category: AiModelCategory,
+    orderedIds: string[],
+  ): Promise<void> {
     if (!isCategory(category))
       throw new BadRequestException('Invalid category');
     await this.refresh();
@@ -467,10 +489,14 @@ export class AiModelRegistryService implements OnModuleInit {
             : 'Image model responded (no image payload)',
       );
       // Retry with the opposite param if the provider rejected our first choice.
-      if (!result.ok && /response_format|output_format|unknown.parameter/i.test(result.message)) {
+      if (
+        !result.ok &&
+        /response_format|output_format|unknown.parameter/i.test(result.message)
+      ) {
         const retryBody: Record<string, unknown> = {
           model: m,
-          prompt: 'A small flat solid blue circle centered on a white background',
+          prompt:
+            'A small flat solid blue circle centered on a white background',
           n: 1,
           size: '1024x1024',
         };
@@ -569,7 +595,11 @@ export class AiModelRegistryService implements OnModuleInit {
     return this.pingEndpoint(
       `${base}/chat/completions`,
       cfg.apiKey,
-      { model: m, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] },
+      {
+        model: m,
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'ping' }],
+      },
       Math.min(cfg.timeoutMs, 20000),
       () => 'Model responded successfully',
     );

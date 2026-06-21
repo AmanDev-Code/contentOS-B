@@ -19,10 +19,7 @@ export class ModerationService {
     private readonly supabaseService: SupabaseService,
     private readonly notificationService: NotificationService,
   ) {
-    this.strikeLimit = parseInt(
-      process.env.MODERATION_STRIKE_LIMIT || '3',
-      10,
-    );
+    this.strikeLimit = parseInt(process.env.MODERATION_STRIKE_LIMIT || '3', 10);
     this.strikeWindowHours = parseInt(
       process.env.MODERATION_STRIKE_WINDOW_HOURS || '24',
       10,
@@ -107,9 +104,7 @@ export class ModerationService {
       .gte('created_at', windowStart);
 
     if (error) {
-      this.logger.error(
-        `Failed to count moderation strikes: ${error.message}`,
-      );
+      this.logger.error(`Failed to count moderation strikes: ${error.message}`);
       return 0;
     }
 
@@ -136,7 +131,7 @@ export class ModerationService {
         userId,
         strikeCount,
         windowHours: this.strikeWindowHours,
-      } as any,
+      },
     });
   }
 }

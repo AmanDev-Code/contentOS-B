@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiGatewayService } from './ai-gateway.service';
-import { MediaPostType, N8nGeneratedContentDto } from '../common/dto/media-intent.dto';
+import {
+  MediaPostType,
+  N8nGeneratedContentDto,
+} from '../common/dto/media-intent.dto';
 import { stripMarkdownForLinkedIn } from '../common/utils/linkedin-publish-text';
 
 type SupportedPlatform = 'linkedin' | 'x' | 'instagram' | string;
@@ -80,8 +83,12 @@ export class PostRefinementService {
   }
 
   private refineLinkedIn(input: RefineInput): RefinedPostOutput {
-    const rawTitle = this.cleanInlineHashtagTokens(input.content.title || '').trim();
-    const rawBody = this.cleanInlineHashtagTokens(input.content.content || '').trim();
+    const rawTitle = this.cleanInlineHashtagTokens(
+      input.content.title || '',
+    ).trim();
+    const rawBody = this.cleanInlineHashtagTokens(
+      input.content.content || '',
+    ).trim();
     const normalizedBody = this.normalizeBodyText(rawBody);
     const title = rawTitle || 'New insight';
 
@@ -101,13 +108,17 @@ export class PostRefinementService {
           !line.startsWith('🔗'),
       );
 
-    const baseSentences = this.toSentences(meaningfulLines.join(' ')).slice(0, 10);
+    const baseSentences = this.toSentences(meaningfulLines.join(' ')).slice(
+      0,
+      10,
+    );
     const keyPoints = this.uniqueSentences(
       baseSentences.slice(0, 4).map((sentence) => this.trimSentence(sentence)),
     ).slice(0, 3);
 
     const tone = this.inferTone(`${title}\n${rawBody}`);
-    const hookEmoji = tone === 'inspiring' ? '🚀' : tone === 'urgent' ? '⚡' : '✨';
+    const hookEmoji =
+      tone === 'inspiring' ? '🚀' : tone === 'urgent' ? '⚡' : '✨';
 
     const intro =
       tone === 'inspiring'
@@ -138,19 +149,30 @@ export class PostRefinementService {
       }
     } else if (styleVariant === 1) {
       // Insight style: tighter summary + numbered moves.
-      const summary = this.uniqueSentences([detailSentence, ...keyPoints.slice(2)])
+      const summary = this.uniqueSentences([
+        detailSentence,
+        ...keyPoints.slice(2),
+      ])
         .filter(Boolean)
         .slice(0, 2)
         .join(' ');
       if (summary) sections.push(summary);
       if (actionItems.length > 0) {
         sections.push(
-          actionItems.slice(0, 2).map((item, idx) => `${idx + 1}) ${item}`).join('\n'),
+          actionItems
+            .slice(0, 2)
+            .map((item, idx) => `${idx + 1}) ${item}`)
+            .join('\n'),
         );
       }
     } else {
       // Contrarian / alternate framing — always anchored in extracted points, no generic filler.
-      const contrarianLead = this.buildContrarianLead(title, leadSentence, detailSentence, keyPoints);
+      const contrarianLead = this.buildContrarianLead(
+        title,
+        leadSentence,
+        detailSentence,
+        keyPoints,
+      );
       if (contrarianLead) sections.push(contrarianLead);
       const bullets = this.uniqueSentences(keyPoints.slice(1))
         .filter(Boolean)
@@ -162,13 +184,19 @@ export class PostRefinementService {
       }
     }
 
-    if (input.content.postType === MediaPostType.CAROUSEL && input.content.slides?.length) {
+    if (
+      input.content.postType === MediaPostType.CAROUSEL &&
+      input.content.slides?.length
+    ) {
       const carouselIntro = this.carouselIntroLine(title);
       sections.push(carouselIntro);
       sections.push(
         input.content.slides
           .slice(0, 4)
-          .map((slide, idx) => `${idx + 1}. ${this.trimSentence(slide.headline || slide.body)}`)
+          .map(
+            (slide, idx) =>
+              `${idx + 1}. ${this.trimSentence(slide.headline || slide.body)}`,
+          )
           .join('\n'),
       );
     }
@@ -187,7 +215,10 @@ export class PostRefinementService {
     // Do not append hashtags into body text; frontend renders hashtags from array.
 
     let refinedContent = sections.filter(Boolean).join('\n\n').trim();
-    refinedContent = this.injectSourceIntoPlaceholder(refinedContent, sourceUrl);
+    refinedContent = this.injectSourceIntoPlaceholder(
+      refinedContent,
+      sourceUrl,
+    );
     refinedContent = this.stripTrailingHashtagLines(refinedContent);
     refinedContent = stripMarkdownForLinkedIn(refinedContent);
     refinedContent = this.removeDuplicateLines(refinedContent);
@@ -251,10 +282,15 @@ export class PostRefinementService {
       .slice(0, 3)
       .map((s) => `• ${this.trimSentence(s)}`)
       .join('\n');
-    const closing = this.pickClosingQuestion('neutral', input.title, input.baseSentences);
+    const closing = this.pickClosingQuestion(
+      'neutral',
+      input.title,
+      input.baseSentences,
+    );
     const lines = [
       `🚀 ${input.title}`,
-      skeletonPoints || '• Clear insight\n• Practical value\n• Immediate application',
+      skeletonPoints ||
+        '• Clear insight\n• Practical value\n• Immediate application',
       closing,
       input.sourceUrl ? input.sourceUrl : '',
     ].filter(Boolean);
@@ -297,9 +333,9 @@ export class PostRefinementService {
 
     // Stale content signal: explicit old-year references.
     const nowYear = new Date().getUTCFullYear();
-    const years = Array.from(input.refinedContent.matchAll(/\b(20\d{2})\b/g)).map((m) =>
-      Number(m[1]),
-    );
+    const years = Array.from(
+      input.refinedContent.matchAll(/\b(20\d{2})\b/g),
+    ).map((m) => Number(m[1]));
     const hasVeryOldYear = years.some((y) => y < nowYear - 2);
     if (hasVeryOldYear) {
       score -= 20;
@@ -354,7 +390,9 @@ export class PostRefinementService {
   }
 
   private extractHashtagsFromText(text: string): string[] {
-    const matches = Array.from(text.matchAll(/#([a-zA-Z0-9_]+)/g)).map((m) => `#${m[1]}`);
+    const matches = Array.from(text.matchAll(/#([a-zA-Z0-9_]+)/g)).map(
+      (m) => `#${m[1]}`,
+    );
     return Array.from(new Set(matches));
   }
 
@@ -379,7 +417,9 @@ export class PostRefinementService {
     let t = String(text || '').trim();
     t = this.flattenMarkdownLinks(t);
     t = this.dedupeRepeatedUrlTail(t);
-    t = t.replace(/\[[^\]]*https?:\/\/[^\]]+\]/gi, (m) => m.replace(/^\[|\]$/g, ''));
+    t = t.replace(/\[[^\]]*https?:\/\/[^\]]+\]/gi, (m) =>
+      m.replace(/^\[|\]$/g, ''),
+    );
     t = this.stripReadMoreAttributionParagraphs(t);
     t = t.replace(/read more[^:]*:\s*/gi, '');
     return t.replace(/\s+$/g, '').trim();
@@ -387,15 +427,18 @@ export class PostRefinementService {
 
   /** [label](url) → plain URL (or "label url") so scrapers/UI never see duplicate bracket links. */
   private flattenMarkdownLinks(text: string): string {
-    return text.replace(/\[([^\]]*)\]\((https?:[^)\s]+)\)/gi, (_m, label, url) => {
-      const u = this.sanitizeUrl(String(url));
-      const l = String(label || '')
-        .trim()
-        .replace(/^<|>$/g, '');
-      if (!l || l === u || /^https?:\/\//i.test(l)) return u;
-      if (l.length <= 2) return u;
-      return `${l} ${u}`;
-    });
+    return text.replace(
+      /\[([^\]]*)\]\((https?:[^)\s]+)\)/gi,
+      (_m, label, url) => {
+        const u = this.sanitizeUrl(String(url));
+        const l = String(label || '')
+          .trim()
+          .replace(/^<|>$/g, '');
+        if (!l || l === u || /^https?:\/\//i.test(l)) return u;
+        if (l.length <= 2) return u;
+        return `${l} ${u}`;
+      },
+    );
   }
 
   /** Collapse patterns like "https://a (https://a)" from n8n / editors. */
@@ -420,14 +463,17 @@ export class PostRefinementService {
     if (!/https?:\/\//i.test(block)) return false;
     if (block.length > 650) return false;
     return (
-      /read more|full article|source\s*:|articleshow|magazines\/panache/i.test(block) ||
-      /^\(?read more\b/i.test(block)
+      /read more|full article|source\s*:|articleshow|magazines\/panache/i.test(
+        block,
+      ) || /^\(?read more\b/i.test(block)
     );
   }
 
   /** Remove accidental line breaks inside bare URLs (prevents "…purchase" / "s/" split in UI). */
   private stripNewlinesInsideUrls(text: string): string {
-    return text.replace(/https?:\/\/[^\s]+/gi, (url) => url.replace(/\s+/g, ''));
+    return text.replace(/https?:\/\/[^\s]+/gi, (url) =>
+      url.replace(/\s+/g, ''),
+    );
   }
 
   /** Final pass: flatten any leftover links, dedupe URLs, collapse duplicate Read more lines. */
@@ -533,7 +579,10 @@ export class PostRefinementService {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const value of values) {
-      const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const normalized = value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
       if (!normalized || seen.has(normalized)) continue;
       seen.add(normalized);
       out.push(value);
@@ -541,7 +590,10 @@ export class PostRefinementService {
     return out;
   }
 
-  private removeHashtagsAlreadyInBody(hashtags: string[], body: string): string[] {
+  private removeHashtagsAlreadyInBody(
+    hashtags: string[],
+    body: string,
+  ): string[] {
     const lowerBody = body.toLowerCase();
     return hashtags.filter((tag) => !lowerBody.includes(tag.toLowerCase()));
   }
@@ -570,7 +622,10 @@ export class PostRefinementService {
         previousNormalized = normalized;
       }
     }
-    return output.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    return output
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   private injectSourceIntoPlaceholder(
@@ -602,15 +657,16 @@ export class PostRefinementService {
       const trimmed = line.trim();
       const isHashtagOnlyLine =
         trimmed.length > 0 &&
-        trimmed
-          .split(/\s+/)
-          .every((token) => /^#[a-z0-9_]+$/i.test(token));
+        trimmed.split(/\s+/).every((token) => /^#[a-z0-9_]+$/i.test(token));
       if (isHashtagOnlyLine) {
         continue;
       }
       cleaned.push(line);
     }
-    return cleaned.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    return cleaned
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   private removeDuplicateLines(text: string): string {
@@ -634,23 +690,28 @@ export class PostRefinementService {
       seen.add(normalized);
       output.push(line);
     }
-    return output.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    return output
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   private stripFormattingNoise(text: string): string {
-    return text
-      .replace(/^[;,*_]+\s*/gm, '')
-      .replace(/\s+[;]+$/gm, '')
-      .replace(/mytake/gi, '')
-      // Drop common “AI section” labels; keep the rest of the line if present.
-      .replace(/^_?\*?my take\*?:_?\s*/gim, '')
-      .replace(/^_?\*?why this caught my attention\*?:_?\s*/gim, '')
-      .replace(/^_?\*?what stands out to me\*?:_?\s*/gim, '')
-      .replace(/^_?\*?how teams can respond\*?:_?\s*/gim, '')
-      .replace(/^_?\*?carousel flow\*?:_?\s*/gim, '')
-      .replace(/^_?\*?key takeaways\*?:_?\s*/gim, '')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    return (
+      text
+        .replace(/^[;,*_]+\s*/gm, '')
+        .replace(/\s+[;]+$/gm, '')
+        .replace(/mytake/gi, '')
+        // Drop common “AI section” labels; keep the rest of the line if present.
+        .replace(/^_?\*?my take\*?:_?\s*/gim, '')
+        .replace(/^_?\*?why this caught my attention\*?:_?\s*/gim, '')
+        .replace(/^_?\*?what stands out to me\*?:_?\s*/gim, '')
+        .replace(/^_?\*?how teams can respond\*?:_?\s*/gim, '')
+        .replace(/^_?\*?carousel flow\*?:_?\s*/gim, '')
+        .replace(/^_?\*?key takeaways\*?:_?\s*/gim, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+    );
   }
 
   private sanitizeUrl(url: string): string {
@@ -699,7 +760,9 @@ export class PostRefinementService {
   ): Promise<RefinedPostOutput | null> {
     const enabled = (process.env.AI_REFINEMENT_ENABLED || 'true') !== 'false';
     if (!enabled) {
-      this.logger.log(JSON.stringify({ event: 'refinement.llm.skip', reason: 'disabled' }));
+      this.logger.log(
+        JSON.stringify({ event: 'refinement.llm.skip', reason: 'disabled' }),
+      );
       return null;
     }
 
@@ -707,9 +770,12 @@ export class PostRefinementService {
       input.sourceUrl ||
       this.extractFirstUrl(input.content.content || '') ||
       this.extractFirstUrl(fallback.content);
-    const originalHashtags = this.normalizeHashtags(input.content.hashtags || []);
+    const originalHashtags = this.normalizeHashtags(
+      input.content.hashtags || [],
+    );
     const fallbackHashtags = this.normalizeHashtags(fallback.hashtags || []);
-    const seedHashtags = originalHashtags.length > 0 ? originalHashtags : fallbackHashtags;
+    const seedHashtags =
+      originalHashtags.length > 0 ? originalHashtags : fallbackHashtags;
 
     const systemPrompt =
       'You are a world-class LinkedIn ghostwriter. Rewrite posts to feel deeply human, emotionally intelligent, and unique per request. Vary structure every time (do not reuse the same outline). Keep facts and intent intact, avoid hallucinations, and produce polished LinkedIn-ready content.';
@@ -757,19 +823,34 @@ export class PostRefinementService {
         });
 
       if (!text) {
-        this.logger.warn(JSON.stringify({ event: 'refinement.llm.empty_response', model: usedModel }));
+        this.logger.warn(
+          JSON.stringify({
+            event: 'refinement.llm.empty_response',
+            model: usedModel,
+          }),
+        );
         return null;
       }
 
       const parsed = this.tryParseJsonFromLlmPayload(text);
       if (!parsed) {
-        this.logger.warn(JSON.stringify({ event: 'refinement.llm.invalid_json', model: usedModel, sample: text.slice(0, 300) }));
+        this.logger.warn(
+          JSON.stringify({
+            event: 'refinement.llm.invalid_json',
+            model: usedModel,
+            sample: text.slice(0, 300),
+          }),
+        );
         return null;
       }
 
-      const title = String(parsed?.title || fallback.title || '').trim().slice(0, 180);
+      const title = String(parsed?.title || fallback.title || '')
+        .trim()
+        .slice(0, 180);
       const content = this.injectSourceIntoPlaceholder(
-        String(parsed?.content || '').trim().slice(0, 5000),
+        String(parsed?.content || '')
+          .trim()
+          .slice(0, 5000),
         sourceUrl,
       );
       const hashtags = this.normalizeHashtags(
@@ -784,16 +865,34 @@ export class PostRefinementService {
         keyPointCount: Math.max(2, this.toSentences(content).length),
       });
       if (!quality.passed || quality.score < 70) {
-        this.logger.warn(JSON.stringify({ event: 'refinement.llm.rejected_quality', model: usedModel, score: quality.score, reasons: quality.reasons }));
+        this.logger.warn(
+          JSON.stringify({
+            event: 'refinement.llm.rejected_quality',
+            model: usedModel,
+            score: quality.score,
+            reasons: quality.reasons,
+          }),
+        );
         return null;
       }
-      this.logger.log(JSON.stringify({ event: 'refinement.llm.success', model: usedModel, qualityScore: quality.score, outputLength: content.length }));
+      this.logger.log(
+        JSON.stringify({
+          event: 'refinement.llm.success',
+          model: usedModel,
+          qualityScore: quality.score,
+          outputLength: content.length,
+        }),
+      );
 
       return { title, content, hashtags, quality };
     } catch (error) {
-      this.logger.warn(JSON.stringify({ event: 'refinement.llm.exception', message: (error as Error).message }));
+      this.logger.warn(
+        JSON.stringify({
+          event: 'refinement.llm.exception',
+          message: (error as Error).message,
+        }),
+      );
       return null;
     }
   }
 }
-

@@ -5,7 +5,9 @@ function makeBodyBullet(label: string): string {
   return `${label}: substantive teaching point that fills the bullet width sufficiently for the gate.`;
 }
 
-function buildValidDeck(slideCount = 12): Pick<
+function buildValidDeck(
+  slideCount = 12,
+): Pick<
   CarouselPostOutput,
   'slides' | 'tocEntries' | 'coverTitle' | 'coverSubtitle' | 'author'
 > {
@@ -30,8 +32,7 @@ function buildValidDeck(slideCount = 12): Pick<
     },
     ...bodyTitles.map((title, i) => ({
       title,
-      body:
-        'Two-sentence body bridging this topic with the rest of the deck for the reader.',
+      body: 'Two-sentence body bridging this topic with the rest of the deck for the reader.',
       bullets: [
         makeBodyBullet('Definition'),
         makeBodyBullet('Mental model'),
@@ -80,7 +81,9 @@ describe('analyzeDocumentDeckQuality', () => {
       expectedSlideCount: 10,
       documentMode: 'handwritten_notes',
     });
-    expect(issues.some((i) => i.code === 'documentdeck_slide_count')).toBe(true);
+    expect(issues.some((i) => i.code === 'documentdeck_slide_count')).toBe(
+      true,
+    );
   });
 
   it('rejects when cover is missing', () => {
@@ -91,7 +94,9 @@ describe('analyzeDocumentDeckQuality', () => {
       expectedSlideCount: 12,
       documentMode: 'handwritten_notes',
     });
-    expect(issues.some((i) => i.code === 'documentdeck_cover_missing')).toBe(true);
+    expect(issues.some((i) => i.code === 'documentdeck_cover_missing')).toBe(
+      true,
+    );
   });
 
   it('rejects when TOC entries do not match body titles', () => {
@@ -104,7 +109,9 @@ describe('analyzeDocumentDeckQuality', () => {
       expectedSlideCount: 12,
       documentMode: 'handwritten_notes',
     });
-    expect(issues.some((i) => i.code === 'documentdeck_toc_title_mismatch')).toBe(true);
+    expect(
+      issues.some((i) => i.code === 'documentdeck_toc_title_mismatch'),
+    ).toBe(true);
   });
 
   it('rejects when TOC length differs from body slide count', () => {
@@ -117,7 +124,9 @@ describe('analyzeDocumentDeckQuality', () => {
       expectedSlideCount: 12,
       documentMode: 'handwritten_notes',
     });
-    expect(issues.some((i) => i.code === 'documentdeck_toc_body_mismatch')).toBe(true);
+    expect(
+      issues.some((i) => i.code === 'documentdeck_toc_body_mismatch'),
+    ).toBe(true);
   });
 
   it('rejects placeholder titles', () => {
@@ -128,7 +137,9 @@ describe('analyzeDocumentDeckQuality', () => {
       expectedSlideCount: 12,
       documentMode: 'handwritten_notes',
     });
-    expect(issues.some((i) => i.code === 'documentdeck_placeholder_title')).toBe(true);
+    expect(
+      issues.some((i) => i.code === 'documentdeck_placeholder_title'),
+    ).toBe(true);
   });
 
   it('rejects body slides with too few substantive bullets', () => {
@@ -139,7 +150,9 @@ describe('analyzeDocumentDeckQuality', () => {
       expectedSlideCount: 12,
       documentMode: 'handwritten_notes',
     });
-    expect(issues.some((i) => i.code === 'documentdeck_bullets_low')).toBe(true);
+    expect(issues.some((i) => i.code === 'documentdeck_bullets_low')).toBe(
+      true,
+    );
   });
 
   it('rejects out-of-order page numbers', () => {

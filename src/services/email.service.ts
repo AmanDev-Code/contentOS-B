@@ -465,7 +465,9 @@ export class EmailService {
   async sendWelcomeEmail(email: string, userName: string): Promise<boolean> {
     const frontendUrl = this.configService.get('frontendUrl');
     if (!frontendUrl) {
-      this.logger.error('FRONTEND_URL env var is not set — skipping welcome email');
+      this.logger.error(
+        'FRONTEND_URL env var is not set — skipping welcome email',
+      );
       return false;
     }
     const result = await this.sendEmail({

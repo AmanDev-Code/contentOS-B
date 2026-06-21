@@ -48,7 +48,10 @@ export class CreditsController {
   ): Promise<CreditBalance> {
     const userId = req.user?.id;
     if (!userId) {
-      throw new HttpException('User not authenticated', HttpStatus.UNAUTHORIZED);
+      throw new HttpException(
+        'User not authenticated',
+        HttpStatus.UNAUTHORIZED,
+      );
     }
     return this.creditBucketService.getBalance(userId);
   }

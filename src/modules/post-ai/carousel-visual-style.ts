@@ -101,7 +101,9 @@ function impliesDenseNotebookPages(topicLower: string): boolean {
   return false;
 }
 
-export function inferCarouselVisualStyleFromTopic(topicLower: string): CarouselVisualStyle {
+export function inferCarouselVisualStyleFromTopic(
+  topicLower: string,
+): CarouselVisualStyle {
   const t = topicLower;
 
   if (impliesDenseNotebookPages(t)) {
@@ -147,7 +149,10 @@ export function resolveCarouselVisualStyle(
   };
 }
 
-export type CustomCarouselOverlayProfile = 'linkedin_panel' | 'notebook_paper' | 'whiteboard';
+export type CustomCarouselOverlayProfile =
+  | 'linkedin_panel'
+  | 'notebook_paper'
+  | 'whiteboard';
 
 export function overlayProfileForCarouselStyle(
   style: CarouselVisualStyle,
@@ -163,6 +168,10 @@ export function overlayProfileForCarouselStyle(
   }
 }
 
-export function isNotebookPaperCarouselStyle(style: CarouselVisualStyle): boolean {
-  return style === 'handwritten_notebook' || style === 'handwritten_notebook_dense';
+export function isNotebookPaperCarouselStyle(
+  style: CarouselVisualStyle,
+): boolean {
+  return (
+    style === 'handwritten_notebook' || style === 'handwritten_notebook_dense'
+  );
 }

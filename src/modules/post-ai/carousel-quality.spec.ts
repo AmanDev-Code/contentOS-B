@@ -1,4 +1,7 @@
-import { analyzeCarouselQuality, educationalNotebookImageNativeMode } from './carousel-quality';
+import {
+  analyzeCarouselQuality,
+  educationalNotebookImageNativeMode,
+} from './carousel-quality';
 
 describe('analyzeCarouselQuality', () => {
   const topic = 'DSA in Java interview prep handwritten notes carousel';
@@ -20,13 +23,15 @@ describe('analyzeCarouselQuality', () => {
         {
           title: 'Slide 3',
           body: 'x'.repeat(60),
-          imagePrompt: 'lined notebook desk paper dotted texture overhead study mood',
+          imagePrompt:
+            'lined notebook desk paper dotted texture overhead study mood',
           bullets: goodBullets(),
         },
         {
           title: 'Carousel slide 2',
           body: 'y'.repeat(60),
-          imagePrompt: 'ruled margins cream paper faint marker smudges no text study',
+          imagePrompt:
+            'ruled margins cream paper faint marker smudges no text study',
           bullets: goodBullets(),
         },
       ],
@@ -43,10 +48,11 @@ describe('analyzeCarouselQuality', () => {
   it('rejects generic 12-slide deck missing DSA arc keyword coverage when topic implies Java interviews', () => {
     /** Bullets deliberately avoid JAVA_DSA_DECK_TERMS substrings ("list", "graph", etc.). */
     const neutralBullets = () =>
-      Array.from({ length: 5 }, (_, j) => `Zyxxkw filler cadence mnemonic-free prose ${j} qwopvn`.repeat(2));
+      Array.from({ length: 5 }, (_, j) =>
+        `Zyxxkw filler cadence mnemonic-free prose ${j} qwopvn`.repeat(2),
+      );
 
-    const neutralBody =
-      `${'Zyxxkw banal qwopvn mnemonic-free qwopqwop cadence aaa '.repeat(5)}`;
+    const neutralBody = `${'Zyxxkw banal qwopvn mnemonic-free qwopqwop cadence aaa '.repeat(5)}`;
 
     const placeholderDeck = Array.from({ length: 12 }, (_, i) => ({
       title: `Narrow micro-topic focus ordinal ${i + 1} for filler cadence prose`,
@@ -68,7 +74,7 @@ describe('analyzeCarouselQuality', () => {
   });
 
   it('accepts a substantive 12-slide deck aligned with topic (handwritten style)', () => {
-    const arcs = [
+    const arcs: [string, string[]][] = [
       ['Why DSA mastery still wins FAANG loops', ['java', 'interview']],
       ['Java arrays contiguous memory pitfalls', ['array', 'complexity']],
       ['String handling StringBuilder slicing', ['string']],
@@ -80,7 +86,10 @@ describe('analyzeCarouselQuality', () => {
       ['Heaps priority queues schedules limits', ['heap']],
       ['Graph basics BFS DFS grids', ['graph']],
       ['Recursion vs DP overlap subproblems patterns', ['recurs', 'dynamic']],
-      ['Interview playbook LeetCode roadmap cadence study', ['leetcode', 'interview']],
+      [
+        'Interview playbook LeetCode roadmap cadence study',
+        ['leetcode', 'interview'],
+      ],
     ];
 
     const slides = arcs.map(([title, keys], i) => ({
@@ -95,28 +104,58 @@ describe('analyzeCarouselQuality', () => {
         {
           subheading: 'Concept',
           lines: [
-            ink(`Java-facing ${keys[0]} intuition for interview cadence and live coding`),
-            ink(`Second ink line for mental models plus API cues on ${keys.join('/')}`),
-            ink(`Third line about pragmatic traps students reproduce under time pressure`),
-            ink(`Fourth line contrasting this structure with adjacent DS patterns in Java`),
-            ink(`Fifth micro-story about debugging a wrong invariant on a whiteboard stress test`),
-            ink(`Sixth line tying the pattern back to real JDK classes you can name aloud`),
-            ink(`Seventh line rehearsal cue you whisper before starting implementation on the clock`),
+            ink(
+              `Java-facing ${keys[0]} intuition for interview cadence and live coding`,
+            ),
+            ink(
+              `Second ink line for mental models plus API cues on ${keys.join('/')}`,
+            ),
+            ink(
+              `Third line about pragmatic traps students reproduce under time pressure`,
+            ),
+            ink(
+              `Fourth line contrasting this structure with adjacent DS patterns in Java`,
+            ),
+            ink(
+              `Fifth micro-story about debugging a wrong invariant on a whiteboard stress test`,
+            ),
+            ink(
+              `Sixth line tying the pattern back to real JDK classes you can name aloud`,
+            ),
+            ink(
+              `Seventh line rehearsal cue you whisper before starting implementation on the clock`,
+            ),
           ],
         },
         {
           subheading: 'Pitfalls + drills',
           lines: [
-            ink(`Big-O plus JVM nuance reminders tied to ${keys[0]} for interviewers`),
-            ink(`Follow-up probes you should rehearse aloud before writing full solutions`),
-            ink(`Third drill on incremental extension when input size doubles unexpectedly`),
-            ink(`Fourth drill comparing two competing implementations on cache behavior`),
-            ink(`Fifth drill mentioning testing harness ideas without losing interview pace`),
-            ink(`Sixth drill: one sentence on how you would defend space trade-offs in Java memory`),
+            ink(
+              `Big-O plus JVM nuance reminders tied to ${keys[0]} for interviewers`,
+            ),
+            ink(
+              `Follow-up probes you should rehearse aloud before writing full solutions`,
+            ),
+            ink(
+              `Third drill on incremental extension when input size doubles unexpectedly`,
+            ),
+            ink(
+              `Fourth drill comparing two competing implementations on cache behavior`,
+            ),
+            ink(
+              `Fifth drill mentioning testing harness ideas without losing interview pace`,
+            ),
+            ink(
+              `Sixth drill: one sentence on how you would defend space trade-offs in Java memory`,
+            ),
           ],
           bulletItems: [
-            ink('Mini bullet rehearse spoken answer under time pressure with clarity'),
-            ink('Second bullet about tracing a tiny example before touching the IDE'),
+            ink(
+              'Mini bullet rehearse spoken answer under time pressure with clarity',
+            ),
+            ink(
+              'Second bullet about tracing a tiny example before touching the IDE',
+            ),
           ],
         },
       ],
@@ -126,9 +165,15 @@ describe('analyzeCarouselQuality', () => {
       ],
       codeSnippets: ['Map<String,Integer> freq = new HashMap<>();'],
       denseBullets: [
-        ink('Dense bullet echoing invariant you must repeat in the hallway after the interview'),
-        ink('Second dense bullet about timeboxing and when to abandon a stuck approach'),
-        ink('Third dense bullet on annotating the sheet with corner cases before you code'),
+        ink(
+          'Dense bullet echoing invariant you must repeat in the hallway after the interview',
+        ),
+        ink(
+          'Second dense bullet about timeboxing and when to abandon a stuck approach',
+        ),
+        ink(
+          'Third dense bullet on annotating the sheet with corner cases before you code',
+        ),
       ],
     }));
 
@@ -146,7 +191,9 @@ describe('analyzeCarouselQuality', () => {
     const line = (c: string) => c.repeat(68);
     const slides = Array.from({ length: 12 }, (_, i) => ({
       title: `Java DSA interview pillar ${i + 1} for whiteboard stress`,
-      body: `Arrays lists stacks queues trees graphs heaps recap slide ${i + 1} `.repeat(4),
+      body: `Arrays lists stacks queues trees graphs heaps recap slide ${i + 1} `.repeat(
+        4,
+      ),
       imagePrompt:
         'overhead desk dotted notebook paper faint pencil shading study texture background',
       notebookSections: [
@@ -165,7 +212,11 @@ describe('analyzeCarouselQuality', () => {
         'Mistake · skipping null checks on containers when the input size looks friendly',
       ],
       codeSnippets: ['Map<String,Integer> m = new HashMap<>();'],
-      denseBullets: [line('i').slice(0, 54), line('j').slice(0, 52), line('k').slice(0, 55)],
+      denseBullets: [
+        line('i').slice(0, 54),
+        line('j').slice(0, 52),
+        line('k').slice(0, 55),
+      ],
     }));
 
     const issues = analyzeCarouselQuality({
@@ -196,7 +247,9 @@ describe('analyzeCarouselQuality', () => {
       resolvedVisualStyle: 'handwritten_notebook',
     });
 
-    expect(issues.some((i) => i.code === 'handwriting_slide_line_budget_low')).toBe(true);
+    expect(
+      issues.some((i) => i.code === 'handwriting_slide_line_budget_low'),
+    ).toBe(true);
   });
 
   it('requires notebook-related image cues when handwritten_notebook resolved style', () => {
@@ -206,7 +259,8 @@ describe('analyzeCarouselQuality', () => {
         3,
       ),
       bullets: goodBullets(),
-      imagePrompt: 'random steak dinner plating hero shot restaurant menu bokeh cinematic',
+      imagePrompt:
+        'random steak dinner plating hero shot restaurant menu bokeh cinematic',
     }));
 
     const issues = analyzeCarouselQuality({
@@ -217,7 +271,9 @@ describe('analyzeCarouselQuality', () => {
       noteDensity: 'standard',
     });
 
-    expect(issues.some((i) => i.code === 'image_prompt_style_mismatch')).toBe(true);
+    expect(issues.some((i) => i.code === 'image_prompt_style_mismatch')).toBe(
+      true,
+    );
   });
 
   it('dense mode rejects sparse slides without structured sections', () => {
@@ -225,7 +281,8 @@ describe('analyzeCarouselQuality', () => {
       title: `Java DSA pillar ${i + 1} with enough title length`,
       body: 'Too short body that should fail dense validation rules here.',
       bullets: ['a', 'b', 'c'],
-      imagePrompt: 'overhead desk dotted notebook paper faint pencil shading study texture background',
+      imagePrompt:
+        'overhead desk dotted notebook paper faint pencil shading study texture background',
     }));
     const issues = analyzeCarouselQuality({
       slides: thin,
@@ -240,24 +297,32 @@ describe('analyzeCarouselQuality', () => {
 
   it('programming mode flags decks with almost no code-ish surface', () => {
     const neutralBullets = () =>
-      Array.from({ length: 5 }, (_, j) => `Narrative fluff cadence ${j} without syntax markers zzz`.repeat(2));
+      Array.from({ length: 5 }, (_, j) =>
+        `Narrative fluff cadence ${j} without syntax markers zzz`.repeat(2),
+      );
 
     const fluff = Array.from({ length: 8 }, (_, i) => ({
       title: `Abstract concept ${i + 1}`,
       body: 'Warm inspirational narrative about studying hard with no syntax or complexity notes at all repeat words',
       bullets: neutralBullets(),
-      imagePrompt: 'overhead desk dotted notebook paper faint pencil shading study texture background',
+      imagePrompt:
+        'overhead desk dotted notebook paper faint pencil shading study texture background',
       notebookSections: [
         {
           subheading: 'Story arc',
-          lines: ['Once upon a motivation tale that never mentions java or loops or maps'],
+          lines: [
+            'Once upon a motivation tale that never mentions java or loops or maps',
+          ],
         },
         {
           subheading: 'Mindset',
           lines: ['Think deeply about effort without technical detail'],
         },
       ],
-      marginNotes: ['Tip · breathe deeply today', 'Remember · focus on calm study habits'],
+      marginNotes: [
+        'Tip · breathe deeply today',
+        'Remember · focus on calm study habits',
+      ],
     }));
 
     const issues = analyzeCarouselQuality({
@@ -268,7 +333,9 @@ describe('analyzeCarouselQuality', () => {
       noteDensity: 'dense',
       programmingModeEffective: true,
     });
-    expect(issues.some((i) => i.code === 'programming_surface_weak')).toBe(true);
+    expect(issues.some((i) => i.code === 'programming_surface_weak')).toBe(
+      true,
+    );
   });
 });
 

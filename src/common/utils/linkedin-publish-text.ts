@@ -94,7 +94,10 @@ export function stripTrailingHashtagOnlyLines(text: string): string {
   return lines.join('\n').trimEnd();
 }
 
-function bodyAlreadyEndsWithHashtagSuffix(body: string, suffix: string): boolean {
+function bodyAlreadyEndsWithHashtagSuffix(
+  body: string,
+  suffix: string,
+): boolean {
   const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
   const b = norm(body);
   const s = norm(suffix);

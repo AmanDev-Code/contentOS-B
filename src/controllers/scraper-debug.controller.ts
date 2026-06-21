@@ -52,7 +52,9 @@ export class ScraperDebugController {
   }
 
   @Post('refresh-all')
-  @ApiOperation({ summary: 'Queue global refresh of all active tags (secret-gated)' })
+  @ApiOperation({
+    summary: 'Queue global refresh of all active tags (secret-gated)',
+  })
   async refreshAll(@Headers('x-admin-action-secret') secret?: string) {
     assertSecret(secret);
     await this.orchestrator.enqueueSyncNow();
@@ -68,7 +70,9 @@ export class ScraperDebugController {
   }
 
   @Get('fetch')
-  @ApiOperation({ summary: 'Test-fetch one tag on one platform (secret-gated)' })
+  @ApiOperation({
+    summary: 'Test-fetch one tag on one platform (secret-gated)',
+  })
   async testFetch(
     @Query('platform') platform: string,
     @Query('tag') tag: string,
@@ -89,7 +93,8 @@ export class ScraperDebugController {
       if (platform === 'instagram') posts = await this.instagram.fetch(tag, n);
       else if (platform === 'twitter' || platform === 'x')
         posts = await this.twitter.fetch(tag, n);
-      else if (platform === 'linkedin') posts = await this.linkedin.fetch(tag, n);
+      else if (platform === 'linkedin')
+        posts = await this.linkedin.fetch(tag, n);
       else
         throw new HttpException(
           'platform must be instagram|twitter|linkedin',

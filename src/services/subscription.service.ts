@@ -132,7 +132,8 @@ export class SubscriptionService {
         typeof v.symbol === 'string' && v.symbol.length ? v.symbol : upper;
       const listMonthly = Number(v.listMonthly);
       const listYearly = Number(v.listYearly);
-      if (!Number.isFinite(listMonthly) || !Number.isFinite(listYearly)) continue;
+      if (!Number.isFinite(listMonthly) || !Number.isFinite(listYearly))
+        continue;
       const om = v.offerMonthly;
       const oy = v.offerYearly;
       const offerMonthly =
@@ -162,7 +163,7 @@ export class SubscriptionService {
     const featuresRaw = plan.features;
     let features: string[] = [];
     if (Array.isArray(featuresRaw)) {
-      features = featuresRaw.filter((x) => typeof x === 'string') as string[];
+      features = featuresRaw.filter((x) => typeof x === 'string');
     }
     const displayRaw = Object.prototype.hasOwnProperty.call(
       plan,
@@ -196,7 +197,7 @@ export class SubscriptionService {
       supportedCurrencies?: string[];
     }>(APP_SETTING_KEYS.PRICING_DISPLAY);
 
-    let defaultCurrency =
+    const defaultCurrency =
       typeof raw?.defaultCurrency === 'string' &&
       /^[A-Z]{3}$/i.test(raw.defaultCurrency)
         ? raw.defaultCurrency.toUpperCase()
@@ -205,7 +206,10 @@ export class SubscriptionService {
     let supportedCurrencies =
       Array.isArray(raw?.supportedCurrencies) && raw.supportedCurrencies.length
         ? raw.supportedCurrencies
-            .filter((c): c is string => typeof c === 'string' && /^[A-Z]{3}$/i.test(c))
+            .filter(
+              (c): c is string =>
+                typeof c === 'string' && /^[A-Z]{3}$/i.test(c),
+            )
             .map((c) => c.toUpperCase())
         : ['USD', 'INR'];
 
@@ -259,9 +263,7 @@ export class SubscriptionService {
       }));
     }
 
-    return data.map((row) =>
-      this.mapRowToPlan(row as Record<string, unknown>),
-    );
+    return data.map((row) => this.mapRowToPlan(row as Record<string, unknown>));
   }
 
   async adminUpdateSubscriptionPlan(
@@ -292,8 +294,7 @@ export class SubscriptionService {
       row.credits_limit = patch.creditsLimit;
     if (patch.priceMonthly !== undefined)
       row.price_monthly = patch.priceMonthly;
-    if (patch.priceYearly !== undefined)
-      row.price_yearly = patch.priceYearly;
+    if (patch.priceYearly !== undefined) row.price_yearly = patch.priceYearly;
     if (patch.features !== undefined) row.features = patch.features;
     if (patch.sortOrder !== undefined) row.sort_order = patch.sortOrder;
     if (patch.isActive !== undefined) row.is_active = patch.isActive;
@@ -377,7 +378,7 @@ export class SubscriptionService {
     };
 
     for (const row of snap.items) {
-      const b = buckets[row.planType as PT];
+      const b = buckets[row.planType];
       if (!b) continue;
       if (row.billingCycle === 'monthly') b.monthly = row;
       else b.yearly = row;
@@ -408,7 +409,8 @@ export class SubscriptionService {
 
     if (fail.length) {
       throw new BadRequestException({
-        message: 'Cannot import: verify POLAR_PRICE_* ids and Polar API responses.',
+        message:
+          'Cannot import: verify POLAR_PRICE_* ids and Polar API responses.',
         errors: fail,
       });
     }
@@ -425,7 +427,9 @@ export class SubscriptionService {
         ''
       ).toUpperCase();
       if (!tierCode) {
-        throw new BadRequestException(`${pt}: could not resolve catalog currency`);
+        throw new BadRequestException(
+          `${pt}: could not resolve catalog currency`,
+        );
       }
 
       const { data: existing, error: readErr } = await this.supabaseService
@@ -445,7 +449,7 @@ export class SubscriptionService {
       merged[tierCode] = {
         symbol:
           (prev[tierCode]?.symbol?.trim()?.length ?? 0) > 0
-            ? prev[tierCode]!.symbol
+            ? prev[tierCode].symbol
             : tierCode === 'USD'
               ? '$'
               : tierCode,
@@ -459,7 +463,7 @@ export class SubscriptionService {
         .getServiceClient()
         .from('subscription_plans')
         .update({
-          display_pricing: merged as unknown as Record<string, unknown>,
+          display_pricing: merged,
           price_monthly: monthly.amountMajor!,
           price_yearly: yearly.amountMajor!,
           updated_at: new Date().toISOString(),
@@ -563,9 +567,9 @@ export class SubscriptionService {
           polarOk += 1;
           result.plans.push({
             planType: pt,
-            monthly: monthly!.amountMajor,
-            yearly: yearly!.amountMajor,
-            currency: (monthly!.currencyCode || currency).toUpperCase(),
+            monthly: monthly.amountMajor,
+            yearly: yearly.amountMajor,
+            currency: (monthly.currencyCode || currency).toUpperCase(),
             source: 'polar',
           });
         } else {
@@ -596,7 +600,11 @@ export class SubscriptionService {
     }
 
     result.source =
-      polarOk > 0 && fellBack > 0 ? 'mixed' : polarOk > 0 ? 'polar' : 'fallback';
+      polarOk > 0 && fellBack > 0
+        ? 'mixed'
+        : polarOk > 0
+          ? 'polar'
+          : 'fallback';
 
     // Short cache so admin/Polar changes propagate quickly but we avoid hammering Polar.
     await this.cacheService.set(cacheKey, result, 300);
@@ -714,7 +722,9 @@ export class SubscriptionService {
       if (error || !data || data.length === 0) {
         console.log('Using fallback plan configuration');
         const freeCfg = PLAN_CONFIGURATIONS.find((p) => p.planType === 'free');
-        const configPlans = freeCfg ? [freeCfg, ...getPublicPlans()] : getPublicPlans();
+        const configPlans = freeCfg
+          ? [freeCfg, ...getPublicPlans()]
+          : getPublicPlans();
         plans = configPlans.map((plan, index) => ({
           id: `config-${plan.planType}`,
           planType: plan.planType,
@@ -742,7 +752,9 @@ export class SubscriptionService {
       console.error('Error getting subscription plans:', error);
 
       const freeCfg = PLAN_CONFIGURATIONS.find((p) => p.planType === 'free');
-      const configPlans = freeCfg ? [freeCfg, ...getPublicPlans()] : getPublicPlans();
+      const configPlans = freeCfg
+        ? [freeCfg, ...getPublicPlans()]
+        : getPublicPlans();
       return configPlans.map((plan, index) => ({
         id: `fallback-${plan.planType}`,
         planType: plan.planType,
@@ -1010,14 +1022,15 @@ export class SubscriptionService {
 
       if (polarSubscriptionId) {
         // Check if the subscription exists in the current Polar environment
-        const subscriptionExists = await this.polarService.checkSubscriptionExists(polarSubscriptionId);
+        const subscriptionExists =
+          await this.polarService.checkSubscriptionExists(polarSubscriptionId);
         if (!subscriptionExists) {
           // Subscription was created in a different environment (e.g., sandbox vs production)
           // Cancel locally only - the subscription doesn't exist in current Polar environment
           localOnlyCancellation = true;
           console.warn(
             `Subscription ${polarSubscriptionId} for user ${userId} not found in current Polar environment. ` +
-            `Performing local-only cancellation. Subscription was likely created in a different environment (sandbox vs production).`
+              `Performing local-only cancellation. Subscription was likely created in a different environment (sandbox vs production).`,
           );
         } else {
           // Subscription exists in Polar - cancel via Polar API
@@ -1051,7 +1064,8 @@ export class SubscriptionService {
         success: true,
         cancelledViaPolar,
         ...(localOnlyCancellation && {
-          message: 'Your subscription has been cancelled. Note: This subscription was created in a different environment, so it was cancelled locally only. You can now subscribe to a new plan.',
+          message:
+            'Your subscription has been cancelled. Note: This subscription was created in a different environment, so it was cancelled locally only. You can now subscribe to a new plan.',
         }),
       };
     } catch (error) {
@@ -1073,14 +1087,17 @@ export class SubscriptionService {
     }
 
     // Check if the subscription exists in the current Polar environment
-    const subscriptionExists = await this.polarService.checkSubscriptionExists(polarSubscriptionId);
+    const subscriptionExists =
+      await this.polarService.checkSubscriptionExists(polarSubscriptionId);
     if (!subscriptionExists) {
       // Subscription was created in a different environment (e.g., sandbox vs production)
       throw new BadRequestException({
-        message: 'Your subscription was created in a different billing environment and cannot be modified here.',
+        message:
+          'Your subscription was created in a different billing environment and cannot be modified here.',
         code: 'SUBSCRIPTION_ENVIRONMENT_MISMATCH',
         action: 'cancel_and_resubscribe',
-        detail: 'Please cancel your current plan and subscribe fresh to continue.',
+        detail:
+          'Please cancel your current plan and subscribe fresh to continue.',
       });
     }
 
@@ -1154,13 +1171,23 @@ export class SubscriptionService {
         .single();
 
       if (e2) {
-        console.error('Error updating subscription in changePlanForExistingSubscription:', e2);
-        throw new Error(`Failed to update subscription in database: ${e2.message}`);
+        console.error(
+          'Error updating subscription in changePlanForExistingSubscription:',
+          e2,
+        );
+        throw new Error(
+          `Failed to update subscription in database: ${e2.message}`,
+        );
       }
       updated = d2;
     } else {
-      console.error('Error updating subscription in changePlanForExistingSubscription:', e1);
-      throw new Error(`Failed to update subscription in database: ${e1.message}`);
+      console.error(
+        'Error updating subscription in changePlanForExistingSubscription:',
+        e1,
+      );
+      throw new Error(
+        `Failed to update subscription in database: ${e1.message}`,
+      );
     }
 
     // Clear cache so fresh data is returned
@@ -1187,7 +1214,8 @@ export class SubscriptionService {
       subscriptionStartDate: row.subscription_start_date,
       subscriptionEndDate: row.subscription_end_date,
       resetDate: row.reset_date,
-      polarSubscriptionId: row.polar_subscription_id || row.stripe_subscription_id,
+      polarSubscriptionId:
+        row.polar_subscription_id || row.stripe_subscription_id,
       polarCustomerId: row.polar_customer_id || row.stripe_customer_id,
       stripeSubscriptionId: row.stripe_subscription_id,
       stripeCustomerId: row.stripe_customer_id,
@@ -1217,7 +1245,9 @@ export class SubscriptionService {
     );
   }
 
-  private async resolvePolarSubscriptionId(userId: string): Promise<string | null> {
+  private async resolvePolarSubscriptionId(
+    userId: string,
+  ): Promise<string | null> {
     const current = await this.getUserSubscription(userId, {
       bypassCache: true,
     });
@@ -1275,7 +1305,8 @@ export class SubscriptionService {
     if (invoice.minio_url) return invoice.minio_url;
     if (invoice.invoice_url) return invoice.invoice_url;
 
-    const fetchedUrl = await this.polarService.getTransactionInvoiceUrl(transactionId);
+    const fetchedUrl =
+      await this.polarService.getTransactionInvoiceUrl(transactionId);
     if (!fetchedUrl) return null;
 
     await this.supabaseService

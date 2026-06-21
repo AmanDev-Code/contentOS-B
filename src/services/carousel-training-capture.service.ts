@@ -124,7 +124,7 @@ export class CarouselTrainingCaptureService {
       }
 
       const body = redactCarouselCapturePayload(
-        params.payload as Record<string, unknown>,
+        params.payload,
         params.consentOptIn,
       );
 

@@ -29,7 +29,8 @@ export class MissedPostSweeperCronService {
   private readonly logger = new Logger(MissedPostSweeperCronService.name);
 
   constructor(
-    @InjectQueue(QUEUE_NAMES.SOCIAL_PUBLISH) private readonly publishQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.SOCIAL_PUBLISH)
+    private readonly publishQueue: Queue,
     private readonly supabaseService: SupabaseService,
   ) {}
 
@@ -40,7 +41,9 @@ export class MissedPostSweeperCronService {
     const { data: overdue, error } = await this.supabaseService
       .getServiceClient()
       .from('scheduled_posts')
-      .select('id, job_id, content_id, user_id, platform, actor_type, organization_urn, retry_count')
+      .select(
+        'id, job_id, content_id, user_id, platform, actor_type, organization_urn, retry_count',
+      )
       .in('status', ['pending', 'processing'])
       .lt('scheduled_for', cutoff)
       .order('scheduled_for', { ascending: true })
@@ -56,7 +59,9 @@ export class MissedPostSweeperCronService {
       return;
     }
 
-    this.logger.log(`Missed-post sweeper found ${overdue.length} overdue post(s)`);
+    this.logger.log(
+      `Missed-post sweeper found ${overdue.length} overdue post(s)`,
+    );
 
     for (const post of overdue) {
       const retryCount = post.retry_count ?? 0;
@@ -88,8 +93,7 @@ export class MissedPostSweeperCronService {
           })
           .eq('id', post.id);
 
-        const jobId =
-          post.job_id || `sweep-${post.content_id}-${Date.now()}`;
+        const jobId = post.job_id || `sweep-${post.content_id}-${Date.now()}`;
         await this.publishQueue.add(
           'publish-scheduled-post',
           {

@@ -29,7 +29,11 @@ function looksLikePlaceholderTitle(title: string): boolean {
   const t = title.trim();
   if (/^carousel\s+slide\s*\d+\s*$/i.test(t)) return true;
   if (/^slide\s*\d+\s*$/i.test(t)) return true;
-  if (/^slide\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*$/i.test(t))
+  if (
+    /^slide\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*$/i.test(
+      t,
+    )
+  )
     return true;
   return false;
 }
@@ -50,10 +54,15 @@ function isLowInformationDenseLine(line: string): boolean {
   return false;
 }
 
-function denseGenericLineIssues(slideIndex: number, lines: string[]): CarouselQualityIssue[] {
+function denseGenericLineIssues(
+  slideIndex: number,
+  lines: string[],
+): CarouselQualityIssue[] {
   const issues: CarouselQualityIssue[] = [];
   let fluff = 0;
-  const normalized = lines.map((l) => l.replace(/\s+/g, ' ').trim().toLowerCase());
+  const normalized = lines.map((l) =>
+    l.replace(/\s+/g, ' ').trim().toLowerCase(),
+  );
   const counts = new Map<string, number>();
   for (const l of normalized) {
     counts.set(l, (counts.get(l) ?? 0) + 1);
@@ -116,7 +125,9 @@ export function analyzeProgrammingCarouselSurface(textBlob: string): boolean {
   return PROGRAMMING_SURFACE_RE.test(textBlob);
 }
 
-export function topicRequestsFilledHandwritingNotes(topicLower: string): boolean {
+export function topicRequestsFilledHandwritingNotes(
+  topicLower: string,
+): boolean {
   return (
     /\bcomplete\s+handwritten\b/.test(topicLower) ||
     /\bhandwritten\s+notes\b/.test(topicLower) ||
@@ -176,8 +187,7 @@ export function analyzeCarouselQuality(params: {
   const { slides, expectedCount, topicLower, resolvedVisualStyle } = params;
   const noteDensity: CarouselNoteDensityLevel =
     params.noteDensity ??
-    (resolvedVisualStyle &&
-      isNotebookPaperCarouselStyle(resolvedVisualStyle)
+    (resolvedVisualStyle && isNotebookPaperCarouselStyle(resolvedVisualStyle)
       ? 'dense'
       : 'standard');
   const programmingMode = Boolean(params.programmingModeEffective);
@@ -196,7 +206,11 @@ export function analyzeCarouselQuality(params: {
   const minBodyDense = expectedCount >= 10 ? 36 : 40;
   const minBodyCompact = expectedCount >= 10 ? 40 : 48;
   const minBodyLen =
-    noteDensity === 'dense' ? minBodyDense : noteDensity === 'compact' ? 28 : minBodyCompact;
+    noteDensity === 'dense'
+      ? minBodyDense
+      : noteDensity === 'compact'
+        ? 28
+        : minBodyCompact;
   const minTitleLen = 4;
 
   const bodies = slides.map((s) => (s.body || '').trim());
@@ -279,7 +293,11 @@ export function analyzeCarouselQuality(params: {
             break;
           }
         }
-      } else if (noteDensity !== 'compact' && expectedCount >= 8 && !slides[i].notebookSections?.length) {
+      } else if (
+        noteDensity !== 'compact' &&
+        expectedCount >= 8 &&
+        !slides[i].notebookSections?.length
+      ) {
         issues.push({
           code: 'bullets_missing',
           detail: `Slide ${i + 1}: for ${noteDensity} carousels with ${expectedCount}+ slides, include bullets OR structured notebookSections.`,
@@ -295,40 +313,50 @@ export function analyzeCarouselQuality(params: {
         marginNotes: slides[i].marginNotes,
       });
       const structuredLines = collectStructuredNotebookLines(slides[i]);
-      
+
       // STRICTER DENSITY REQUIREMENTS: Each slide should have 15-25+ substantive teaching lines
-      const denseLinesFloor = Math.max(15, Math.min(22, Math.round(16 + slides.length / 5)));
+      const denseLinesFloor = Math.max(
+        15,
+        Math.min(22, Math.round(16 + slides.length / 5)),
+      );
       const minBulletsCount = 8;
       const minDenseBulletsCount = 4;
       const minCodeSnippetsForTech = 1;
       const minMarginNotes = 3;
       const minNotebookSections = 3;
 
-      if (!slides[i].notebookSections?.length || slides[i].notebookSections!.length < minNotebookSections) {
+      if (
+        !slides[i].notebookSections?.length ||
+        slides[i].notebookSections!.length < minNotebookSections
+      ) {
         issues.push({
           code: 'dense_missing_sections',
           detail: `Slide ${i + 1}: dense mode requires at least ${minNotebookSections} notebookSections (e.g., Definition, Example, Pitfalls, Tips).`,
         });
       }
-      
+
       // Check bullets count
-      const bulletsCount = (slides[i].bullets || []).filter(b => b.trim().length > 20).length;
+      const bulletsCount = (slides[i].bullets || []).filter(
+        (b) => b.trim().length > 20,
+      ).length;
       if (bulletsCount < minBulletsCount) {
         issues.push({
           code: 'dense_bullets_sparse',
           detail: `Slide ${i + 1}: need ≥${minBulletsCount} substantive bullets (have ${bulletsCount}). Each bullet must be ≥20 chars with real information.`,
         });
       }
-      
+
       // Check denseBullets
-      const denseBulletsCount = (slides[i].denseBullets || []).filter(b => b.trim().length > 10).length;
+      const denseBulletsCount = (slides[i].denseBullets || []).filter(
+        (b) => b.trim().length > 10,
+      ).length;
       if (denseBulletsCount < minDenseBulletsCount) {
         issues.push({
           code: 'dense_densebullets_sparse',
           detail: `Slide ${i + 1}: need ≥${minDenseBulletsCount} denseBullets for quick reference (have ${denseBulletsCount}).`,
         });
       }
-      
+
       // Check margin notes
       const marginOk = (slides[i].marginNotes || []).filter(
         (x) => x.trim().length > 12,
@@ -339,24 +367,29 @@ export function analyzeCarouselQuality(params: {
           detail: `Slide ${i + 1}: need ≥${minMarginNotes} substantive marginNotes callouts (tip / mistake / remember). Have ${marginOk}.`,
         });
       }
-      
+
       // Check code snippets for technical topics
-      const codeSnippetsCount = (slides[i].codeSnippets || []).filter(c => c.trim().length > 10).length;
-      const isTechnicalTopic = /\b(code|programming|algorithm|data\s*structure|java|python|javascript|api|function|class|array|list|stack|queue|tree|graph|hash|leetcode|dsa)\b/i.test(topicLower);
+      const codeSnippetsCount = (slides[i].codeSnippets || []).filter(
+        (c) => c.trim().length > 10,
+      ).length;
+      const isTechnicalTopic =
+        /\b(code|programming|algorithm|data\s*structure|java|python|javascript|api|function|class|array|list|stack|queue|tree|graph|hash|leetcode|dsa)\b/i.test(
+          topicLower,
+        );
       if (isTechnicalTopic && codeSnippetsCount < minCodeSnippetsForTech) {
         issues.push({
           code: 'dense_code_missing',
           detail: `Slide ${i + 1}: technical topics need ≥${minCodeSnippetsForTech} code snippet(s). Have ${codeSnippetsCount}.`,
         });
       }
-      
+
       if (metrics.lineCount < denseLinesFloor) {
         issues.push({
           code: 'dense_slide_too_sparse',
           detail: `Slide ${i + 1}: need ≥${denseLinesFloor} substantive lines/bullets (have ${metrics.lineCount}). FILL THE PAGE with content.`,
         });
       }
-      
+
       // Stricter character count requirements
       const minCharsDeck =
         expectedCount >= 10
@@ -381,7 +414,10 @@ export function analyzeCarouselQuality(params: {
         lineCount: metrics.lineCount,
         maxLines: DENSE_NOTEBOOK_QUALITY.assumedMaxLines,
       });
-      const targetFillRatio = Math.max(0.7, DENSE_NOTEBOOK_QUALITY.minFillRatio);
+      const targetFillRatio = Math.max(
+        0.7,
+        DENSE_NOTEBOOK_QUALITY.minFillRatio,
+      );
       if (fill < targetFillRatio) {
         issues.push({
           code: 'dense_page_underfilled',
@@ -400,8 +436,7 @@ export function analyzeCarouselQuality(params: {
     }
 
     const notebookStyleGate =
-      resolvedVisualStyle &&
-      isNotebookPaperCarouselStyle(resolvedVisualStyle);
+      resolvedVisualStyle && isNotebookPaperCarouselStyle(resolvedVisualStyle);
 
     if (notebookStyleGate && resolvedVisualStyle) {
       const p = prompt.toLowerCase();
@@ -437,7 +472,11 @@ export function analyzeCarouselQuality(params: {
     }
 
     /* programming template per slide hints */
-    if (programmingMode && noteDensity === 'dense' && slides[i].notebookSections?.length) {
+    if (
+      programmingMode &&
+      noteDensity === 'dense' &&
+      slides[i].notebookSections?.length
+    ) {
       const headings = slides[i]
         .notebookSections!.map((s) => `${s.subheading || ''}`)
         .join(' ')
@@ -447,7 +486,9 @@ export function analyzeCarouselQuality(params: {
       if (/\bpitfall|mistake|watch|gotcha|trap\b/.test(headings)) hit++;
       if (/\bcomplexity|big-? ?o|perf|latency\b/.test(headings)) hit++;
       if (/\b(java|pseudo|snippet|example|idea)\b/.test(headings)) hit++;
-      const codeOnSlide = (slides[i].codeSnippets ?? []).some((c) => c.trim().length > 8);
+      const codeOnSlide = (slides[i].codeSnippets ?? []).some(
+        (c) => c.trim().length > 8,
+      );
       if (hit < 2 && !codeOnSlide) {
         issues.push({
           code: 'programming_section_hints_missing',
@@ -476,7 +517,11 @@ export function analyzeCarouselQuality(params: {
     }
   }
 
-  if (topicTokens.length >= 2 && slides.length > 0 && noteDensity !== 'compact') {
+  if (
+    topicTokens.length >= 2 &&
+    slides.length > 0 &&
+    noteDensity !== 'compact'
+  ) {
     let weakRelevance = 0;
     for (const slide of slides) {
       const blob = `${slide.title} ${slide.body}`.toLowerCase();
@@ -492,7 +537,9 @@ export function analyzeCarouselQuality(params: {
     }
   }
 
-  const normalizedBodies = bodies.map((b) => b.replace(/\s+/g, ' ').toLowerCase());
+  const normalizedBodies = bodies.map((b) =>
+    b.replace(/\s+/g, ' ').toLowerCase(),
+  );
   for (let i = 1; i < normalizedBodies.length; i++) {
     if (
       normalizedBodies[i].length > 20 &&
@@ -521,7 +568,8 @@ export function analyzeCarouselQuality(params: {
     if (requiredJava && !/\bjava\b/.test(deckBlob)) {
       issues.push({
         code: 'topic_keywords_weak',
-        detail: 'Topic mentions Java but few slides reference Java specifically.',
+        detail:
+          'Topic mentions Java but few slides reference Java specifically.',
       });
     }
     let hits = 0;
@@ -605,10 +653,14 @@ export function meetsMinimumShippableCarousel(params: {
   /** Remaining analyzer issues — used to block “ship anyway” for serious codes */
   remainingIssues?: CarouselQualityIssue[];
 }): boolean {
-  const { slides, expectedCount, programmingModeEffective, remainingIssues } = params;
-  const noteDensity: CarouselNoteDensityLevel = params.noteDensity ?? 'standard';
+  const { slides, expectedCount, programmingModeEffective, remainingIssues } =
+    params;
+  const noteDensity: CarouselNoteDensityLevel =
+    params.noteDensity ?? 'standard';
 
-  if (remainingIssues?.some((i) => CAROUSEL_MIN_SHIP_BLOCKING_CODES.has(i.code))) {
+  if (
+    remainingIssues?.some((i) => CAROUSEL_MIN_SHIP_BLOCKING_CODES.has(i.code))
+  ) {
     return false;
   }
 
@@ -636,10 +688,14 @@ export function meetsMinimumShippableCarousel(params: {
       // Need at least 3 sections for proper organization
       if ((slides[i].notebookSections?.length ?? 0) < 3) return false;
       // Need at least 2 margin notes
-      const marginOk = (slides[i].marginNotes || []).filter((x) => x.trim().length > 10).length;
+      const marginOk = (slides[i].marginNotes || []).filter(
+        (x) => x.trim().length > 10,
+      ).length;
       if (marginOk < 2) return false;
       // Need at least 6 substantial bullets
-      const bulletsOk = (slides[i].bullets || []).filter((x) => x.trim().length > 20).length;
+      const bulletsOk = (slides[i].bullets || []).filter(
+        (x) => x.trim().length > 20,
+      ).length;
       if (bulletsOk < 6) return false;
       // Body must be substantial
       if ((slides[i].body || '').trim().length < 100) return false;
@@ -650,10 +706,11 @@ export function meetsMinimumShippableCarousel(params: {
     let programmingSurfaceHits = 0;
     for (const s of slides) {
       const bullets = Array.isArray(s.bullets)
-        ? s.bullets!.map((b) => String(b).trim()).filter(Boolean)
+        ? s.bullets.map((b) => String(b).trim()).filter(Boolean)
         : [];
       const slideBlob = `${s.title}\n${s.body}\n${bullets.join(' ')}\n${(s.denseBullets ?? []).join(' ')}\n${(s.codeSnippets ?? []).join(' ')}\n${collectStructuredNotebookLines(s).join(' ')}`;
-      if (analyzeProgrammingCarouselSurface(slideBlob)) programmingSurfaceHits++;
+      if (analyzeProgrammingCarouselSurface(slideBlob))
+        programmingSurfaceHits++;
     }
     const need = Math.max(2, Math.ceil(slides.length * 0.28));
     if (programmingSurfaceHits < need) return false;
@@ -715,7 +772,10 @@ export function buildCarouselStrictRetryInstruction(
           '- Show edge cases and common bugs',
         ]
       : prog
-        ? ['', '- Include language-specific code examples, Big-O, and common pitfalls.']
+        ? [
+            '',
+            '- Include language-specific code examples, Big-O, and common pitfalls.',
+          ]
         : [];
 
   return [

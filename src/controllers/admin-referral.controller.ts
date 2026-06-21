@@ -16,11 +16,22 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Multer } from 'multer';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiTags,
+  ApiQuery,
+  ApiConsumes,
+  ApiBody,
+} from '@nestjs/swagger';
 import { AuthGuard } from '../guards/auth.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
 import { AdminGuard } from '../guards/admin.guard';
-import { ReferralService, ReferralSettings, ReferralBanner } from '../services/referral.service';
+import {
+  ReferralService,
+  ReferralSettings,
+  ReferralBanner,
+} from '../services/referral.service';
 import { MinioService } from '../services/minio.service';
 
 @ApiTags('admin-referral')
@@ -58,7 +69,10 @@ export class AdminReferralController {
   ) {
     // Validate inputs
     if (body.credits_per_referral !== undefined) {
-      if (!Number.isInteger(body.credits_per_referral) || body.credits_per_referral < 0) {
+      if (
+        !Number.isInteger(body.credits_per_referral) ||
+        body.credits_per_referral < 0
+      ) {
         throw new HttpException(
           'credits_per_referral must be a non-negative integer',
           HttpStatus.BAD_REQUEST,
@@ -67,7 +81,10 @@ export class AdminReferralController {
     }
 
     if (body.min_actions_to_complete !== undefined) {
-      if (!Number.isInteger(body.min_actions_to_complete) || body.min_actions_to_complete < 1) {
+      if (
+        !Number.isInteger(body.min_actions_to_complete) ||
+        body.min_actions_to_complete < 1
+      ) {
         throw new HttpException(
           'min_actions_to_complete must be a positive integer',
           HttpStatus.BAD_REQUEST,
@@ -122,7 +139,13 @@ export class AdminReferralController {
   @UseInterceptors(FileInterceptor('image'))
   async createBanner(
     @UploadedFile() file: Multer.File,
-    @Body() body: { title: string; link_url?: string; is_active?: string; display_order?: string },
+    @Body()
+    body: {
+      title: string;
+      link_url?: string;
+      is_active?: string;
+      display_order?: string;
+    },
   ) {
     if (!body.title?.trim()) {
       throw new HttpException('title is required', HttpStatus.BAD_REQUEST);
@@ -134,8 +157,16 @@ export class AdminReferralController {
       // Upload image to MinIO
       try {
         const fileName = `referral-banners/${Date.now()}-${file.originalname}`;
-        await this.minioService.uploadFile('contentos-media', fileName, file.buffer, file.mimetype);
-        imageUrl = await this.minioService.getPublicUrl('contentos-media', fileName);
+        await this.minioService.uploadFile(
+          'contentos-media',
+          fileName,
+          file.buffer,
+          file.mimetype,
+        );
+        imageUrl = await this.minioService.getPublicUrl(
+          'contentos-media',
+          fileName,
+        );
       } catch (error) {
         throw new HttpException(
           'Failed to upload image',
@@ -154,7 +185,9 @@ export class AdminReferralController {
         image_url: imageUrl,
         link_url: body.link_url?.trim() || null,
         is_active: body.is_active === 'true' || body.is_active === undefined,
-        display_order: body.display_order ? parseInt(body.display_order, 10) : 0,
+        display_order: body.display_order
+          ? parseInt(body.display_order, 10)
+          : 0,
       });
       return { success: true, data: banner };
     } catch (error) {
@@ -172,9 +205,18 @@ export class AdminReferralController {
   async updateBanner(
     @Param('id') id: string,
     @UploadedFile() file: Multer.File,
-    @Body() body: Partial<{ title: string; link_url: string; is_active: string; display_order: string; image_url: string }>,
+    @Body()
+    body: Partial<{
+      title: string;
+      link_url: string;
+      is_active: string;
+      display_order: string;
+      image_url: string;
+    }>,
   ) {
-    const updates: Partial<Omit<ReferralBanner, 'id' | 'created_at' | 'updated_at'>> = {};
+    const updates: Partial<
+      Omit<ReferralBanner, 'id' | 'created_at' | 'updated_at'>
+    > = {};
 
     if (body.title !== undefined) {
       updates.title = body.title.trim();
@@ -195,8 +237,16 @@ export class AdminReferralController {
     if (file) {
       try {
         const fileName = `referral-banners/${Date.now()}-${file.originalname}`;
-        await this.minioService.uploadFile('contentos-media', fileName, file.buffer, file.mimetype);
-        updates.image_url = await this.minioService.getPublicUrl('contentos-media', fileName);
+        await this.minioService.uploadFile(
+          'contentos-media',
+          fileName,
+          file.buffer,
+          file.mimetype,
+        );
+        updates.image_url = await this.minioService.getPublicUrl(
+          'contentos-media',
+          fileName,
+        );
       } catch (error) {
         throw new HttpException(
           'Failed to upload image',
@@ -314,7 +364,11 @@ export class AdminReferralController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
-  @ApiQuery({ name: 'status', required: false, enum: ['active', 'inactive', 'all'] })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['active', 'inactive', 'all'],
+  })
   async listCodes(
     @Query('page') page?: string,
     @Query('limit') limit?: string,

@@ -103,7 +103,8 @@ export class AdminPaymentGatewayController {
   @Get('health')
   @ApiOperation({
     summary: 'Get payment gateway health status',
-    description: 'Returns comprehensive health status for Polar integration including products, checkout links, webhooks, and discount codes',
+    description:
+      'Returns comprehensive health status for Polar integration including products, checkout links, webhooks, and discount codes',
   })
   async getHealthStatus(): Promise<HealthCheckResult> {
     const now = new Date().toISOString();
@@ -154,9 +155,13 @@ export class AdminPaymentGatewayController {
   @Post('run-checkout-links-script')
   @ApiOperation({
     summary: 'Regenerate checkout links',
-    description: 'Triggers regeneration of Polar checkout links for all configured products',
+    description:
+      'Triggers regeneration of Polar checkout links for all configured products',
   })
-  async runCheckoutLinksScript(): Promise<{ success: boolean; message: string }> {
+  async runCheckoutLinksScript(): Promise<{
+    success: boolean;
+    message: string;
+  }> {
     try {
       // This is a placeholder - in a real implementation you'd regenerate checkout links
       // For now, just verify that Polar is configured
@@ -184,7 +189,8 @@ export class AdminPaymentGatewayController {
   @Post('setup-production')
   @ApiOperation({
     summary: 'Setup Polar production environment',
-    description: 'Creates products and checkout links in Polar production. See docs/integrations/polar-setup-production.md for details.',
+    description:
+      'Creates products and checkout links in Polar production. See docs/integrations/polar-setup-production.md for details.',
   })
   async setupProduction(): Promise<{
     success: boolean;
@@ -192,7 +198,13 @@ export class AdminPaymentGatewayController {
     details?: {
       productsCreated: number;
       checkoutLinksCreated: number;
-      products: Array<{ key: string; name: string; productId: string; priceId: string; price: string }>;
+      products: Array<{
+        key: string;
+        name: string;
+        productId: string;
+        priceId: string;
+        price: string;
+      }>;
       checkoutLinks: Array<{ key: string; url: string }>;
       nextSteps: string[];
     };
@@ -200,7 +212,9 @@ export class AdminPaymentGatewayController {
     try {
       const mode = this.configService.get<string>('polar.mode');
       const accessToken = this.configService.get<string>('polar.accessToken');
-      const webhookSecret = this.configService.get<string>('polar.webhookSecret');
+      const webhookSecret = this.configService.get<string>(
+        'polar.webhookSecret',
+      );
       const orgId = this.configService.get<string>('polar.organization');
 
       // Check if we're in production mode
@@ -227,19 +241,44 @@ export class AdminPaymentGatewayController {
       }
 
       // Check if products already exist (using Polar API)
-      const existingProducts = await this.polarService.fetchCatalogLiveSnapshot();
+      const existingProducts =
+        await this.polarService.fetchCatalogLiveSnapshot();
       const existingProductIds = existingProducts.items
-        .filter(item => !item.error)
-        .map(item => `${item.planType}_${item.billingCycle}`);
+        .filter((item) => !item.error)
+        .map((item) => `${item.planType}_${item.billingCycle}`);
 
-      const missingProducts: Array<{ key: string; name: string; cents: number }> = [];
-      const expectedProducts: Array<{ key: string; name: string; cents: number }> = [
-        { key: 'standard_monthly', name: 'Trndinn Standard (Monthly)', cents: 9900 },
-        { key: 'standard_yearly', name: 'Trndinn Standard (Yearly)', cents: 98600 },
+      const missingProducts: Array<{
+        key: string;
+        name: string;
+        cents: number;
+      }> = [];
+      const expectedProducts: Array<{
+        key: string;
+        name: string;
+        cents: number;
+      }> = [
+        {
+          key: 'standard_monthly',
+          name: 'Trndinn Standard (Monthly)',
+          cents: 9900,
+        },
+        {
+          key: 'standard_yearly',
+          name: 'Trndinn Standard (Yearly)',
+          cents: 98600,
+        },
         { key: 'pro_monthly', name: 'Trndinn Pro (Monthly)', cents: 14900 },
         { key: 'pro_yearly', name: 'Trndinn Pro (Yearly)', cents: 148400 },
-        { key: 'ultimate_monthly', name: 'Trndinn Ultimate (Monthly)', cents: 19900 },
-        { key: 'ultimate_yearly', name: 'Trndinn Ultimate (Yearly)', cents: 198200 },
+        {
+          key: 'ultimate_monthly',
+          name: 'Trndinn Ultimate (Monthly)',
+          cents: 19900,
+        },
+        {
+          key: 'ultimate_yearly',
+          name: 'Trndinn Ultimate (Yearly)',
+          cents: 198200,
+        },
       ];
 
       for (const product of expectedProducts) {
@@ -253,8 +292,8 @@ export class AdminPaymentGatewayController {
           `ultimate${product.key.includes('ultimate') ? product.key.split('_')[1]?.charAt(0).toUpperCase() + product.key.split('_')[1]?.slice(1) : ''}`,
         ].filter(Boolean);
 
-        const exists = possibleKeys.some(k =>
-          existingProductIds.some(id => id.toLowerCase() === k.toLowerCase())
+        const exists = possibleKeys.some((k) =>
+          existingProductIds.some((id) => id.toLowerCase() === k.toLowerCase()),
         );
 
         if (!exists) {
@@ -307,16 +346,23 @@ export class AdminPaymentGatewayController {
         '  - Enable events: checkout.created, checkout.completed, subscription.created,',
         '    subscription.active, subscription.updated, subscription.canceled, order.paid',
         '  - Copy webhook secret to POLAR_WEBHOOK_SECRET',
-        ...(needsProducts[0] ? ['', 'Missing products detected:', ...missingProducts.map(p => `  - ${p.name}`)] : []),
+        ...(needsProducts[0]
+          ? [
+              '',
+              'Missing products detected:',
+              ...missingProducts.map((p) => `  - ${p.name}`),
+            ]
+          : []),
       ];
 
       return {
         success: true,
-        message: 'Polar production setup guidance provided. Run the CLI script to complete setup.',
+        message:
+          'Polar production setup guidance provided. Run the CLI script to complete setup.',
         details: {
           productsCreated: 0,
           checkoutLinksCreated: 0,
-          products: missingProducts.map(p => ({
+          products: missingProducts.map((p) => ({
             key: p.key,
             name: p.name,
             productId: '(not created yet)',
@@ -345,7 +391,7 @@ export class AdminPaymentGatewayController {
 
     try {
       const catalog = await this.polarService.fetchCatalogLiveSnapshot();
-      const products = catalog.items.map(item => ({
+      const products: PolarProductHealth[] = catalog.items.map((item) => ({
         id: `${item.planType}_${item.billingCycle}`,
         name: `${item.planType.charAt(0).toUpperCase() + item.planType.slice(1)} ${item.billingCycle.charAt(0).toUpperCase() + item.billingCycle.slice(1)}`,
         status: (item.error ? 'degraded' : 'ok') as HealthStatus,
@@ -354,14 +400,15 @@ export class AdminPaymentGatewayController {
       }));
 
       // Check if we have configured products
-      const configuredCount = products.filter(p => p.priceCount > 0).length;
+      const configuredCount = products.filter((p) => p.priceCount > 0).length;
       const totalExpected = 6; // standard/pro/ultimate × monthly/yearly
 
-      const status: HealthStatus = configuredCount === totalExpected
-        ? 'ok'
-        : configuredCount > 0
-          ? 'degraded'
-          : 'error';
+      const status: HealthStatus =
+        configuredCount === totalExpected
+          ? 'ok'
+          : configuredCount > 0
+            ? 'degraded'
+            : 'error';
 
       return {
         products,
@@ -390,8 +437,8 @@ export class AdminPaymentGatewayController {
 
     // Generate checkout links based on configured products
     const links: CheckoutLinkHealth[] = catalogSnapshot.products
-      .filter(p => p.status !== 'error')
-      .map(product => {
+      .filter((p) => p.status !== 'error')
+      .map((product) => {
         const [planType, billingCycle] = product.id.split('_');
         return {
           id: `${planType}-${billingCycle}`,
@@ -411,9 +458,11 @@ export class AdminPaymentGatewayController {
 
   private getCheckoutUrl(planType: string, billingCycle: string): string {
     const mode = this.configService.get<string>('polar.mode') || 'sandbox';
-    const baseUrl = mode === 'production' ? 'https://polar.sh' : 'https://sandbox.polar.sh';
-    const products = this.configService.get<Record<string, string>>('polar.products') || {};
-    const key = `${planType}${billingCycle.charAt(0).toUpperCase() + billingCycle.slice(1)}` as keyof typeof products;
+    const baseUrl =
+      mode === 'production' ? 'https://polar.sh' : 'https://sandbox.polar.sh';
+    const products =
+      this.configService.get<Record<string, string>>('polar.products') || {};
+    const key = `${planType}${billingCycle.charAt(0).toUpperCase() + billingCycle.slice(1)}`;
     const productId = products[key];
 
     if (!productId) {
@@ -429,16 +478,24 @@ export class AdminPaymentGatewayController {
     try {
       const codes = await this.discountCodesService.listAll();
       const total = codes.length;
-      const synced = codes.filter(c => c.polar_discount_id && !c.polar_sync_error).length;
-      const pending = codes.filter(c => !c.polar_discount_id && !c.polar_sync_error).length;
-      const error = codes.filter(c => c.polar_sync_error).length;
+      const synced = codes.filter(
+        (c) => c.polar_discount_id && !c.polar_sync_error,
+      ).length;
+      const pending = codes.filter(
+        (c) => !c.polar_discount_id && !c.polar_sync_error,
+      ).length;
+      const error = codes.filter((c) => c.polar_sync_error).length;
 
-      const lastSyncAt = codes.length > 0
-        ? codes
-          .filter(c => c.updated_at)
-          .sort((a, b) => new Date(b.updated_at!).getTime() - new Date(a.updated_at!).getTime())[0]
-          ?.updated_at || null
-        : null;
+      const lastSyncAt =
+        codes.length > 0
+          ? codes
+              .filter((c) => c.updated_at)
+              .sort(
+                (a, b) =>
+                  new Date(b.updated_at).getTime() -
+                  new Date(a.updated_at).getTime(),
+              )[0]?.updated_at || null
+          : null;
 
       const status: HealthStatus = error > 0 ? 'degraded' : 'ok';
 
@@ -493,7 +550,7 @@ export class AdminPaymentGatewayController {
   private calculateOverallStatus(statuses: HealthStatus[]): HealthStatus {
     if (statuses.includes('error')) return 'error';
     if (statuses.includes('degraded')) return 'degraded';
-    if (statuses.every(s => s === 'ok')) return 'ok';
+    if (statuses.every((s) => s === 'ok')) return 'ok';
     return 'unknown';
   }
 
@@ -532,7 +589,8 @@ export class AdminPaymentGatewayController {
         healthStatus = 'error';
       } else if (!status.lastFetchedAt) {
         healthStatus = 'degraded';
-        message = 'Forex API is reachable but no rates stored yet — run refresh';
+        message =
+          'Forex API is reachable but no rates stored yet — run refresh';
       } else {
         const lastFetched = new Date(status.lastFetchedAt);
         const hoursSinceFetch =
@@ -559,7 +617,7 @@ export class AdminPaymentGatewayController {
       const inrToUsd =
         usdToInr && usdToInr > 0
           ? 1 / usdToInr
-          : status.inrToUsd ?? currencyData.inr_to_usd ?? null;
+          : (status.inrToUsd ?? currencyData.inr_to_usd ?? null);
 
       return {
         status: healthStatus,

@@ -44,8 +44,8 @@ export class ContentController {
       return v ?? fallback;
     };
     const tagStr = first(tag, '').trim();
-    const parsedLimit = Number(first(limit as any, '20'));
-    const parsedOffset = Number(first(offset as any, '0'));
+    const parsedLimit = Number(first(limit, '20'));
+    const parsedOffset = Number(first(offset, '0'));
     const safeLimit =
       Number.isFinite(parsedLimit) && parsedLimit >= 1
         ? Math.min(Math.floor(parsedLimit), 100)

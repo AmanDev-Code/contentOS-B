@@ -87,8 +87,9 @@ export class WebResearchService implements OnModuleInit {
 
   private async refreshConfig(): Promise<void> {
     try {
-      const stored =
-        await this.appSettings.get<WebResearchConfig>(WEB_RESEARCH_SETTINGS_KEY);
+      const stored = await this.appSettings.get<WebResearchConfig>(
+        WEB_RESEARCH_SETTINGS_KEY,
+      );
       if (stored) {
         this.config = { ...DEFAULT_CONFIG, ...stored };
       } else {
@@ -186,7 +187,9 @@ export class WebResearchService implements OnModuleInit {
       timeRange?: 'day' | 'week' | 'month' | 'year';
       includeAnswer?: boolean;
     },
-  ): Promise<(WebResearchResult & { promptContext: ResearchPromptContext }) | null> {
+  ): Promise<
+    (WebResearchResult & { promptContext: ResearchPromptContext }) | null
+  > {
     await this.ensureFreshConfig();
 
     const apiKey = this.getApiKey();
@@ -230,16 +233,16 @@ export class WebResearchService implements OnModuleInit {
 
       if (!res.ok) {
         const errText = await res.text().catch(() => 'unknown');
-        this.logger.warn(
-          `Tavily ${res.status}: ${errText.slice(0, 200)}`,
-        );
+        this.logger.warn(`Tavily ${res.status}: ${errText.slice(0, 200)}`);
         return null;
       }
 
       const data = (await res.json()) as TavilyResponse;
       const elapsed = Date.now() - startMs;
 
-      const result: WebResearchResult & { promptContext: ResearchPromptContext } = {
+      const result: WebResearchResult & {
+        promptContext: ResearchPromptContext;
+      } = {
         query: data.query || query,
         answer: data.answer || undefined,
         sources: (data.results || []).map((r) => ({
@@ -276,8 +279,7 @@ export class WebResearchService implements OnModuleInit {
     originalTopic: string,
     ctx?: ResearchPromptContext,
   ): string {
-    const promptCtx =
-      ctx ?? buildResearchPromptContext(originalTopic);
+    const promptCtx = ctx ?? buildResearchPromptContext(originalTopic);
     return formatResearchSystemBlock(research, promptCtx, originalTopic);
   }
 

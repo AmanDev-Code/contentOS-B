@@ -438,7 +438,9 @@ export class OnboardingService {
         .eq('id', item.id);
 
       if (error) {
-        throw new Error(`Failed to reorder question ${item.id}: ${error.message}`);
+        throw new Error(
+          `Failed to reorder question ${item.id}: ${error.message}`,
+        );
       }
     }
 
@@ -531,7 +533,7 @@ export class OnboardingService {
         selected_option: row.selected_option,
         created_at: row.created_at,
         updated_at: row.updated_at,
-      } as OnboardingResponse,
+      },
       question: row.question as OnboardingQuestion,
     }));
   }

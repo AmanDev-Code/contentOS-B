@@ -76,11 +76,14 @@ export class LinkedInPublishBridgeService {
     return { status: 'published', postId: result.platformPostId };
   }
 
-  private async getValidTokens(accountId: string): Promise<OAuthTokenSet | null> {
+  private async getValidTokens(
+    accountId: string,
+  ): Promise<OAuthTokenSet | null> {
     const tokens = await this.tokenVault.readTokens(accountId);
     if (!tokens) return null;
 
-    const stillValid = tokens.expiresAt.getTime() > Date.now() + TOKEN_EXPIRY_SKEW_MS;
+    const stillValid =
+      tokens.expiresAt.getTime() > Date.now() + TOKEN_EXPIRY_SKEW_MS;
     if (stillValid) return tokens;
 
     if (!tokens.refreshToken) return null;
@@ -103,7 +106,9 @@ export class LinkedInPublishBridgeService {
     const storagePath = this.toStoragePath(mediaUrl);
     const kind = mediaType === 'document' ? 'document' : 'image';
     const mimeType =
-      mediaType === 'document' ? 'application/pdf' : this.guessImageMime(storagePath);
+      mediaType === 'document'
+        ? 'application/pdf'
+        : this.guessImageMime(storagePath);
     return {
       id: storagePath,
       kind,

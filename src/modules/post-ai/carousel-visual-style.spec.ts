@@ -20,28 +20,33 @@ describe('carousel visual style', () => {
     });
 
     it('maps whiteboard phrases', () => {
-      expect(inferCarouselVisualStyleFromTopic('explain b-trees whiteboard style')).toBe(
-        'whiteboard_notes',
-      );
+      expect(
+        inferCarouselVisualStyleFromTopic('explain b-trees whiteboard style'),
+      ).toBe('whiteboard_notes');
     });
 
     it('forces notebook mood for DSA / LeetCode / interview prep without explicit notebook words', () => {
-      expect(inferCarouselVisualStyleFromTopic('java dsa cheatsheet carousel')).toBe(
-        'handwritten_notebook',
-      );
-      expect(inferCarouselVisualStyleFromTopic('leetcode roadmap for FAANG')).toBe(
-        'handwritten_notebook',
-      );
+      expect(
+        inferCarouselVisualStyleFromTopic('java dsa cheatsheet carousel'),
+      ).toBe('handwritten_notebook');
+      expect(
+        inferCarouselVisualStyleFromTopic('leetcode roadmap for FAANG'),
+      ).toBe('handwritten_notebook');
     });
 
     it('defaults to stock_visual when no cues', () => {
-      expect(inferCarouselVisualStyleFromTopic('product launch teaser q4')).toBe('stock_visual');
+      expect(
+        inferCarouselVisualStyleFromTopic('product launch teaser q4'),
+      ).toBe('stock_visual');
     });
   });
 
   describe('resolveCarouselVisualStyle', () => {
     it('respects explicit override over topic inference', () => {
-      const r = resolveCarouselVisualStyle('handwritten notes java', 'diagram_clean');
+      const r = resolveCarouselVisualStyle(
+        'handwritten notes java',
+        'diagram_clean',
+      );
       expect(r.resolved).toBe('diagram_clean');
       expect(r.source).toBe('explicit');
     });
@@ -55,9 +60,15 @@ describe('carousel visual style', () => {
 
   describe('overlayProfileForCarouselStyle', () => {
     it('maps notebook + whiteboard styles to distinct overlay compositors', () => {
-      expect(overlayProfileForCarouselStyle('handwritten_notebook')).toBe('notebook_paper');
-      expect(overlayProfileForCarouselStyle('whiteboard_notes')).toBe('whiteboard');
-      expect(overlayProfileForCarouselStyle('diagram_clean')).toBe('linkedin_panel');
+      expect(overlayProfileForCarouselStyle('handwritten_notebook')).toBe(
+        'notebook_paper',
+      );
+      expect(overlayProfileForCarouselStyle('whiteboard_notes')).toBe(
+        'whiteboard',
+      );
+      expect(overlayProfileForCarouselStyle('diagram_clean')).toBe(
+        'linkedin_panel',
+      );
     });
   });
 });

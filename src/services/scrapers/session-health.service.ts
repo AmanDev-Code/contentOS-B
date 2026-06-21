@@ -45,7 +45,8 @@ export class ScraperSessionHealthService {
       elapsedMs: 0,
     };
     if (!params.cookieValue) {
-      result.reason = 'not configured (paste in Admin → Scraper Debug or set env)';
+      result.reason =
+        'not configured (paste in Admin → Scraper Debug or set env)';
       result.elapsedMs = Date.now() - started;
       return result;
     }
@@ -74,7 +75,8 @@ export class ScraperSessionHealthService {
         result.finalUrl = resp.url();
         const check = params.loggedInCheck(result.finalUrl);
         result.loggedIn = check.loggedIn && resp.ok();
-        result.reason = check.reason || (!resp.ok() ? `http ${resp.status()}` : undefined);
+        result.reason =
+          check.reason || (!resp.ok() ? `http ${resp.status()}` : undefined);
       } finally {
         await context.close().catch(() => {});
       }

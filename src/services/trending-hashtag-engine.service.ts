@@ -66,20 +66,26 @@ export class TrendingHashtagEngineService {
     if (!sb || typeof sb !== 'object') return 0;
     const o = sb as Record<string, unknown>;
     return (
-      Number(o.instagram || 0) + Number(o.twitter || 0) + Number(o.linkedin || 0)
+      Number(o.instagram || 0) +
+      Number(o.twitter || 0) +
+      Number(o.linkedin || 0)
     );
   }
 
   private hasExternalSignal(rows: unknown[]): boolean {
     const items = Array.isArray(rows) ? rows : [];
-    return items.some((row: any) => this.externalSignalTotal(row?.source_breakdown) > 0);
+    return items.some(
+      (row: any) => this.externalSignalTotal(row?.source_breakdown) > 0,
+    );
   }
 
   /** Merge duplicate hashtag rows (e.g. same tag tracked under multiple admin scope_tag). */
   private mergeTrendingByHashtag(rows: any[]): any[] {
     const map = new Map<string, any>();
     for (const r of rows) {
-      const raw = String(r.hashtag || '').trim().toLowerCase();
+      const raw = String(r.hashtag || '')
+        .trim()
+        .toLowerCase();
       const key = raw.startsWith('#') ? raw : `#${raw.replace(/^#/, '')}`;
       const prev = map.get(key);
       if (!prev) {
@@ -91,22 +97,31 @@ export class TrendingHashtagEngineService {
           source_breakdown: { ...(r.source_breakdown || {}) },
         });
       } else {
-        prev.usage_count = Number(prev.usage_count || 0) + Number(r.usage_count || 0);
+        prev.usage_count =
+          Number(prev.usage_count || 0) + Number(r.usage_count || 0);
         prev.score = Number(prev.score || 0) + Number(r.score || 0);
         prev.source_breakdown = this.sumNumericBreakdown(
           prev.source_breakdown,
           r.source_breakdown,
         );
         const lu = r.last_updated;
-        if (lu && (!prev.last_updated || String(lu) > String(prev.last_updated))) {
+        if (
+          lu &&
+          (!prev.last_updated || String(lu) > String(prev.last_updated))
+        ) {
           prev.last_updated = lu;
         }
       }
     }
-    return Array.from(map.values()).sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+    return Array.from(map.values()).sort(
+      (a, b) => Number(b.score || 0) - Number(a.score || 0),
+    );
   }
 
-  private sumNumericBreakdown(a: Record<string, unknown>, b: Record<string, unknown>) {
+  private sumNumericBreakdown(
+    a: Record<string, unknown>,
+    b: Record<string, unknown>,
+  ) {
     const out: Record<string, number> = {};
     const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
     for (const k of keys) {
@@ -122,7 +137,8 @@ export class TrendingHashtagEngineService {
   private classifyBlockedReason(detail: string): string | null {
     const d = String(detail || '').toLowerCase();
     if (d.includes('login') || d.includes('sign in')) return 'login_wall';
-    if (d.includes('challenge') || d.includes('verification')) return 'challenge';
+    if (d.includes('challenge') || d.includes('verification'))
+      return 'challenge';
     if (d.includes('timeout')) return 'timeout';
     if (d.includes('selector')) return 'selector_miss';
     if (d.includes('empty') || d.includes('fetched 0')) return 'empty_result';
@@ -171,7 +187,9 @@ export class TrendingHashtagEngineService {
       let filteredOutCount = 0;
       for (const post of normalizedPosts) {
         const before = post.hashtags.length;
-        post.hashtags = post.hashtags.filter((h) => !this.isLowQualityHashtag(h));
+        post.hashtags = post.hashtags.filter(
+          (h) => !this.isLowQualityHashtag(h),
+        );
         filteredOutCount += Math.max(0, before - post.hashtags.length);
       }
 
@@ -181,8 +199,7 @@ export class TrendingHashtagEngineService {
           posts: [],
           hashtags: [],
           status: 'error',
-          detail:
-            `Fetched 0 ${source} posts. Most likely blocked by login wall/anti-bot or selector drift.`,
+          detail: `Fetched 0 ${source} posts. Most likely blocked by login wall/anti-bot or selector drift.`,
           filteredOutCount,
         };
       }
@@ -248,7 +265,8 @@ export class TrendingHashtagEngineService {
       const payload = (await response.json()) as { data?: any[] };
       const posts: SourcePost[] = (payload.data || []).map((row) => {
         const extracted =
-          Array.isArray(row?.entities?.hashtags) && row.entities.hashtags.length > 0
+          Array.isArray(row?.entities?.hashtags) &&
+          row.entities.hashtags.length > 0
             ? row.entities.hashtags
                 .map((h: any) => this.normalizeHashtag(String(h?.tag || '')))
                 .filter((v: string | null): v is string => Boolean(v))
@@ -258,7 +276,9 @@ export class TrendingHashtagEngineService {
           text: String(row?.text || ''),
           hashtags: extracted,
           publishedAt: String(row?.created_at || new Date().toISOString()),
-          permalink: row?.id ? `https://x.com/i/web/status/${row.id}` : undefined,
+          permalink: row?.id
+            ? `https://x.com/i/web/status/${row.id}`
+            : undefined,
         };
       });
       return {
@@ -279,7 +299,10 @@ export class TrendingHashtagEngineService {
     }
   }
 
-  private async fetchInstagram(tag: string, limit: number): Promise<SourcePayload> {
+  private async fetchInstagram(
+    tag: string,
+    limit: number,
+  ): Promise<SourcePayload> {
     if (this.engineMode === 'playwright') {
       return this.fetchFromInternalScraper('instagram', tag, limit);
     }
@@ -311,7 +334,9 @@ export class TrendingHashtagEngineService {
         };
       }
 
-      const searchPayload = (await searchResponse.json()) as { data?: Array<{ id: string }> };
+      const searchPayload = (await searchResponse.json()) as {
+        data?: Array<{ id: string }>;
+      };
       const hashtagId = searchPayload?.data?.[0]?.id;
       if (!hashtagId) {
         return {
@@ -368,7 +393,10 @@ export class TrendingHashtagEngineService {
     }
   }
 
-  private async fetchLinkedin(tag: string, limit: number): Promise<SourcePayload> {
+  private async fetchLinkedin(
+    tag: string,
+    limit: number,
+  ): Promise<SourcePayload> {
     if (this.engineMode === 'playwright') {
       return this.fetchFromInternalScraper('linkedin', tag, limit);
     }
@@ -410,7 +438,12 @@ export class TrendingHashtagEngineService {
       `processTag source results tag=${input.tag} | ig=${instagram.posts.length} tw=${twitter.posts.length} li=${linkedin.posts.length}`,
     );
 
-    type FormatCounts = { ig_reel: number; ig_post: number; tweet: number; li_post: number };
+    type FormatCounts = {
+      ig_reel: number;
+      ig_post: number;
+      tweet: number;
+      li_post: number;
+    };
     const emptyFormats = (): FormatCounts => ({
       ig_reel: 0,
       ig_post: 0,
@@ -462,20 +495,22 @@ export class TrendingHashtagEngineService {
       }
     }
 
-    const records = Array.from(aggregate.entries()).map(([hashtag, metrics]) => ({
-      scope_tag: input.tag,
-      hashtag,
-      score: Number((metrics.score + input.priority * 0.2).toFixed(4)),
-      usage_count: metrics.usageCount,
-      source_breakdown: {
-        ...metrics.sourceBreakdown,
-        ig_reel: metrics.formats.ig_reel,
-        ig_post: metrics.formats.ig_post,
-        tweet: metrics.formats.tweet,
-        li_post: metrics.formats.li_post,
-      },
-      last_updated: new Date().toISOString(),
-    }));
+    const records = Array.from(aggregate.entries()).map(
+      ([hashtag, metrics]) => ({
+        scope_tag: input.tag,
+        hashtag,
+        score: Number((metrics.score + input.priority * 0.2).toFixed(4)),
+        usage_count: metrics.usageCount,
+        source_breakdown: {
+          ...metrics.sourceBreakdown,
+          ig_reel: metrics.formats.ig_reel,
+          ig_post: metrics.formats.ig_post,
+          tweet: metrics.formats.tweet,
+          li_post: metrics.formats.li_post,
+        },
+        last_updated: new Date().toISOString(),
+      }),
+    );
     this.logger.log(
       `processTag aggregate tag=${input.tag} hashtags=${records.length}`,
     );
@@ -520,7 +555,9 @@ export class TrendingHashtagEngineService {
   private readonly globalTrendRawCap = 12_000;
 
   async refreshGlobalCache(): Promise<void> {
-    const rows = await this.loadGlobalTrendingMergedFromDb(this.globalTrendRawCap);
+    const rows = await this.loadGlobalTrendingMergedFromDb(
+      this.globalTrendRawCap,
+    );
     const listKey = 'trending:global:list';
     if (rows.length > 0) {
       await this.cacheService.set(listKey, rows, 60 * 60);
@@ -528,7 +565,10 @@ export class TrendingHashtagEngineService {
       return;
     }
     if (this.allowInhouseFallback) {
-      const fallback = await this.buildFallbackFromGeneratedContent(500, undefined);
+      const fallback = await this.buildFallbackFromGeneratedContent(
+        500,
+        undefined,
+      );
       if (fallback.length > 0) {
         await this.cacheService.set(listKey, fallback, 60 * 10);
         return;
@@ -537,11 +577,15 @@ export class TrendingHashtagEngineService {
     await this.cacheService.delete(listKey).catch(() => {});
   }
 
-  private async loadGlobalTrendingMergedFromDb(maxRawRows: number): Promise<any[]> {
+  private async loadGlobalTrendingMergedFromDb(
+    maxRawRows: number,
+  ): Promise<any[]> {
     const { data, error } = await this.supabaseService
       .getServiceClient()
       .from('trending_hashtags')
-      .select('scope_tag, hashtag, score, usage_count, source_breakdown, last_updated')
+      .select(
+        'scope_tag, hashtag, score, usage_count, source_breakdown, last_updated',
+      )
       .order('score', { ascending: false })
       .limit(maxRawRows);
     if (error) {
@@ -549,17 +593,24 @@ export class TrendingHashtagEngineService {
     }
     let rows = data || [];
     if (this.engineMode === 'playwright' && !this.allowInhouseFallback) {
-      rows = rows.filter((r: any) => this.externalSignalTotal(r?.source_breakdown) > 0);
+      rows = rows.filter(
+        (r: any) => this.externalSignalTotal(r?.source_breakdown) > 0,
+      );
     }
     if (rows.length === 0) return [];
     return this.mergeTrendingByHashtag(rows);
   }
 
-  private async loadScopedTrendingFromDb(tag: string, maxRaw = 2000): Promise<any[]> {
+  private async loadScopedTrendingFromDb(
+    tag: string,
+    maxRaw = 2000,
+  ): Promise<any[]> {
     const { data, error } = await this.supabaseService
       .getServiceClient()
       .from('trending_hashtags')
-      .select('scope_tag, hashtag, score, usage_count, source_breakdown, last_updated')
+      .select(
+        'scope_tag, hashtag, score, usage_count, source_breakdown, last_updated',
+      )
       .eq('scope_tag', tag)
       .order('score', { ascending: false })
       .limit(maxRaw);
@@ -570,9 +621,14 @@ export class TrendingHashtagEngineService {
   }
 
   /** Keep only rows with real external (IG/X/LinkedIn) signal. */
-  private filterExternalOnly<T extends { source_breakdown?: any }>(rows: T[]): T[] {
-    if (this.allowInhouseFallback || this.engineMode !== 'playwright') return rows;
-    return rows.filter((r) => this.externalSignalTotal(r?.source_breakdown) > 0);
+  private filterExternalOnly<T extends { source_breakdown?: any }>(
+    rows: T[],
+  ): T[] {
+    if (this.allowInhouseFallback || this.engineMode !== 'playwright')
+      return rows;
+    return rows.filter(
+      (r) => this.externalSignalTotal(r?.source_breakdown) > 0,
+    );
   }
 
   async decayScores(): Promise<void> {
@@ -598,7 +654,9 @@ export class TrendingHashtagEngineService {
   }
 
   async cleanupStale(): Promise<void> {
-    const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(
+      Date.now() - 14 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const { error } = await this.supabaseService
       .getServiceClient()
       .from('trending_hashtags')
@@ -738,7 +796,10 @@ export class TrendingHashtagEngineService {
         if (arr.length > 0) {
           await this.cacheService.set(listKey, arr, 60 * 60);
         } else if (this.allowInhouseFallback) {
-          const fallback = await this.buildFallbackFromGeneratedContent(500, undefined);
+          const fallback = await this.buildFallbackFromGeneratedContent(
+            500,
+            undefined,
+          );
           if (fallback.length > 0) {
             await this.cacheService.set(listKey, fallback, 60 * 10);
             arr = fallback;
@@ -773,7 +834,10 @@ export class TrendingHashtagEngineService {
       if (rows.length > 0) {
         await this.cacheService.set(cacheKey, rows, 60 * 60);
       } else if (this.allowInhouseFallback) {
-        const fallback = await this.buildFallbackFromGeneratedContent(500, normalizedTag);
+        const fallback = await this.buildFallbackFromGeneratedContent(
+          500,
+          normalizedTag,
+        );
         rows = fallback;
         if (rows.length > 0) {
           await this.cacheService.set(cacheKey, rows, 60 * 10);
@@ -791,10 +855,17 @@ export class TrendingHashtagEngineService {
     };
   }
 
-  async getTrendingDebug(tag?: string, limit = 20): Promise<{
+  async getTrendingDebug(
+    tag?: string,
+    limit = 20,
+  ): Promise<{
     api: { endpoint: string; tag: string | null; limit: number };
     cache: { key: string; hit: boolean; size: number };
-    dataSource: 'cache' | 'aggregated_table' | 'fallback_generated_content' | 'empty';
+    dataSource:
+      | 'cache'
+      | 'aggregated_table'
+      | 'fallback_generated_content'
+      | 'empty';
     aggregatedCount: number;
     fallbackCandidateCount: number;
     topFromAggregated: unknown[];
@@ -827,7 +898,9 @@ export class TrendingHashtagEngineService {
   }> {
     const safeLimit = Math.max(1, Math.min(limit, 100));
     const normalizedTag = tag ? tag.toLowerCase().replace(/^#+/, '') : null;
-    const cacheKey = normalizedTag ? `trending:${normalizedTag}` : 'trending:global:list';
+    const cacheKey = normalizedTag
+      ? `trending:${normalizedTag}`
+      : 'trending:global:list';
     const subjectTag = normalizedTag || 'ai';
 
     const cached = await this.cacheService.get(cacheKey);
@@ -836,12 +909,15 @@ export class TrendingHashtagEngineService {
     const aggQuery = this.supabaseService
       .getServiceClient()
       .from('trending_hashtags')
-      .select('scope_tag, hashtag, score, usage_count, source_breakdown, last_updated')
+      .select(
+        'scope_tag, hashtag, score, usage_count, source_breakdown, last_updated',
+      )
       .order('score', { ascending: false })
       .limit(safeLimit);
     if (normalizedTag) aggQuery.eq('scope_tag', normalizedTag);
     const { data: aggregatedRows, error: aggError } = await aggQuery;
-    if (aggError) throw new Error(`Debug aggregate read failed: ${aggError.message}`);
+    if (aggError)
+      throw new Error(`Debug aggregate read failed: ${aggError.message}`);
 
     const [ig, x, li] = await Promise.all([
       this.fetchInstagram(subjectTag, 10),
@@ -850,28 +926,32 @@ export class TrendingHashtagEngineService {
     ]);
 
     const fallbackRows = this.allowInhouseFallback
-      ? await this.buildFallbackFromGeneratedContent(safeLimit, normalizedTag || undefined)
-      : [];
-
-    const sampleRows = this.allowInhouseFallback
-      ? (
-          await (async () => {
-            const sampleQuery = this.supabaseService
-              .getServiceClient()
-              .from('generated_content')
-              .select('id, title, hashtags, content, updated_at')
-              .is('deleted_at', null)
-              .order('updated_at', { ascending: false })
-              .limit(15);
-            if (normalizedTag) sampleQuery.ilike('content', `%${normalizedTag}%`);
-            const { data } = await sampleQuery;
-            return data || [];
-          })()
+      ? await this.buildFallbackFromGeneratedContent(
+          safeLimit,
+          normalizedTag || undefined,
         )
       : [];
 
-    let dataSource: 'cache' | 'aggregated_table' | 'fallback_generated_content' | 'empty' =
-      'empty';
+    const sampleRows = this.allowInhouseFallback
+      ? await (async () => {
+          const sampleQuery = this.supabaseService
+            .getServiceClient()
+            .from('generated_content')
+            .select('id, title, hashtags, content, updated_at')
+            .is('deleted_at', null)
+            .order('updated_at', { ascending: false })
+            .limit(15);
+          if (normalizedTag) sampleQuery.ilike('content', `%${normalizedTag}%`);
+          const { data } = await sampleQuery;
+          return data || [];
+        })()
+      : [];
+
+    let dataSource:
+      | 'cache'
+      | 'aggregated_table'
+      | 'fallback_generated_content'
+      | 'empty' = 'empty';
     if (cacheRows.length > 0) dataSource = 'cache';
     else if ((aggregatedRows || []).length > 0) dataSource = 'aggregated_table';
     else if (fallbackRows.length > 0) dataSource = 'fallback_generated_content';
@@ -892,8 +972,16 @@ export class TrendingHashtagEngineService {
     });
 
     return {
-      api: { endpoint: '/content/trending', tag: normalizedTag, limit: safeLimit },
-      cache: { key: cacheKey, hit: cacheRows.length > 0, size: cacheRows.length },
+      api: {
+        endpoint: '/content/trending',
+        tag: normalizedTag,
+        limit: safeLimit,
+      },
+      cache: {
+        key: cacheKey,
+        hit: cacheRows.length > 0,
+        size: cacheRows.length,
+      },
       dataSource,
       aggregatedCount: (aggregatedRows || []).length,
       fallbackCandidateCount: fallbackRows.length,

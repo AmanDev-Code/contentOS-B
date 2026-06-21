@@ -750,11 +750,17 @@ export class PostsController {
       const scheduleSource = scheduledFor || scheduledForLocal;
       const effectiveTimezone = timezone || userTimezoneHeader;
       if (!scheduleSource) {
-        throw new HttpException('Invalid scheduled time', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'Invalid scheduled time',
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const scheduledDate = new Date(scheduleSource);
       if (Number.isNaN(scheduledDate.getTime())) {
-        throw new HttpException('Invalid scheduled time', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'Invalid scheduled time',
+          HttpStatus.BAD_REQUEST,
+        );
       }
       if (scheduledDate <= new Date()) {
         throw new HttpException(

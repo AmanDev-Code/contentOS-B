@@ -120,7 +120,10 @@ export class AppSettingsService {
     return value ?? 50; // Default to 50 if not set
   }
 
-  async setFreeCreditLimit(limit: number, updatedBy?: string): Promise<boolean> {
+  async setFreeCreditLimit(
+    limit: number,
+    updatedBy?: string,
+  ): Promise<boolean> {
     if (limit < 0 || !Number.isInteger(limit)) {
       this.logger.warn(`Invalid free credit limit: ${limit}`);
       return false;

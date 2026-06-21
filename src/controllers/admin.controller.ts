@@ -111,7 +111,9 @@ export class AdminController {
     const stale = (data || []).filter((r: any) => {
       const sb = r?.source_breakdown || {};
       const total =
-        Number(sb.instagram || 0) + Number(sb.twitter || 0) + Number(sb.linkedin || 0);
+        Number(sb.instagram || 0) +
+        Number(sb.twitter || 0) +
+        Number(sb.linkedin || 0);
       return total === 0;
     });
     let deleted = 0;
@@ -122,7 +124,10 @@ export class AdminController {
         .delete()
         .in('id', ids);
       if (delErr) {
-        throw new HttpException(delErr.message, HttpStatus.INTERNAL_SERVER_ERROR);
+        throw new HttpException(
+          delErr.message,
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
       }
       deleted = ids.length;
     }
@@ -133,7 +138,10 @@ export class AdminController {
     } catch {
       /* ignore */
     }
-    return { success: true, data: { deletedRows: deleted, cacheCleared: true } };
+    return {
+      success: true,
+      data: { deletedRows: deleted, cacheCleared: true },
+    };
   }
 
   @Post('trending/prune-oldest')
@@ -154,9 +162,15 @@ export class AdminController {
     }
     const ids = (rows || []).map((r: { id: string }) => r.id).filter(Boolean);
     if (ids.length > 0) {
-      const { error: delErr } = await client.from('trending_hashtags').delete().in('id', ids);
+      const { error: delErr } = await client
+        .from('trending_hashtags')
+        .delete()
+        .in('id', ids);
       if (delErr) {
-        throw new HttpException(delErr.message, HttpStatus.INTERNAL_SERVER_ERROR);
+        throw new HttpException(
+          delErr.message,
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
       }
     }
     await this.cacheService.delete('trending:global').catch(() => {});
@@ -199,12 +213,16 @@ export class AdminController {
     await this.browserPool.recycle();
     const credentials = await this.scraperCredentials.getAdminView();
     const verify = body?.verify !== false;
-    const health = verify ? await this.scraperSessionHealthService.check() : null;
+    const health = verify
+      ? await this.scraperSessionHealthService.check()
+      : null;
     return { success: true, data: { credentials, health } };
   }
 
   @Post('scraper/credentials/verify')
-  @ApiOperation({ summary: 'Re-run session health probes with current effective credentials' })
+  @ApiOperation({
+    summary: 'Re-run session health probes with current effective credentials',
+  })
   async verifyScraperCredentials() {
     const health = await this.scraperSessionHealthService.check();
     const credentials = await this.scraperCredentials.getAdminView();
@@ -212,7 +230,9 @@ export class AdminController {
   }
 
   @Get('scraper/session-health')
-  @ApiOperation({ summary: 'Check scraper session cookie validity per platform' })
+  @ApiOperation({
+    summary: 'Check scraper session cookie validity per platform',
+  })
   async scraperSessionHealth() {
     try {
       const data = await this.scraperSessionHealthService.check();
@@ -248,11 +268,19 @@ export class AdminController {
   @Post('scraper/test-fetch')
   @ApiOperation({ summary: 'Test-fetch a single tag on a single platform' })
   async scraperTestFetch(
-    @Body() body: { platform: 'instagram' | 'twitter' | 'linkedin'; tag: string; limit?: number },
+    @Body()
+    body: {
+      platform: 'instagram' | 'twitter' | 'linkedin';
+      tag: string;
+      limit?: number;
+    },
   ) {
     const { platform, tag } = body || ({} as any);
     if (!platform || !tag) {
-      throw new HttpException('platform and tag are required', HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        'platform and tag are required',
+        HttpStatus.BAD_REQUEST,
+      );
     }
     const limit = Math.max(1, Math.min(Number(body.limit ?? 10), 30));
     const started = Date.now();
@@ -794,9 +822,10 @@ export class AdminController {
     @Body() body?: { userId?: string; maxAgeMinutes?: number },
   ) {
     try {
-      const maxAgeMs = Math.max(1, Math.min(body?.maxAgeMinutes ?? 5, 60)) * 60 * 1000;
+      const maxAgeMs =
+        Math.max(1, Math.min(body?.maxAgeMinutes ?? 5, 60)) * 60 * 1000;
       const client = this.supabaseService.getServiceClient();
-      
+
       // Build query for stale jobs - clean ALL non-terminal statuses
       // Terminal statuses: ready, failed, cancelled (these are complete)
       // Everything else should be cleaned if stuck
@@ -808,17 +837,20 @@ export class AdminController {
         .lt('updated_at', new Date(Date.now() - maxAgeMs).toISOString())
         .order('updated_at', { ascending: true })
         .limit(100);
-      
+
       if (body?.userId) {
         query = query.eq('user_id', body.userId);
       }
-      
+
       const { data: staleJobs, error: fetchError } = await query;
-      
+
       if (fetchError) {
-        throw new HttpException(fetchError.message, HttpStatus.INTERNAL_SERVER_ERROR);
+        throw new HttpException(
+          fetchError.message,
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
       }
-      
+
       if (!staleJobs || staleJobs.length === 0) {
         return {
           success: true,
@@ -826,7 +858,7 @@ export class AdminController {
           data: { cleanedCount: 0 },
         };
       }
-      
+
       // Mark stale jobs as failed (individually to capture status in error message)
       let updateSuccessCount = 0;
       const updateErrors: string[] = [];
@@ -843,7 +875,10 @@ export class AdminController {
             .not('status', 'in', terminalStatuses);
 
           if (singleUpdateError) {
-            throw new HttpException(singleUpdateError.message, HttpStatus.INTERNAL_SERVER_ERROR);
+            throw new HttpException(
+              singleUpdateError.message,
+              HttpStatus.INTERNAL_SERVER_ERROR,
+            );
           }
           updateSuccessCount++;
         } catch (err: any) {
@@ -881,7 +916,10 @@ export class AdminController {
       }
 
       if (refundErrors.length > 0) {
-        console.error(`Credit refund errors during admin cleanup:`, refundErrors);
+        console.error(
+          `Credit refund errors during admin cleanup:`,
+          refundErrors,
+        );
       }
 
       const cleanedJobIds = staleJobs.map((j: any) => j.id);

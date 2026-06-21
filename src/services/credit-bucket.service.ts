@@ -79,7 +79,9 @@ export class CreditBucketService {
         p_trial_default: trialDefault,
       });
     if (error) {
-      this.logger.error(`ensure_credit_buckets failed for ${userId}: ${error.message}`);
+      this.logger.error(
+        `ensure_credit_buckets failed for ${userId}: ${error.message}`,
+      );
     }
   }
 
@@ -121,12 +123,17 @@ export class CreditBucketService {
       .maybeSingle();
 
     if (error) {
-      this.logger.error(`getBalance view read failed for ${userId}: ${error.message}`);
+      this.logger.error(
+        `getBalance view read failed for ${userId}: ${error.message}`,
+      );
     }
 
     const planResetsAt: string | null = data?.plan_resets_at ?? null;
     const periodStart = this.computePeriodStart(planResetsAt);
-    const { consumed, byType } = await this.computeConsumption(userId, periodStart);
+    const { consumed, byType } = await this.computeConsumption(
+      userId,
+      periodStart,
+    );
 
     const balance: CreditBalance = {
       userId,
@@ -255,7 +262,12 @@ export class CreditBucketService {
 
     await this.invalidate(params.userId);
 
-    const result = (data ?? { trial: 0, plan: 0, reward: 0, total: 0 }) as ChargeRpcResult;
+    const result = (data ?? {
+      trial: 0,
+      plan: 0,
+      reward: 0,
+      total: 0,
+    }) as ChargeRpcResult;
     return result;
   }
 }

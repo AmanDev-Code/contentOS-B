@@ -15,7 +15,9 @@ export class PlatformAccessController {
   constructor(private readonly platformAccess: PlatformAccessService) {}
 
   @Get('access')
-  @ApiOperation({ summary: 'Current user platform roles (super-admin vs staff)' })
+  @ApiOperation({
+    summary: 'Current user platform roles (super-admin vs staff)',
+  })
   async access(@Request() req: AuthReq) {
     const superAdmin = this.platformAccess.isSuperAdmin(req.user);
     const staff = await this.platformAccess.hasStaffAccess(req.user);

@@ -108,11 +108,10 @@ export class LinkedinController {
     if (body?.returnTo) {
       metadata.returnTo = body.returnTo;
     }
-    const state =
-      await this.linkedinOAuthStateService.createStateForUser(
-        userId,
-        Object.keys(metadata).length > 0 ? metadata : undefined,
-      );
+    const state = await this.linkedinOAuthStateService.createStateForUser(
+      userId,
+      Object.keys(metadata).length > 0 ? metadata : undefined,
+    );
     // Use unified scopes: requests ALL permissions in a single OAuth flow.
     // After callback, frontend auto-shows page picker if user admins any org pages.
     const url = await this.buildOAuthAuthorizeUrl(
@@ -143,7 +142,10 @@ export class LinkedinController {
     scopes?: readonly string[],
   ): Promise<string> {
     if (this.linkedInAuthV2 && scopes && scopes.length > 0) {
-      const { url } = await this.linkedInAuthV2.getAuthorizationUrl(state, scopes);
+      const { url } = await this.linkedInAuthV2.getAuthorizationUrl(
+        state,
+        scopes,
+      );
       return url;
     }
     return this.linkedinService.getAuthUrl(state);
@@ -166,8 +168,7 @@ export class LinkedinController {
     }
 
     if (oauthError) {
-      const reason =
-        oauthErrorDescription || oauthError || 'oauth_denied';
+      const reason = oauthErrorDescription || oauthError || 'oauth_denied';
       return this.oauthRedirect(frontendUrl, '/settings', {
         linkedin: 'error',
         reason,
@@ -185,7 +186,8 @@ export class LinkedinController {
     let stateMetadata: Record<string, unknown> | undefined;
     let returnTo: unknown = '/settings';
     try {
-      const stateResult = await this.linkedinOAuthStateService.consumeState(state);
+      const stateResult =
+        await this.linkedinOAuthStateService.consumeState(state);
       if (typeof stateResult === 'string') {
         userId = stateResult;
       } else {
@@ -216,12 +218,19 @@ export class LinkedinController {
       });
     }
 
-    let bridgeIdentity: { memberId: string; displayName?: string; avatarUrl?: string } | null = null;
+    let bridgeIdentity: {
+      memberId: string;
+      displayName?: string;
+      avatarUrl?: string;
+    } | null = null;
     if (this.isSocialV2Enabled() && this.socialBridge && this.linkedInAuthV2) {
       const authV2 = this.linkedInAuthV2;
       try {
         bridgeIdentity = await authV2.fetchUserIdentity(accessToken);
-        await this.socialBridge.assertLinkedInNotOwnedByOther(userId, bridgeIdentity.memberId);
+        await this.socialBridge.assertLinkedInNotOwnedByOther(
+          userId,
+          bridgeIdentity.memberId,
+        );
       } catch (preflightErr) {
         if (preflightErr instanceof SocialAccountAlreadyConnectedError) {
           this.logger.warn(
@@ -240,7 +249,12 @@ export class LinkedinController {
     }
 
     try {
-      await this.linkedinService.saveTokens(userId, accessToken, refreshToken, expiresIn);
+      await this.linkedinService.saveTokens(
+        userId,
+        accessToken,
+        refreshToken,
+        expiresIn,
+      );
     } catch (saveErr) {
       this.logger.error(
         `[handleCallback] saveTokens failed for user ${userId}: ${String(saveErr instanceof Error ? saveErr.message : saveErr)}`,
@@ -278,7 +292,8 @@ export class LinkedinController {
     let hasOrgPages = false;
     if (this.linkedInAuthV2) {
       try {
-        const orgPages = await this.linkedInAuthV2.fetchAdminOrgPages(accessToken);
+        const orgPages =
+          await this.linkedInAuthV2.fetchAdminOrgPages(accessToken);
         hasOrgPages = orgPages.length > 0;
       } catch (orgErr) {
         this.logger.warn(
@@ -345,7 +360,8 @@ export class LinkedinController {
     const connectedIds = new Set<string>();
     if (this.socialBridge) {
       try {
-        const accounts = await this.socialBridge.getConnectedLinkedInAccounts(userId);
+        const accounts =
+          await this.socialBridge.getConnectedLinkedInAccounts(userId);
         for (const acct of accounts) {
           if (acct.accountType === 'organization') {
             connectedIds.add(acct.platformAccountId);
@@ -390,7 +406,9 @@ export class LinkedinController {
       throw new BadRequestException('At least one page must be selected');
     }
     if (body.pages.length > 10) {
-      throw new BadRequestException('Cannot connect more than 10 pages at once');
+      throw new BadRequestException(
+        'Cannot connect more than 10 pages at once',
+      );
     }
     if (!this.socialBridge || !this.linkedInAuthV2) {
       throw new HttpException(
@@ -401,11 +419,15 @@ export class LinkedinController {
 
     const profile = await this.linkedinService.getConnectionStatus(userId);
     if (!profile.connected) {
-      throw new BadRequestException('LinkedIn not connected. Connect your personal account first.');
+      throw new BadRequestException(
+        'LinkedIn not connected. Connect your personal account first.',
+      );
     }
 
-    let personalAccount = await this.socialBridge.getConnectedLinkedIn(userId);
-    let tokens: import('../integrations/social/types').OAuthTokenSet | null = null;
+    const personalAccount =
+      await this.socialBridge.getConnectedLinkedIn(userId);
+    let tokens: import('../integrations/social/types').OAuthTokenSet | null =
+      null;
     if (personalAccount && this.tokenVault) {
       tokens = await this.tokenVault.readTokens(personalAccount.id);
     }
@@ -416,7 +438,11 @@ export class LinkedinController {
       );
     }
 
-    const results: Array<{ organizationId: string; status: string; error?: string }> = [];
+    const results: Array<{
+      organizationId: string;
+      status: string;
+      error?: string;
+    }> = [];
 
     for (const page of body.pages) {
       try {
@@ -430,7 +456,10 @@ export class LinkedinController {
           vanityName: page.vanityName,
           parentPersonalAccountId: personalAccount?.id,
         });
-        results.push({ organizationId: page.organizationId, status: 'connected' });
+        results.push({
+          organizationId: page.organizationId,
+          status: 'connected',
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
@@ -509,14 +538,14 @@ export class LinkedinController {
   @ApiOperation({ summary: 'Get LinkedIn metrics for dashboard' })
   async getDashboardMetrics(@Request() req) {
     const userId = req.user?.id;
-    
+
     // Cache dashboard metrics for 60 seconds to avoid hammering LinkedIn API
     const cacheKey = `linkedin:dashboard:${userId}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached) {
       return cached;
     }
-    
+
     const result = await this.linkedinService.getDashboardMetrics(userId);
     await this.cacheService.set(cacheKey, result, 60);
     return result;
@@ -567,7 +596,8 @@ export class LinkedinController {
   @Get('posting-identities')
   @UseGuards(AuthGuard, UserRateLimitGuard, PaywallGuard)
   @ApiOperation({
-    summary: 'Get available LinkedIn posting identities (personal + admin pages)',
+    summary:
+      'Get available LinkedIn posting identities (personal + admin pages)',
   })
   async getPostingIdentities(@Request() req) {
     const userId = req.user?.id;
@@ -582,7 +612,10 @@ export class LinkedinController {
     @Query('organizationUrn') organizationUrn?: string,
   ) {
     const userId = req.user?.id;
-    return this.linkedinService.getOrganizationAnalytics(userId, organizationUrn);
+    return this.linkedinService.getOrganizationAnalytics(
+      userId,
+      organizationUrn,
+    );
   }
 
   @Post('disconnect')

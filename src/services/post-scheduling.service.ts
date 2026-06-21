@@ -74,7 +74,8 @@ export class PostSchedulingService {
   private readonly logger = new Logger(PostSchedulingService.name);
 
   constructor(
-    @InjectQueue(QUEUE_NAMES.SOCIAL_PUBLISH) private readonly publishQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.SOCIAL_PUBLISH)
+    private readonly publishQueue: Queue,
     private readonly supabaseService: SupabaseService,
     private readonly mediaGenerationService: MediaGenerationService,
     private readonly linkedinService: LinkedinService,
@@ -336,15 +337,16 @@ export class PostSchedulingService {
     );
 
     // 1. Load + ownership check on the scheduled_posts row.
-    const { data: scheduledPost, error: fetchError } = await this.supabaseService
-      .getServiceClient()
-      .from('scheduled_posts')
-      .select(
-        'id, content_id, job_id, status, scheduled_for, platform, actor_type, organization_urn',
-      )
-      .eq('id', scheduledPostId)
-      .eq('user_id', userId)
-      .single();
+    const { data: scheduledPost, error: fetchError } =
+      await this.supabaseService
+        .getServiceClient()
+        .from('scheduled_posts')
+        .select(
+          'id, content_id, job_id, status, scheduled_for, platform, actor_type, organization_urn',
+        )
+        .eq('id', scheduledPostId)
+        .eq('user_id', userId)
+        .single();
 
     if (fetchError || !scheduledPost) {
       throw new NotFoundException('Scheduled post not found');
@@ -663,7 +665,7 @@ export class PostSchedulingService {
       userId: withPdf.user_id,
       text,
       mediaType: 'document',
-      mediaUrl: withPdf.pdf_url as string,
+      mediaUrl: withPdf.pdf_url,
       actorType,
       organizationUrn,
     });
@@ -673,7 +675,9 @@ export class PostSchedulingService {
    * LinkedIn document posts require a PDF. If slides exist but `pdf_url` is missing, assemble
    * a PDF from slide URLs, upload to MinIO, and persist `pdf_url` (shared by immediate + scheduled publish).
    */
-  private async ensureCarouselPdfUrl(content: PostContent): Promise<PostContent> {
+  private async ensureCarouselPdfUrl(
+    content: PostContent,
+  ): Promise<PostContent> {
     if (!content.carousel_urls || content.carousel_urls.length === 0) {
       throw new BadRequestException(
         'Carousel has no slide images. Generate or attach carousel slides before publishing to LinkedIn.',

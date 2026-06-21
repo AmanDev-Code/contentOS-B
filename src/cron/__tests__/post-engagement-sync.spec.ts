@@ -20,28 +20,32 @@ function buildFakeRepo(pending: PendingEngagementPost[] = []) {
   };
 }
 
-function buildFakeLinkedin(opts: {
-  identities?: Array<{
-    actorType: 'member' | 'organization';
-    organizationUrn?: string;
-    id: string;
-    label: string;
-  }>;
-  orgAnalytics?: Array<{ id: string; likes: number; comments: number }>;
-  member?: {
-    available: boolean;
-    byPostId: Map<string, { reactions: number; comments: number }>;
-  };
-} = {}) {
+function buildFakeLinkedin(
+  opts: {
+    identities?: Array<{
+      actorType: 'member' | 'organization';
+      organizationUrn?: string;
+      id: string;
+      label: string;
+    }>;
+    orgAnalytics?: Array<{ id: string; likes: number; comments: number }>;
+    member?: {
+      available: boolean;
+      byPostId: Map<string, { reactions: number; comments: number }>;
+    };
+  } = {},
+) {
   return {
     getPostingIdentities: jest.fn().mockResolvedValue({
       defaultIdentityId: 'member:self',
       identities: opts.identities ?? [],
     }),
     getPostAnalytics: jest.fn().mockResolvedValue(opts.orgAnalytics ?? []),
-    getMemberPostEngagement: jest.fn().mockResolvedValue(
-      opts.member ?? { available: true, byPostId: new Map() },
-    ),
+    getMemberPostEngagement: jest
+      .fn()
+      .mockResolvedValue(
+        opts.member ?? { available: true, byPostId: new Map() },
+      ),
   };
 }
 
@@ -72,7 +76,8 @@ describe('PostEngagementSyncCronService', () => {
     await service.sync();
     const after = Date.now();
 
-    const cutoffIso = repo.getPostsAwaitingEngagement.mock.calls[0][0] as string;
+    const cutoffIso = repo.getPostsAwaitingEngagement.mock
+      .calls[0][0] as string;
     const cutoffMs = new Date(cutoffIso).getTime();
     const elapsed24h = 24 * 60 * 60 * 1000;
     expect(cutoffMs).toBeGreaterThanOrEqual(before - elapsed24h - 5000);
@@ -116,9 +121,7 @@ describe('PostEngagementSyncCronService', () => {
     const repo = buildFakeRepo([post]);
     const member = {
       available: true,
-      byPostId: new Map([
-        ['urn:li:share:222', { reactions: 5, comments: 2 }],
-      ]),
+      byPostId: new Map([['urn:li:share:222', { reactions: 5, comments: 2 }]]),
     };
     const linkedin = buildFakeLinkedin({ identities: [], member });
     const service = new PostEngagementSyncCronService(
@@ -172,12 +175,23 @@ describe('PostEngagementSyncCronService', () => {
   });
 
   it('isolates a failing user from the rest of the batch', async () => {
-    const postA = makePending({ id: 'a', userId: 'user-A', linkedinPostId: 'urn:li:share:A' });
-    const postB = makePending({ id: 'b', userId: 'user-B', linkedinPostId: 'urn:li:share:B' });
+    const postA = makePending({
+      id: 'a',
+      userId: 'user-A',
+      linkedinPostId: 'urn:li:share:A',
+    });
+    const postB = makePending({
+      id: 'b',
+      userId: 'user-B',
+      linkedinPostId: 'urn:li:share:B',
+    });
     const repo = buildFakeRepo([postA, postB]);
     const linkedin = buildFakeLinkedin({
       identities: [],
-      member: { available: true, byPostId: new Map([['urn:li:share:b', { reactions: 1, comments: 1 }]]) },
+      member: {
+        available: true,
+        byPostId: new Map([['urn:li:share:b', { reactions: 1, comments: 1 }]]),
+      },
     });
     // user-A blows up during posting-identity lookup; user-B must still process.
     linkedin.getPostingIdentities.mockImplementation(async (userId: string) => {

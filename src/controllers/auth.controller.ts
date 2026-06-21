@@ -131,8 +131,7 @@ export class AuthController {
     @Query('state') state: string,
     @Query('error') oauthError?: string,
   ) {
-    const frontendUrl =
-      this.configService.get<string>('frontendUrl');
+    const frontendUrl = this.configService.get<string>('frontendUrl');
 
     if (!frontendUrl) {
       this.logger.error('FRONTEND_URL env var is not set');
@@ -186,10 +185,7 @@ export class AuthController {
         token_type: session.token_type,
       };
     } catch (error) {
-      this.logger.error(
-        'Google mobile auth error:',
-        (error as Error).message,
-      );
+      this.logger.error('Google mobile auth error:', (error as Error).message);
       return { success: false, message: 'Google sign-in failed' };
     }
   }

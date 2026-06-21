@@ -29,7 +29,9 @@ describe('escapeLinkedInText', () => {
   });
 
   it('leaves plain text untouched', () => {
-    expect(escapeLinkedInText('Just a normal sentence.')).toBe('Just a normal sentence.');
+    expect(escapeLinkedInText('Just a normal sentence.')).toBe(
+      'Just a normal sentence.',
+    );
   });
 
   it('is the same function referenced by capabilities (WYSIWYG parity)', () => {

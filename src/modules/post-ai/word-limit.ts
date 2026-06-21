@@ -22,10 +22,7 @@ export function resolveWordLimit(input: {
 }
 
 export function countWords(text: string): number {
-  return text
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean).length;
+  return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
 export function isWithinLimit(text: string, hardCap: number): boolean {
