@@ -589,3 +589,299 @@ export async function generateOGImage(options: OGImageOptions): Promise<Buffer> 
 
   return pngBuffer;
 }
+
+// ─── Platform-Specific Image Generation ─────────────────────────────────────
+
+export type PlatformImageType =
+  | 'linkedin'
+  | 'devto'
+  | 'medium'
+  | 'newsletter'
+  | 'twitter'
+  | 'reddit';
+
+export interface PlatformImageConfig {
+  width: number;
+  height: number;
+  style: 'professional' | 'technical' | 'editorial' | 'branded' | 'minimal';
+}
+
+export const PLATFORM_IMAGE_CONFIGS: Record<string, PlatformImageConfig> = {
+  linkedin: { width: 1200, height: 627, style: 'professional' },
+  linkedin_article: { width: 1200, height: 627, style: 'professional' },
+  linkedin_post: { width: 1200, height: 627, style: 'professional' },
+  devto: { width: 1000, height: 420, style: 'technical' },
+  hashnode: { width: 1200, height: 630, style: 'technical' },
+  medium: { width: 1400, height: 700, style: 'editorial' },
+  newsletter: { width: 600, height: 300, style: 'branded' },
+  beehiiv: { width: 600, height: 300, style: 'branded' },
+  twitter: { width: 1200, height: 675, style: 'minimal' },
+  twitter_thread: { width: 1200, height: 675, style: 'minimal' },
+  ghost: { width: 1200, height: 630, style: 'editorial' },
+  substack: { width: 1200, height: 630, style: 'editorial' },
+};
+
+const PLATFORM_STYLES = {
+  professional: {
+    bgGradientStart: '#0a1628',
+    bgGradientEnd: '#1a2744',
+    accentColor: '#0077b5',
+    accentLight: '#00a0dc',
+    textColor: '#f0f4f8',
+    textMuted: '#8b9ab5',
+    borderColor: '#1c2a42',
+  },
+  technical: {
+    bgGradientStart: '#0d1117',
+    bgGradientEnd: '#161b22',
+    accentColor: '#58a6ff',
+    accentLight: '#79c0ff',
+    textColor: '#f0f6fc',
+    textMuted: '#8b949e',
+    borderColor: '#30363d',
+  },
+  editorial: {
+    bgGradientStart: '#1a1a1a',
+    bgGradientEnd: '#2d2d2d',
+    accentColor: '#00ab6c',
+    accentLight: '#00d084',
+    textColor: '#ffffff',
+    textMuted: '#a0a0a0',
+    borderColor: '#404040',
+  },
+  branded: {
+    bgGradientStart: '#060b17',
+    bgGradientEnd: '#0d1527',
+    accentColor: '#f27a1a',
+    accentLight: '#ff9a44',
+    textColor: '#f0f4f8',
+    textMuted: '#8b9ab5',
+    borderColor: '#1c2a42',
+  },
+  minimal: {
+    bgGradientStart: '#15202b',
+    bgGradientEnd: '#192734',
+    accentColor: '#1d9bf0',
+    accentLight: '#4db5f9',
+    textColor: '#ffffff',
+    textMuted: '#8899a6',
+    borderColor: '#38444d',
+  },
+};
+
+export interface PlatformCoverImageOptions {
+  title: string;
+  platform: string;
+  category?: string;
+  excerpt?: string;
+  hashtags?: string[];
+}
+
+/**
+ * Generate a platform-specific cover image
+ */
+export async function generatePlatformCoverImage(
+  options: PlatformCoverImageOptions,
+): Promise<Buffer> {
+  const { title, platform, category, excerpt, hashtags } = options;
+  const config = PLATFORM_IMAGE_CONFIGS[platform] || PLATFORM_IMAGE_CONFIGS.linkedin;
+  const style = PLATFORM_STYLES[config.style];
+  const { width, height } = config;
+
+  const titleLines = wrapText(title, Math.floor(width / 28));
+  const titleFontSize = titleLines.length > 2 ? Math.floor(width / 28) : Math.floor(width / 24);
+  const titleLineHeight = titleFontSize + 12;
+  const titleStartY = Math.floor(height * 0.35);
+
+  const titleTspans = titleLines
+    .map(
+      (line, i) =>
+        `<tspan x="80" dy="${i === 0 ? 0 : titleLineHeight}">${escapeXml(line)}</tspan>`,
+    )
+    .join('');
+
+  const excerptLines = excerpt ? wrapText(excerpt, Math.floor(width / 16)).slice(0, 2) : [];
+  const excerptY = titleStartY + titleLines.length * titleLineHeight + 24;
+  const excerptTspans = excerptLines
+    .map(
+      (line, i) =>
+        `<tspan x="80" dy="${i === 0 ? 0 : 24}">${escapeXml(line)}</tspan>`,
+    )
+    .join('');
+
+  const categoryBadge = category
+    ? `<g transform="translate(${width - 80 - category.length * 9}, 50)">
+        <rect width="${category.length * 9 + 24}" height="28" rx="14" fill="${style.accentColor}" opacity="0.2"/>
+        <text x="${(category.length * 9 + 24) / 2}" y="19" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="600" fill="${style.accentColor}" text-anchor="middle" letter-spacing="0.5">${escapeXml(category.toUpperCase())}</text>
+      </g>`
+    : '';
+
+  const hashtagsText = hashtags?.slice(0, 3).join(' ') || '';
+  const hashtagsElement = hashtagsText
+    ? `<text x="80" y="${height - 40}" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="${style.accentColor}" letter-spacing="0.3">${escapeXml(hashtagsText)}</text>`
+    : '';
+
+  const platformLabel = getPlatformLabel(platform);
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${style.bgGradientStart}"/>
+      <stop offset="100%" stop-color="${style.bgGradientEnd}"/>
+    </linearGradient>
+    <linearGradient id="accent-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="${style.accentColor}"/>
+      <stop offset="100%" stop-color="${style.accentLight}"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${style.accentColor}" stop-opacity="0.12"/>
+      <stop offset="50%" stop-color="${style.accentColor}" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="transparent" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.6" fill="${style.textMuted}" opacity="0.06"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="${width}" height="${height}" fill="url(#bg-gradient)"/>
+  <rect width="${width}" height="${height}" fill="url(#grid)"/>
+
+  <!-- Glow effect -->
+  <ellipse cx="${width - 150}" cy="100" rx="250" ry="180" fill="url(#glow)"/>
+
+  <!-- Left accent stripe -->
+  <rect x="0" y="0" width="5" height="${height}" fill="url(#accent-gradient)"/>
+
+  <!-- Inner card border -->
+  <rect x="40" y="30" width="${width - 80}" height="${height - 60}" rx="12" ry="12" fill="none" stroke="${style.borderColor}" stroke-width="1" opacity="0.4"/>
+
+  <!-- Brand -->
+  <text x="80" y="75" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="${style.accentColor}" letter-spacing="2.5">TRNDINN</text>
+
+  <!-- Category badge -->
+  ${categoryBadge}
+
+  <!-- Decorative line -->
+  <line x1="80" y1="100" x2="180" y2="100" stroke="${style.accentColor}" stroke-width="2" opacity="0.5"/>
+
+  <!-- Title -->
+  <text x="80" y="${titleStartY}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="${titleFontSize}" font-weight="700" fill="${style.textColor}" letter-spacing="-0.5">
+    ${titleTspans}
+  </text>
+
+  <!-- Excerpt -->
+  ${excerptLines.length > 0 ? `<text x="80" y="${excerptY}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" fill="${style.textMuted}" letter-spacing="0.2">${excerptTspans}</text>` : ''}
+
+  <!-- Bottom separator -->
+  <line x1="80" y1="${height - 65}" x2="${width - 80}" y2="${height - 65}" stroke="${style.borderColor}" stroke-width="1"/>
+
+  <!-- Footer -->
+  <text x="80" y="${height - 40}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" fill="${style.textMuted}" letter-spacing="0.4">trndinn.com</text>
+  ${hashtagsText ? `<text x="${width - 80}" y="${height - 40}" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="${style.accentColor}" text-anchor="end" letter-spacing="0.3">${escapeXml(hashtagsText)}</text>` : ''}
+
+  <!-- Platform indicator -->
+  <text x="${width - 80}" y="75" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="${style.textMuted}" text-anchor="end" letter-spacing="0.5">${escapeXml(platformLabel)}</text>
+
+  <!-- Accent dots -->
+  <circle cx="${width - 60}" cy="${height - 45}" r="3" fill="${style.accentColor}" opacity="0.5"/>
+  <circle cx="${width - 72}" cy="${height - 50}" r="2" fill="${style.accentLight}" opacity="0.3"/>
+</svg>`;
+
+  const pngBuffer = await sharp(Buffer.from(svg))
+    .png({ quality: 95 })
+    .toBuffer();
+
+  return pngBuffer;
+}
+
+function getPlatformLabel(platform: string): string {
+  const labels: Record<string, string> = {
+    linkedin: 'LinkedIn',
+    linkedin_article: 'LinkedIn Article',
+    linkedin_post: 'LinkedIn Post',
+    devto: 'DEV.to',
+    hashnode: 'Hashnode',
+    medium: 'Medium',
+    newsletter: 'Newsletter',
+    beehiiv: 'Beehiiv',
+    twitter: 'Twitter/X',
+    twitter_thread: 'Twitter Thread',
+    ghost: 'Ghost',
+    substack: 'Substack',
+    reddit: 'Reddit',
+    hackernews: 'Hacker News',
+  };
+  return labels[platform] || platform.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Generate a section/inline image for content
+ */
+export async function generateSectionImage(
+  title: string,
+  sectionNumber: number,
+  platform: string,
+): Promise<Buffer> {
+  const config = PLATFORM_IMAGE_CONFIGS[platform] || PLATFORM_IMAGE_CONFIGS.linkedin;
+  const style = PLATFORM_STYLES[config.style];
+  const width = Math.floor(config.width * 0.8);
+  const height = Math.floor(config.height * 0.6);
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${style.bgGradientStart}"/>
+      <stop offset="100%" stop-color="${style.bgGradientEnd}"/>
+    </linearGradient>
+    <linearGradient id="accent-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="${style.accentColor}"/>
+      <stop offset="100%" stop-color="${style.accentLight}"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="${width}" height="${height}" fill="url(#bg-gradient)"/>
+  
+  <!-- Section number circle -->
+  <circle cx="60" cy="${height / 2}" r="30" fill="url(#accent-gradient)"/>
+  <text x="60" y="${height / 2 + 8}" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="700" fill="${style.textColor}" text-anchor="middle">${sectionNumber}</text>
+
+  <!-- Section title -->
+  <text x="120" y="${height / 2 + 6}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="${style.textColor}">${escapeXml(title.substring(0, 50))}</text>
+
+  <!-- Decorative line -->
+  <line x1="120" y1="${height / 2 + 20}" x2="${width - 60}" y2="${height / 2 + 20}" stroke="${style.borderColor}" stroke-width="1"/>
+</svg>`;
+
+  const pngBuffer = await sharp(Buffer.from(svg))
+    .png({ quality: 90 })
+    .toBuffer();
+
+  return pngBuffer;
+}
+
+/**
+ * Get recommended image dimensions for a platform
+ */
+export function getPlatformImageDimensions(platform: string): { width: number; height: number } {
+  const config = PLATFORM_IMAGE_CONFIGS[platform];
+  if (config) {
+    return { width: config.width, height: config.height };
+  }
+  return { width: 1200, height: 630 };
+}
+
+/**
+ * Check if a platform typically uses images
+ */
+export function platformUsesImages(platform: string): boolean {
+  const noImagePlatforms = new Set([
+    'reddit',
+    'hackernews',
+    'indiehackers',
+    'producthunt_discussions',
+    'growthhackers',
+    'huggingface_community',
+  ]);
+  return !noImagePlatforms.has(platform);
+}

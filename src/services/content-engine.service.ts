@@ -12,7 +12,13 @@ import { PlatformPublishersService } from './platform-publishers.service';
 import { ProfileRepository } from '../repositories/profile.repository';
 import { LinkedInAuthService } from '../integrations/social/providers/linkedin/linkedin-auth.service';
 import { MinioService } from './minio.service';
-import { generateDiagram, generateOGImage } from '../utils/image-generation.util';
+import {
+  generateDiagram,
+  generateOGImage,
+  generatePlatformCoverImage,
+  platformUsesImages,
+  PLATFORM_IMAGE_CONFIGS,
+} from '../utils/image-generation.util';
 
 export interface GeneratePlanInput {
   primary_keyword: string;
@@ -538,16 +544,52 @@ Requirements:
   async generateDistribution(postId: string, platform: string) {
     const client = this.supabase.getServiceClient();
 
-    // Get the post content
+    // Get the post content with slug for image naming
     const { data: post } = await client
       .from('blog_posts')
-      .select('title, excerpt, body, tags')
+      .select('title, excerpt, body, tags, slug, category')
       .eq('id', postId)
       .single();
 
     if (!post) throw new NotFoundException('Post not found');
 
-    const adapted = await this.adaptContentForPlatform(post, platform);
+    // Generate platform-adapted content with enhanced prompts
+    const adaptedResult = await this.adaptContentForPlatformEnhanced(post, platform);
+    
+    // Determine if this platform is manual-only
+    const isManual = this.platformPublishers.isManualOnly(platform);
+
+    // Generate cover image if platform uses images
+    let coverImageUrl: string | undefined;
+    if (platformUsesImages(platform) && this.minioService) {
+      try {
+        const imageBuffer = await generatePlatformCoverImage({
+          title: adaptedResult.platformTitle || post.title,
+          platform,
+          category: post.category || (post.tags?.[0] ?? undefined),
+          excerpt: post.excerpt ?? undefined,
+          hashtags: adaptedResult.hashtags,
+        });
+
+        const objectName = `blog/distribution/${post.slug || postId}/${platform}-cover-${Date.now()}.png`;
+        await this.minioService.uploadFile(
+          'contentos-media',
+          objectName,
+          imageBuffer,
+          'image/png',
+        );
+        coverImageUrl = await this.minioService.getPublicUrl('contentos-media', objectName);
+        this.logger.log(`Generated cover image for ${platform}: ${coverImageUrl}`);
+      } catch (imgError) {
+        this.logger.warn(`Failed to generate cover image for ${platform}: ${(imgError as Error).message}`);
+      }
+    }
+
+    // Calculate character count
+    const characterCount = adaptedResult.content.length;
+
+    // Calculate simple engagement score based on content quality signals
+    const engagementScore = this.calculateEngagementScore(adaptedResult.content, platform);
 
     const { data, error } = await client
       .from('blog_distributions')
@@ -556,7 +598,15 @@ Requirements:
           post_id: postId,
           platform,
           status: 'ready',
-          adapted_content: adapted,
+          adapted_content: adaptedResult.content,
+          platform_title: adaptedResult.platformTitle,
+          cover_image_url: coverImageUrl,
+          inline_images: [],
+          hashtags: adaptedResult.hashtags,
+          character_count: characterCount,
+          seo_score: adaptedResult.seoScore,
+          engagement_score: engagementScore,
+          is_manual: isManual,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'post_id,platform' },
@@ -568,346 +618,321 @@ Requirements:
     return data;
   }
 
-  private async adaptContentForPlatform(
+  private calculateEngagementScore(content: string, platform: string): number {
+    let score = 50;
+
+    // Check for engagement elements
+    const hasQuestion = /\?/.test(content);
+    const hasHashtags = /#\w+/.test(content);
+    const hasCTA = /\b(comment|share|follow|subscribe|click|read more|learn more|check out)\b/i.test(content);
+    const hasEmoji = /[\u{1F300}-\u{1F9FF}]/u.test(content);
+    const hasNumbers = /\d+%|\d+x|\$\d+|\d+ (tips|ways|steps|reasons)/i.test(content);
+    const hasHook = content.split('\n')[0]?.length < 150;
+
+    if (hasQuestion) score += 10;
+    if (hasHashtags) score += 8;
+    if (hasCTA) score += 12;
+    if (hasNumbers) score += 10;
+    if (hasHook) score += 10;
+
+    // Platform-specific adjustments
+    if (platform === 'linkedin_post' || platform === 'linkedin_article') {
+      if (hasEmoji) score -= 5;
+    }
+    if (platform === 'twitter_thread') {
+      if (hasEmoji) score += 5;
+    }
+    if (platform === 'reddit' || platform === 'hackernews') {
+      if (hasCTA) score -= 10;
+    }
+
+    return Math.min(100, Math.max(0, score));
+  }
+
+  private async adaptContentForPlatformEnhanced(
     post: {
       title: string;
       excerpt: string | null;
       body: string | null;
       tags: string[] | null;
+      category?: string | null;
     },
     platform: string,
-  ): Promise<string> {
+  ): Promise<{
+    content: string;
+    platformTitle?: string;
+    hashtags: string[];
+    seoScore: number;
+  }> {
     const title = post.title;
     const excerpt = post.excerpt ?? '';
     const body = post.body ?? excerpt;
     const tags = post.tags ?? [];
 
-    const platformRules: Record<string, string> = {
+    // Get platform-specific rules with enhanced authenticity guidelines
+    const platformRules = this.getEnhancedPlatformRules(platform);
+
+    const systemPrompt = `You are an expert content strategist who creates authentic, engaging content for different platforms. Your content should feel genuine and native to each platform — never robotic or templated.
+
+CRITICAL GUIDELINES:
+1. AUTHENTICITY: Write like a real person sharing valuable insights, not a marketing bot
+2. PLATFORM-NATIVE: Match the exact tone, format, and conventions of ${platform}
+3. VALUE-FIRST: Lead with insights and value, not self-promotion
+4. UNIQUE ANGLE: Don't just summarize — add a fresh perspective or insight
+5. ENGAGEMENT: Include elements that naturally encourage interaction
+
+Platform-specific rules:
+${platformRules}
+
+OUTPUT FORMAT (JSON):
+{
+  "content": "The full adapted content ready to publish",
+  "platformTitle": "Platform-optimized title (may differ from original)",
+  "hashtags": ["relevant", "hashtags", "for", "platform"],
+  "seoScore": 75
+}
+
+The seoScore should be 0-100 based on:
+- Keyword presence and placement
+- Readability and structure
+- Engagement potential
+- Platform best practices adherence`;
+
+    const userPrompt = `Adapt this article for ${platform}:
+
+ORIGINAL TITLE: ${title}
+CATEGORY: ${post.category || 'General'}
+TAGS: ${tags.join(', ')}
+
+CONTENT:
+${body.slice(0, 8000)}
+
+Remember: Create authentic, platform-native content that provides real value. Don't just truncate or reformat — reimagine the content for this specific audience.`;
+
+    try {
+      const { content: aiResponse } = await this.aiGateway.chatCompletionRaw({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        category: 'seo_generation',
+        temperature: 0.75,
+        maxTokens: 4500,
+        timeoutMs: 60_000,
+      });
+
+      // Parse the JSON response
+      const cleaned = this.extractJsonFromAiResponse(aiResponse);
+      const parsed = JSON.parse(cleaned);
+
+      return {
+        content: parsed.content || aiResponse,
+        platformTitle: parsed.platformTitle,
+        hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
+        seoScore: typeof parsed.seoScore === 'number' ? parsed.seoScore : 70,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Enhanced platform adaptation failed for ${platform}: ${(error as Error).message}`,
+      );
+      // Fallback to basic adaptation
+      const fallbackContent = this.fallbackAdaptContent(post, platform);
+      return {
+        content: fallbackContent,
+        hashtags: tags.slice(0, 5).map((t) => `#${t.replace(/\s+/g, '')}`),
+        seoScore: 50,
+      };
+    }
+  }
+
+  private getEnhancedPlatformRules(platform: string): string {
+    const rules: Record<string, string> = {
       // ===== TIER 1: AUTO-PUBLISH PLATFORMS =====
-      linkedin_article:
-        'Professional LinkedIn article. 1500-2000 words. Add relevant hashtags at the end. Maintain professional, insightful tone. Add a strong hook in the first line. Include data points and industry insights.',
-      linkedin_post:
-        'LinkedIn post, MAX 1300 characters total. Hook in first line (bold statement or question). Personal/professional tone. Use line breaks for readability. End with a question to drive engagement. Add 3-5 hashtags.',
-      medium:
-        'Medium article format. Different intro than original (hook the reader). Use Medium-style formatting: pull quotes, section breaks (---). Add a "TL;DR" at the top. Conversational but authoritative tone.',
-      devto:
-        'Dev.to article. Start with YAML front matter (title, published: false, tags). Developer-community focused. Add code examples where relevant. Practical and tutorial-like. Use dev.to markdown extensions.',
-      hashnode:
-        'Hashnode technical blog. Deep technical depth. Include code examples and explanations. Developer-friendly. Use clear subheadings. Add a "Prerequisites" section if applicable.',
-      ghost:
-        'Ghost blog format. Clean, professional writing. Use proper heading hierarchy (H2, H3). Include a compelling introduction. Add a clear call-to-action at the end. Optimize for readability with short paragraphs.',
-      beehiiv:
-        'Beehiiv newsletter format. Engaging, personal tone. Start with a hook that makes readers want to continue. Use bullet points for key takeaways. Include a clear CTA. Keep paragraphs short (2-3 sentences).',
-      telegraph:
-        'Telegraph article format. Clean, minimal formatting. Focus on readability. Use short paragraphs. Include a strong opening. Telegraph supports basic formatting only (bold, italic, links).',
-      blogger:
-        'Blogger/Blogspot format. SEO-optimized with keywords in headings. Include internal linking suggestions. Add a meta description at the top as a comment. Use proper heading structure.',
+      linkedin_article: `LinkedIn Article (Long-form):
+- Professional thought leadership tone
+- 1500-2000 words optimal
+- Strong hook in first 2 lines (appears before "see more")
+- Use data points, statistics, and industry insights
+- Include personal experience or case study angle
+- Add 3-5 relevant hashtags at the end
+- End with a thought-provoking question
+- Structure: Hook → Context → Insights → Takeaways → CTA`,
+
+      linkedin_post: `LinkedIn Post (Short-form):
+- MAX 1300 characters total
+- Hook in first line (bold statement, surprising stat, or question)
+- Personal/professional tone — share YOUR perspective
+- Use line breaks for readability (short paragraphs)
+- Include 1-2 specific examples or data points
+- End with a question to drive comments
+- 3-5 hashtags (mix of broad and niche)
+- NO emojis overload — keep it professional`,
+
+      medium: `Medium Article:
+- Editorial, storytelling approach
+- Different intro than original — hook the reader immediately
+- Use Medium-style formatting: pull quotes, section breaks (---)
+- Add a "TL;DR" or "Key Takeaways" at the top
+- Conversational but authoritative tone
+- 5-8 minute read optimal
+- Include personal anecdotes or observations
+- End with a reflection or call to action`,
+
+      devto: `Dev.to Article:
+- Start with YAML front matter: title, published: false, tags (max 4)
+- Developer-community focused — practical and helpful
+- Include code examples with syntax highlighting
+- Add a "Prerequisites" section if technical
+- Use dev.to markdown extensions ({% embed %}, {% codepen %})
+- Conversational, peer-to-peer tone
+- Include "What I learned" or "Gotchas" sections
+- End with next steps or resources`,
+
+      hashnode: `Hashnode Technical Blog:
+- Deep technical depth with clear explanations
+- Include working code examples
+- Add a "Prerequisites" section
+- Use clear subheadings for scannability
+- Developer-friendly, tutorial-like structure
+- Include diagrams or architecture descriptions
+- End with "Further Reading" or related topics`,
+
+      ghost: `Ghost Blog:
+- Clean, professional writing
+- Proper heading hierarchy (H2, H3)
+- Compelling introduction that sets up the value
+- Short paragraphs for readability
+- Include a clear call-to-action at the end
+- SEO-optimized with keywords in headings
+- Add internal linking suggestions`,
+
+      beehiiv: `Beehiiv Newsletter:
+- Personal, direct tone — like writing to a friend
+- Start with a hook that creates curiosity
+- Use bullet points for key takeaways
+- Keep paragraphs short (2-3 sentences)
+- Include a clear CTA (reply, click, share)
+- Add a P.S. line with bonus insight
+- Make it scannable but valuable`,
+
+      telegraph: `Telegraph Article:
+- Clean, minimal formatting
+- Focus on readability
+- Short paragraphs
+- Strong opening that delivers value immediately
+- Basic formatting only (bold, italic, links)
+- No images or complex media`,
+
+      blogger: `Blogger/Blogspot:
+- SEO-optimized with keywords in headings
+- Include meta description at top as comment
+- Proper heading structure (H2, H3)
+- Add internal linking suggestions
+- Conversational but informative tone`,
 
       // ===== TIER 2: SUBMIT FOR REVIEW PLATFORMS =====
-      hackernoon: `HackerNoon tech editorial submission. Requirements:
-- 1500+ words minimum, tech editorial style
-- Compelling narrative hook in the first paragraph
+      hackernoon: `HackerNoon Submission:
+- 1500+ words, tech editorial style
+- Compelling narrative hook in first paragraph
 - Technical depth with practical insights
-- Include a TL;DR section at the top
+- Include TL;DR section at top
 - Add specific data points and statistics
 - End with actionable takeaways
-- Include a brief author bio suggestion
+- Include brief author bio suggestion
 - Add 3-5 relevant tags
+- Generate: submission pitch, key points for editors, 2 alt titles`,
 
-Also generate:
-1. A submission pitch (2-3 sentences explaining why this fits HackerNoon)
-2. Key points for editors (3 bullet points)
-3. 2 alternative title suggestions`,
-
-      towards_ai: `Towards AI submission. Requirements:
-- AI/ML focused content with technical accuracy
-- Explain AI concepts clearly for practitioners
-- Include code snippets if relevant (Python preferred)
+      towards_ai: `Towards AI Submission:
+- AI/ML focused with technical accuracy
+- Explain concepts clearly for practitioners
+- Include Python code snippets if relevant
 - Add practical applications and use cases
-- Reference recent AI research or developments
-- Include visualizations or diagram descriptions
+- Reference recent AI research
+- Include visualization descriptions`,
 
-Also generate:
-1. A pitch for the editors (why this fits Towards AI audience)
-2. Suggested categories (Machine Learning, Deep Learning, NLP, Computer Vision, etc.)
-3. Key technical concepts covered`,
-
-      analytics_vidhya: `Analytics Vidhya submission. Requirements:
-- Data science/analytics tutorial format
-- Step-by-step explanations
-- Include code examples (Python/R)
-- Add dataset references or examples
-- Explain statistical concepts clearly
-- Include practical exercises or challenges
-
-Also generate:
-1. Submission pitch for editors
-2. Difficulty level (Beginner/Intermediate/Advanced)
-3. Prerequisites for readers`,
-
-      freecodecamp: `freeCodeCamp tutorial submission. Requirements:
-- Developer tutorial format, educational tone
-- Step-by-step instructions with code examples
+      freecodecamp: `freeCodeCamp Tutorial:
+- Educational, step-by-step format
 - Beginner-friendly explanations
-- Include a "What You'll Learn" section
+- Include "What You'll Learn" section
 - Add "Prerequisites" section
-- Include working code examples
-- End with "Next Steps" or further learning resources
-
-Also generate:
-1. Pitch explaining educational value
-2. Target audience (beginners, intermediate, advanced)
-3. Estimated reading/completion time`,
-
-      smashing_magazine: `Smashing Magazine submission. Requirements:
-- Web development or design focus
-- In-depth, well-researched content
-- Include practical examples and demos
-- Add browser compatibility notes if relevant
-- Professional, authoritative tone
-- Include performance considerations
-
-Also generate:
-1. Editorial pitch (why this fits Smashing's audience)
-2. Key takeaways for readers
-3. Related topics for internal linking`,
-
-      sitepoint: `SitePoint submission. Requirements:
-- Web development tutorial format
-- Practical, hands-on approach
-- Include complete code examples
-- Add "Quick Tips" or "Pro Tips" sections
-- Cover best practices
-- Include troubleshooting section
-
-Also generate:
-1. Submission pitch
-2. Technology stack covered
-3. Skill level required`,
-
-      readwrite: `ReadWrite tech news/opinion submission. Requirements:
-- Tech industry news or opinion angle
-- Current, timely topic
-- Include industry context and trends
-- Quote or reference industry experts
-- Forward-looking analysis
-- Accessible to general tech audience
-
-Also generate:
-1. News hook (why this is timely)
-2. Key industry implications
-3. Expert sources to cite`,
-
-      yourstory: `YourStory submission (Indian startup focus). Requirements:
-- Founder journey or startup story angle
-- Include specific metrics and milestones
-- Add challenges overcome and lessons learned
-- Indian market context where relevant
-- Inspirational but practical tone
-- Include founder quotes or insights
-
-Also generate:
-1. Pitch emphasizing the founder/startup angle
-2. Key metrics to highlight
-3. Indian market relevance`,
-
-      startuptalky: `StartupTalky submission. Requirements:
-- Indian startup ecosystem focus
-- News or analysis format
-- Include funding, growth, or milestone data
-- Add market context and competition analysis
-- Quote founders or industry experts
-- Include company background
-
-Also generate:
-1. News angle pitch
-2. Key data points to highlight
-3. Related startups to mention`,
-
-      inc42: `Inc42 submission (Indian tech/startup). Requirements:
-- Indian tech industry news angle
-- Data-driven analysis
-- Include market size and growth projections
-- Add competitive landscape
-- Quote industry experts
-- Professional, journalistic tone
-
-Also generate:
-1. News pitch with timeliness angle
-2. Key statistics to include
-3. Industry experts to quote`,
-
-      techstory: `TechStory submission. Requirements:
-- Tech news or startup story format
-- Include company/product details
-- Add market context
-- Quote relevant stakeholders
-- Include future outlook
-- Accessible writing style
-
-Also generate:
-1. Story pitch
-2. Key facts to highlight
-3. Related stories angle`,
+- Working code examples throughout
+- End with "Next Steps" or further learning`,
 
       // ===== TIER 3: DISCUSSION PLATFORMS =====
-      reddit: `Reddit discussion post. CRITICAL RULES:
-- Value-first, NO self-promotion
-- Lead with insights/findings, NOT "I wrote an article about..."
-- Sound like a knowledgeable community member sharing discoveries
+      reddit: `Reddit Discussion Post:
+CRITICAL: Value-first, NO self-promotion
+- Lead with insights/findings, NOT "I wrote an article..."
+- Sound like a knowledgeable community member
 - Ask genuine questions to spark discussion
 - Use markdown formatting
 - Be humble and open to feedback
-
 Format:
 1. Hook (interesting finding or question)
 2. Context (brief background)
 3. Key insights (bullet points)
 4. Discussion questions (2-3 genuine questions)
+Also suggest: 3 relevant subreddits, best posting times`,
 
-Also suggest:
-- 3 relevant subreddits with subscriber counts
-- Best posting times
-- Potential objections to address`,
-
-      indiehackers: `Indie Hackers post. Requirements:
+      indiehackers: `Indie Hackers Post:
 - Founder journey format
 - Focus on lessons learned and challenges
 - Include specific metrics if available
 - Be transparent about failures and pivots
 - End with discussion questions
 - Builder/maker community tone
+Format: Problem → What I Built → Key Learnings → What's Next → Questions`,
 
-Format:
-1. The Problem/Opportunity
-2. What I Built/Discovered
-3. Key Learnings (bullet points with specifics)
-4. What's Next
-5. Questions for the community
-
-Also generate:
-- Engagement hooks
-- Metrics to share (if applicable)
-- Follow-up discussion topics`,
-
-      producthunt_discussions: `Product Hunt Discussions post. Requirements:
-- Product or launch focused
-- Problem-solution format
-- Invite feedback and suggestions
-- Be specific about the product/approach
-- Engage with the maker community
-
-Format:
-1. Problem statement
-2. Solution approach
-3. Current status/results
-4. Specific questions for feedback
-
-Also generate:
-- Discussion title options
-- Key features to highlight
-- Feedback questions`,
-
-      growthhackers: `GrowthHackers post. Requirements:
-- Growth tactics and data focus
-- Include specific metrics and results
-- Case study format preferred
-- Actionable insights
-- A/B test results if available
-
-Format:
-1. Growth challenge/goal
-2. Tactics tried
-3. Results with data
-4. Key learnings
-5. Questions for the community
-
-Also generate:
-- Growth metrics to highlight
-- Tactics summary
-- Discussion questions`,
-
-      hackernews: `Hacker News submission. CRITICAL RULES:
-- Technical and objective tone
+      hackernews: `Hacker News Submission:
+CRITICAL: Technical and objective tone
 - NO marketing language whatsoever
 - Factual, concise title
-- Lead with the most interesting technical aspect
+- Lead with most interesting technical aspect
 - Be prepared for critical feedback
+Format: Submission title (factual) + brief context comment`,
 
-Format:
-1. Submission title (factual, no clickbait)
-2. Brief comment to add context (optional)
-3. Key technical points
+      // ===== LEGACY/SOCIAL PLATFORMS =====
+      twitter_thread: `Twitter/X Thread:
+- 5-10 tweets, each UNDER 280 characters
+- Number each tweet (1/, 2/, etc)
+- First tweet is a hook (bold claim or question)
+- Each tweet should be standalone-valuable
+- Last tweet is a CTA
+- Separate tweets with "---"
+- Use emojis sparingly for emphasis`,
 
-Also generate:
-- Alternative titles
-- Potential HN objections to address
-- Technical depth to emphasize`,
+      newsletter: `Email Newsletter:
+- Personal, direct tone
+- Short paragraphs (2-3 sentences max)
+- Clear sections with bold headers
+- Single, clear CTA
+- Add a P.S. line
+- Make it scannable
+- "Letter to a friend" feel`,
 
-      huggingface_community: `Hugging Face Community post. Requirements:
-- AI/ML technical focus
-- Include model details or code
-- Reference Hugging Face tools/models
-- Technical but accessible
-- Include reproducibility info
+      substack: `Substack Newsletter:
+- Personal, opinionated voice
+- Start with personal opener
+- Include personal anecdotes
+- End with invitation to subscribe/share
+- Conversational, intimate tone`,
 
-Format:
-1. Technical overview
-2. Implementation details
-3. Results/benchmarks
-4. Code snippets
-5. Discussion questions
+      facebook: `Facebook Post:
+- Conversational, accessible
+- Ask a question to drive comments
+- Keep under 500 words
+- Use emoji sparingly
+- End with engagement prompt`,
 
-Also generate:
-- Relevant models/datasets to reference
-- Technical tags
-- Collaboration opportunities`,
-
-      // ===== LEGACY PLATFORMS =====
-      twitter_thread:
-        'Twitter/X thread. 5-10 tweets, each UNDER 280 characters. Number each tweet (1/, 2/, etc). First tweet is a hook. Last tweet is a CTA. Separate tweets with "---". Make each tweet standalone-valuable.',
-      newsletter:
-        'Email newsletter format. Short paragraphs (2-3 sentences max). Conversational "letter to a friend" tone. Clear sections with bold headers. End with a single CTA. Add a P.S. line. Make it scannable.',
-      substack:
-        'Substack newsletter. Personal, opinionated voice. Start with "Dear reader" or similar personal opener. Include personal anecdotes or observations. End with invitation to subscribe/share.',
-      facebook:
-        'Facebook post. Conversational, accessible. Ask a question to drive comments. Keep under 500 words. Use emoji sparingly. End with engagement prompt.',
-      instagram:
-        'Instagram carousel text. Create 7-10 slides. Each slide: [Slide N - Topic]. First slide is a hook/title. Last slide is CTA. Keep text per slide under 50 words. Visual-first thinking.',
+      instagram: `Instagram Carousel:
+- 7-10 slides format
+- Each slide: [Slide N - Topic]
+- First slide is hook/title
+- Last slide is CTA
+- Keep text per slide under 50 words
+- Visual-first thinking`,
     };
 
-    const rules =
-      platformRules[platform] ||
-      `Adapt for ${platform}. Keep the core message but match the platform's conventions and audience expectations.`;
-
-    const systemPrompt = `You are an expert content repurposing specialist. Adapt the following article for a specific platform. Output ONLY the adapted content — no explanations, no JSON wrapper, just the ready-to-publish text.
-
-Platform rules: ${rules}`;
-
-    const userPrompt = `ORIGINAL ARTICLE:
-Title: ${title}
-Tags: ${tags.join(', ')}
-
-${body.slice(0, 6000)}`;
-
-    try {
-      const { content } = await this.aiGateway.chatCompletionRaw({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        category: 'seo_generation',
-        temperature: 0.7,
-        maxTokens: 4000,
-        timeoutMs: 45_000,
-      });
-      return content;
-    } catch (error) {
-      this.logger.error(
-        `Platform adaptation failed for ${platform}: ${(error as Error).message}`,
-      );
-      return this.fallbackAdaptContent(post, platform);
-    }
+    return rules[platform] || `Adapt for ${platform}. Keep the core message but match the platform's conventions and audience expectations.`;
   }
 
   private fallbackAdaptContent(
