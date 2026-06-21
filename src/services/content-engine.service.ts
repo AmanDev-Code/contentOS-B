@@ -649,6 +649,241 @@ Requirements:
     return Math.min(100, Math.max(0, score));
   }
 
+  /**
+   * Returns true when content appears to be cut off mid-sentence.
+   * Heuristic: last non-whitespace char is not a sentence-ending punctuation
+   * or a standard markdown closing marker.
+   */
+  private isContentTruncated(content: string): boolean {
+    const trimmed = content.trimEnd();
+    if (!trimmed) return false;
+    const lastChar = trimmed[trimmed.length - 1];
+    const sentenceEnders = new Set(['.', '!', '?', ')', ']', '"', "'", '`', '-']);
+    // Also accept markdown HR (---) and code-fence close (```)
+    if (trimmed.endsWith('---') || trimmed.endsWith('```')) return false;
+    return !sentenceEnders.has(lastChar);
+  }
+
+  /**
+   * Long-form platforms need considerably more output tokens.
+   * Short-form platforms (twitter threads, linkedin posts, etc.) are fine with fewer.
+   */
+  private getMaxTokensForPlatform(platform: string): number {
+    const longFormPlatforms = new Set([
+      'devto',
+      'medium',
+      'hashnode',
+      'beehiiv',
+      'ghost',
+      'blogger',
+      'telegraph',
+      'hackernoon',
+      'linkedin_article',
+      'newsletter',
+      'substack',
+    ]);
+    return longFormPlatforms.has(platform) ? 8000 : 4500;
+  }
+
+  private isLongFormPlatform(platform: string): boolean {
+    return this.getMaxTokensForPlatform(platform) >= 8000;
+  }
+
+  /**
+   * Split a large article body into logical sections of up to maxChars each.
+   * Prefers splitting on ## headings, then paragraph breaks (\n\n), then hard-cuts.
+   */
+  private splitIntoSections(body: string, maxChars = 6000): string[] {
+    if (body.length <= maxChars) return [body];
+
+    const sections: string[] = [];
+    // Try to split on H2 headings first
+    const h2Parts = body.split(/(?=^## )/m);
+    let current = '';
+    for (const part of h2Parts) {
+      if ((current + part).length <= maxChars) {
+        current += part;
+      } else {
+        if (current.trim()) sections.push(current.trim());
+        // Part itself might exceed maxChars — split on paragraph breaks
+        if (part.length <= maxChars) {
+          current = part;
+        } else {
+          const paragraphs = part.split(/\n\n+/);
+          current = '';
+          for (const para of paragraphs) {
+            if ((current + '\n\n' + para).length <= maxChars) {
+              current = current ? current + '\n\n' + para : para;
+            } else {
+              if (current.trim()) sections.push(current.trim());
+              // Paragraph itself may exceed limit — hard-cut at word boundary
+              if (para.length <= maxChars) {
+                current = para;
+              } else {
+                let remaining = para;
+                while (remaining.length > maxChars) {
+                  const cutAt = remaining.lastIndexOf(' ', maxChars);
+                  const boundary = cutAt > maxChars * 0.5 ? cutAt : maxChars;
+                  sections.push(remaining.slice(0, boundary).trim());
+                  remaining = remaining.slice(boundary).trim();
+                }
+                current = remaining;
+              }
+            }
+          }
+        }
+      }
+    }
+    if (current.trim()) sections.push(current.trim());
+    return sections.filter((s) => s.length > 0);
+  }
+
+  /**
+   * For large articles, process section batches sequentially and merge results.
+   * Returns a synthesised platform-native content string.
+   */
+  private async processBatchedContent(
+    post: {
+      title: string;
+      excerpt: string | null;
+      body: string | null;
+      tags: string[] | null;
+      content_category?: string | null;
+    },
+    platform: string,
+    sections: string[],
+    systemPrompt: string,
+  ): Promise<{ content: string; platformTitle?: string; hashtags: string[]; seoScore: number }> {
+    const title = post.title;
+    const tags = post.tags ?? [];
+    const maxTokens = this.getMaxTokensForPlatform(platform);
+    const totalSections = sections.length;
+
+    this.logger.log(
+      `[distribution] Batching ${totalSections} sections for ${platform} (total body chars: ${(post.body ?? '').length})`,
+    );
+
+    const sectionResults: string[] = [];
+    let platformTitle: string | undefined;
+    let hashtags: string[] = [];
+    let seoScore = 70;
+
+    for (let i = 0; i < totalSections; i++) {
+      const section = sections[i];
+      const isFirst = i === 0;
+      const isLast = i === totalSections - 1;
+
+      const batchPrompt = isFirst
+        ? `Adapt this article for ${platform}.
+
+ORIGINAL TITLE: ${title}
+CATEGORY: ${post.content_category || 'General'}
+TAGS: ${tags.join(', ')}
+TOTAL SECTIONS: ${totalSections} (processing section 1 of ${totalSections})
+
+CONTENT SECTION ${i + 1}/${totalSections}:
+${section}
+
+${isLast ? '' : 'NOTE: More sections follow. Write the opening/introduction section only — do NOT write a conclusion yet. Complete every sentence.'}
+
+Output JSON:
+{
+  "content": "The adapted content for this section",
+  "platformTitle": "Platform-optimized title",
+  "hashtags": ["tag1", "tag2"],
+  "seoScore": 75
+}`
+        : `Continue adapting the same article for ${platform}.
+
+CONTENT SECTION ${i + 1}/${totalSections}:
+${section}
+
+${isLast ? 'This is the FINAL section. Write a strong conclusion.' : 'More sections follow. Do NOT write a conclusion yet. Complete every sentence.'}
+
+Output JSON:
+{
+  "content": "The adapted content for this section (continuation, no title repeat)",
+  "platformTitle": null,
+  "hashtags": [],
+  "seoScore": 0
+}`;
+
+      const { content: aiResponse } = await this.aiGateway.chatCompletionRaw({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: batchPrompt },
+        ],
+        category: 'seo_generation',
+        temperature: 0.75,
+        maxTokens,
+        timeoutMs: 120_000,
+      });
+
+      let sectionContent = aiResponse;
+      let parsedOk = false;
+      try {
+        const cleaned = this.extractJsonFromAiResponse(aiResponse);
+        const parsed = JSON.parse(cleaned);
+        sectionContent = parsed.content || aiResponse;
+        parsedOk = true;
+        if (isFirst) {
+          platformTitle = parsed.platformTitle ?? undefined;
+          hashtags = Array.isArray(parsed.hashtags) ? parsed.hashtags : [];
+          seoScore = typeof parsed.seoScore === 'number' ? parsed.seoScore : 70;
+        }
+      } catch {
+        this.logger.warn(
+          `[distribution] Batch ${i + 1}/${totalSections} JSON parse failed for ${platform}; using raw`,
+        );
+      }
+
+      // Truncation continuation for this batch
+      if (this.isContentTruncated(sectionContent)) {
+        this.logger.warn(`[distribution] Batch ${i + 1} truncated for ${platform}; retrying continuation`);
+        try {
+          const { content: cont } = await this.aiGateway.chatCompletionRaw({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: batchPrompt },
+              { role: 'assistant', content: aiResponse },
+              {
+                role: 'user',
+                content: 'The previous response was cut off. Continue and complete it, then close the JSON properly.',
+              },
+            ],
+            category: 'seo_generation',
+            temperature: 0.7,
+            maxTokens: Math.round(maxTokens * 0.6),
+            timeoutMs: 60_000,
+          });
+          const mergedRaw = aiResponse + cont;
+          try {
+            const mc = this.extractJsonFromAiResponse(mergedRaw);
+            const mp = JSON.parse(mc);
+            sectionContent = mp.content || sectionContent;
+          } catch {
+            if (!parsedOk) {
+              try {
+                const cc = this.extractJsonFromAiResponse(cont);
+                const cp = JSON.parse(cc);
+                if (cp.content && !this.isContentTruncated(cp.content)) sectionContent = cp.content;
+              } catch { /* keep existing */ }
+            }
+          }
+        } catch (retryErr) {
+          this.logger.warn(`[distribution] Batch ${i + 1} continuation failed: ${(retryErr as Error).message}`);
+        }
+      }
+
+      sectionResults.push(sectionContent.trim());
+    }
+
+    // Merge all sections with a blank line separator
+    const mergedContent = sectionResults.join('\n\n');
+
+    return { content: mergedContent, platformTitle, hashtags, seoScore };
+  }
+
   private async adaptContentForPlatformEnhanced(
     post: {
       title: string;
@@ -680,6 +915,7 @@ CRITICAL GUIDELINES:
 3. VALUE-FIRST: Lead with insights and value, not self-promotion
 4. UNIQUE ANGLE: Don't just summarize — add a fresh perspective or insight
 5. ENGAGEMENT: Include elements that naturally encourage interaction
+6. COMPLETENESS: Always finish every sentence and section — never cut off mid-thought
 
 Platform-specific rules:
 ${platformRules}
@@ -698,6 +934,27 @@ The seoScore should be 0-100 based on:
 - Engagement potential
 - Platform best practices adherence`;
 
+    // For large articles, use section-based batching to avoid prompt truncation
+    const BATCH_THRESHOLD = 8000;
+    const BATCH_SIZE = 6000;
+
+    if (body.length > BATCH_THRESHOLD) {
+      const sections = this.splitIntoSections(body, BATCH_SIZE);
+      if (sections.length > 1) {
+        try {
+          return await this.processBatchedContent(post, platform, sections, systemPrompt);
+        } catch (batchError) {
+          this.logger.error(
+            `Batched processing failed for ${platform}: ${(batchError as Error).message} — falling back to single-call with head`,
+          );
+          // Fall through to single-call below using just the first ~8000 chars as graceful degradation
+        }
+      }
+    }
+
+    const maxTokens = this.getMaxTokensForPlatform(platform);
+
+    // Single-call path (body fits within threshold, or batching failed as fallback)
     const userPrompt = `Adapt this article for ${platform}:
 
 ORIGINAL TITLE: ${title}
@@ -705,9 +962,9 @@ CATEGORY: ${post.content_category || 'General'}
 TAGS: ${tags.join(', ')}
 
 CONTENT:
-${body.slice(0, 8000)}
+${body}
 
-Remember: Create authentic, platform-native content that provides real value. Don't just truncate or reformat — reimagine the content for this specific audience.`;
+Remember: Create authentic, platform-native content that provides real value. Don't just truncate or reformat — reimagine the content for this specific audience. IMPORTANT: Complete every sentence fully — the response must not end mid-sentence.`;
 
     try {
       const { content: aiResponse } = await this.aiGateway.chatCompletionRaw({
@@ -717,16 +974,69 @@ Remember: Create authentic, platform-native content that provides real value. Do
         ],
         category: 'seo_generation',
         temperature: 0.75,
-        maxTokens: 4500,
-        timeoutMs: 60_000,
+        maxTokens,
+        timeoutMs: 120_000,
       });
 
       // Parse the JSON response
       const cleaned = this.extractJsonFromAiResponse(aiResponse);
       const parsed = JSON.parse(cleaned);
 
+      let generatedContent: string = parsed.content || aiResponse;
+
+      // Detect truncation and retry once with a continuation prompt
+      if (this.isContentTruncated(generatedContent)) {
+        this.logger.warn(
+          `Platform content for ${platform} appears truncated (ends: "…${generatedContent.slice(-40)}"). Retrying with continuation.`,
+        );
+        try {
+          const { content: continuationResponse } = await this.aiGateway.chatCompletionRaw({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+              { role: 'assistant', content: aiResponse },
+              {
+                role: 'user',
+                content:
+                  'The previous response was cut off. Please continue from exactly where it stopped and complete the content, then close the JSON object properly.',
+              },
+            ],
+            category: 'seo_generation',
+            temperature: 0.7,
+            maxTokens: Math.round(maxTokens * 0.6),
+            timeoutMs: 60_000,
+          });
+
+          // Try to merge: the continuation may be a completion of the truncated JSON
+          // or a standalone full response — handle both
+          const mergedRaw = aiResponse + continuationResponse;
+          try {
+            const mergedCleaned = this.extractJsonFromAiResponse(mergedRaw);
+            const mergedParsed = JSON.parse(mergedCleaned);
+            generatedContent = mergedParsed.content || generatedContent;
+          } catch {
+            // Merged JSON didn't parse — try the continuation alone
+            try {
+              const contCleaned = this.extractJsonFromAiResponse(continuationResponse);
+              const contParsed = JSON.parse(contCleaned);
+              if (contParsed.content && !this.isContentTruncated(contParsed.content)) {
+                generatedContent = contParsed.content;
+              }
+            } catch {
+              this.logger.warn(
+                `Continuation parse failed for ${platform}; using original truncated content`,
+              );
+            }
+          }
+        } catch (retryError) {
+          this.logger.warn(
+            `Truncation retry failed for ${platform}: ${(retryError as Error).message}`,
+          );
+        }
+      }
+
       return {
-        content: parsed.content || aiResponse,
+        content: generatedContent,
         platformTitle: parsed.platformTitle,
         hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
         seoScore: typeof parsed.seoScore === 'number' ? parsed.seoScore : 70,
