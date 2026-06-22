@@ -921,6 +921,11 @@ Requirements:
     let hashtags: string[] = [];
     let seoScore = 70;
 
+    // Calculate expected section length
+    const totalBodyLength = (post.body ?? '').length;
+    const avgSectionLength = Math.floor(totalBodyLength / totalSections);
+    const minSectionOutput = Math.max(Math.floor(avgSectionLength * 0.85), 2000);
+
     for (let i = 0; i < totalSections; i++) {
       const section = sections[i];
       const isFirst = i === 0;
@@ -933,10 +938,13 @@ ORIGINAL TITLE: ${title}
 CATEGORY: ${post.content_category || 'General'}
 TAGS: ${tags.join(', ')}
 TOTAL SECTIONS: ${totalSections} (processing section 1 of ${totalSections})
+SECTION LENGTH: ${section.length.toLocaleString()} chars
+MINIMUM OUTPUT FOR THIS SECTION: ${minSectionOutput.toLocaleString()} chars
 
 CONTENT SECTION ${i + 1}/${totalSections}:
 ${section}
 
+IMPORTANT: Adapt the FULL content of this section — do NOT summarize or shorten. Include all details, examples, and key points. Output must be at least ${minSectionOutput.toLocaleString()} characters.
 ${isLast ? '' : 'NOTE: More sections follow. Write the opening/introduction section only — do NOT write a conclusion yet. Complete every sentence.'}
 
 Output JSON:
@@ -948,9 +956,13 @@ Output JSON:
 }`
         : `Continue adapting the same article for ${platform}.
 
+SECTION LENGTH: ${section.length.toLocaleString()} chars
+MINIMUM OUTPUT FOR THIS SECTION: ${minSectionOutput.toLocaleString()} chars
+
 CONTENT SECTION ${i + 1}/${totalSections}:
 ${section}
 
+IMPORTANT: Adapt the FULL content of this section — do NOT summarize or shorten. Include all details, examples, and key points. Output must be at least ${minSectionOutput.toLocaleString()} characters.
 ${isLast ? 'This is the FINAL section. Write a strong conclusion.' : 'More sections follow. Do NOT write a conclusion yet. Complete every sentence.'}
 
 Output JSON:
@@ -1066,6 +1078,13 @@ Output JSON:
     // Get platform-specific rules with enhanced authenticity guidelines
     const platformRules = this.getEnhancedPlatformRules(platform);
 
+    // Calculate expected minimum length based on original content
+    const originalLength = body.length;
+    const minExpectedLength = Math.max(
+      Math.floor(originalLength * 0.85), // At least 85% of original length
+      this.isLongFormPlatform(platform) ? 8000 : 2000, // Minimum floor
+    );
+
     const systemPrompt = `You are an expert content strategist who creates authentic, engaging content for different platforms. Your content should feel genuine and native to each platform — never robotic or templated.
 
 CRITICAL GUIDELINES:
@@ -1075,6 +1094,7 @@ CRITICAL GUIDELINES:
 4. UNIQUE ANGLE: Don't just summarize — add a fresh perspective or insight
 5. ENGAGEMENT: Include elements that naturally encourage interaction
 6. COMPLETENESS: Always finish every sentence and section — never cut off mid-thought
+7. FULL LENGTH: The adapted content MUST be comprehensive and detailed. DO NOT summarize or shorten the content. The output should be AT LEAST ${minExpectedLength.toLocaleString()} characters (original is ${originalLength.toLocaleString()} chars). Include ALL key points, examples, and details from the original.
 
 Platform-specific rules:
 ${platformRules}
@@ -1119,11 +1139,18 @@ The seoScore should be 0-100 based on:
 ORIGINAL TITLE: ${title}
 CATEGORY: ${post.content_category || 'General'}
 TAGS: ${tags.join(', ')}
+ORIGINAL LENGTH: ${body.length.toLocaleString()} characters
+MINIMUM REQUIRED OUTPUT: ${minExpectedLength.toLocaleString()} characters
 
 CONTENT:
 ${body}
 
-Remember: Create authentic, platform-native content that provides real value. Don't just truncate or reformat — reimagine the content for this specific audience. IMPORTANT: Complete every sentence fully — the response must not end mid-sentence.`;
+IMPORTANT INSTRUCTIONS:
+- Create authentic, platform-native content that provides real value
+- DO NOT summarize or shorten — adapt the FULL content for this platform
+- Include ALL sections, examples, and key points from the original
+- The output must be comprehensive and detailed (at least ${minExpectedLength.toLocaleString()} chars)
+- Complete every sentence fully — the response must not end mid-sentence`;
 
     try {
       const { content: aiResponse } = await this.aiGateway.chatCompletionRaw({
@@ -1249,9 +1276,10 @@ Remember: Create authentic, platform-native content that provides real value. Do
 - Use Medium-style formatting: pull quotes, section breaks (---)
 - Add a "TL;DR" or "Key Takeaways" at the top
 - Conversational but authoritative tone
-- 5-8 minute read optimal
+- 5-8 minute read optimal (1500-2500 words)
 - Include personal anecdotes or observations
-- End with a reflection or call to action`,
+- End with a reflection or call to action
+- MINIMUM LENGTH: 2000+ words — comprehensive and detailed`,
 
       devto: `Dev.to Article:
 - Start with YAML front matter: title, published: false, tags (max 4)
@@ -1261,7 +1289,8 @@ Remember: Create authentic, platform-native content that provides real value. Do
 - Use dev.to markdown extensions ({% embed %}, {% codepen %})
 - Conversational, peer-to-peer tone
 - Include "What I learned" or "Gotchas" sections
-- End with next steps or resources`,
+- End with next steps or resources
+- MINIMUM LENGTH: 2000+ words for comprehensive articles — DO NOT summarize`,
 
       hashnode: `Hashnode Technical Blog:
 - Deep technical depth with clear explanations
@@ -1270,7 +1299,8 @@ Remember: Create authentic, platform-native content that provides real value. Do
 - Use clear subheadings for scannability
 - Developer-friendly, tutorial-like structure
 - Include diagrams or architecture descriptions
-- End with "Further Reading" or related topics`,
+- End with "Further Reading" or related topics
+- MINIMUM LENGTH: 2000+ words — include all technical details`,
 
       ghost: `Ghost Blog:
 - Clean, professional writing
@@ -1279,7 +1309,8 @@ Remember: Create authentic, platform-native content that provides real value. Do
 - Short paragraphs for readability
 - Include a clear call-to-action at the end
 - SEO-optimized with keywords in headings
-- Add internal linking suggestions`,
+- Add internal linking suggestions
+- MINIMUM LENGTH: 1500+ words — comprehensive coverage`,
 
       beehiiv: `Beehiiv Newsletter:
 - Personal, direct tone — like writing to a friend
@@ -1288,7 +1319,8 @@ Remember: Create authentic, platform-native content that provides real value. Do
 - Keep paragraphs short (2-3 sentences)
 - Include a clear CTA (reply, click, share)
 - Add a P.S. line with bonus insight
-- Make it scannable but valuable`,
+- Make it scannable but valuable
+- MINIMUM LENGTH: 1000+ words for substantial newsletters`,
 
       telegraph: `Telegraph Article:
 - Clean, minimal formatting
