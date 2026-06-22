@@ -1319,7 +1319,15 @@ ${body}
   }
 
   /**
-   * Generate long content iteratively by processing sections
+   * Generate long content iteratively by processing sections.
+   * 
+   * IMPORTANT: This function is resilient to section failures. If a section fails
+   * after retries, it will:
+   * 1. Return partial content from successfully generated sections (if any)
+   * 2. Only throw if NO sections were generated successfully
+   * 
+   * This prevents throwing away good content (e.g., 19k chars from sections 1+2)
+   * when a later section fails due to timeouts or model errors.
    */
   private async generateContentIteratively(
     systemPrompt: string,
@@ -1337,6 +1345,7 @@ ${body}
     sections.forEach((s, i) => this.logger.log(`[${platform}] Section ${i + 1} input: ${s.length} chars`));
 
     const results: string[] = [];
+    let lastSuccessfulSectionIndex = -1;
 
     for (let i = 0; i < totalSections; i++) {
       const section = sections[i];
@@ -1374,54 +1383,107 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
 
       this.logger.log(`[${platform}] Generating section ${i + 1}/${totalSections}...`);
       
-      const { content: sectionContent, model } = await this.aiGateway.chatCompletionRaw({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: sectionPrompt },
-        ],
-        category: 'seo_generation',
-        temperature: 0.7,
-        maxTokens: Math.min(maxTokens, 8000),
-        timeoutMs: 120_000,
-      });
-
-      this.logger.log(`[${platform}] Section ${i + 1} raw response: ${sectionContent.length} chars from model ${model}`);
-
-      let cleaned = this.cleanMarkdownOutput(sectionContent);
-      this.logger.log(`[${platform}] Section ${i + 1} after cleaning: ${cleaned.length} chars`);
-
-      // Check if section is truncated or too short
-      const isTruncated = this.isContentTruncated(cleaned);
-      const isTooShort = cleaned.length < sectionMinOutput * 0.5;
+      // Wrap section generation in try-catch to handle failures gracefully
+      let cleaned: string | null = null;
+      const maxSectionRetries = 3;
       
-      if (isTruncated || isTooShort) {
-        this.logger.warn(`[${platform}] Section ${i + 1} incomplete (truncated=${isTruncated}, tooShort=${isTooShort}, got ${cleaned.length}, need ${sectionMinOutput}). Continuing...`);
-        
-        // Try up to 2 continuations for this section
-        for (let contAttempt = 0; contAttempt < 2 && (this.isContentTruncated(cleaned) || cleaned.length < sectionMinOutput * 0.7); contAttempt++) {
-          this.logger.log(`[${platform}] Section ${i + 1} continuation attempt ${contAttempt + 1}...`);
+      for (let sectionRetry = 0; sectionRetry < maxSectionRetries; sectionRetry++) {
+        try {
+          // Exponential backoff: 0ms, 2s, 4s
+          if (sectionRetry > 0) {
+            const backoffMs = Math.pow(2, sectionRetry) * 1000;
+            this.logger.log(`[${platform}] Section ${i + 1} retry ${sectionRetry}/${maxSectionRetries - 1} after ${backoffMs}ms backoff...`);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+          }
           
-          const { content: cont } = await this.aiGateway.chatCompletionRaw({
+          const { content: sectionContent, model } = await this.aiGateway.chatCompletionRaw({
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: sectionPrompt },
-              { role: 'assistant', content: cleaned },
-              { role: 'user', content: `Continue from exactly where you stopped. Your output was ${cleaned.length} chars but needs to be at least ${sectionMinOutput} chars. Complete this section fully.` },
             ],
             category: 'seo_generation',
             temperature: 0.7,
-            maxTokens: 4000,
-            timeoutMs: 60_000,
+            maxTokens: Math.min(maxTokens, 8000),
+            timeoutMs: 120_000,
           });
+
+          this.logger.log(`[${platform}] Section ${i + 1} raw response: ${sectionContent.length} chars from model ${model}`);
+
+          cleaned = this.cleanMarkdownOutput(sectionContent);
+          this.logger.log(`[${platform}] Section ${i + 1} after cleaning: ${cleaned.length} chars`);
+
+          // Check if section is truncated or too short
+          const isTruncated = this.isContentTruncated(cleaned);
+          const isTooShort = cleaned.length < sectionMinOutput * 0.5;
           
-          const contCleaned = this.cleanMarkdownOutput(cont);
-          this.logger.log(`[${platform}] Section ${i + 1} continuation ${contAttempt + 1}: +${contCleaned.length} chars`);
-          cleaned = cleaned + '\n\n' + contCleaned;
+          if (isTruncated || isTooShort) {
+            this.logger.warn(`[${platform}] Section ${i + 1} incomplete (truncated=${isTruncated}, tooShort=${isTooShort}, got ${cleaned.length}, need ${sectionMinOutput}). Continuing...`);
+            
+            // Try up to 2 continuations for this section
+            for (let contAttempt = 0; contAttempt < 2 && (this.isContentTruncated(cleaned) || cleaned.length < sectionMinOutput * 0.7); contAttempt++) {
+              this.logger.log(`[${platform}] Section ${i + 1} continuation attempt ${contAttempt + 1}...`);
+              
+              try {
+                const { content: cont } = await this.aiGateway.chatCompletionRaw({
+                  messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: sectionPrompt },
+                    { role: 'assistant', content: cleaned },
+                    { role: 'user', content: `Continue from exactly where you stopped. Your output was ${cleaned.length} chars but needs to be at least ${sectionMinOutput} chars. Complete this section fully.` },
+                  ],
+                  category: 'seo_generation',
+                  temperature: 0.7,
+                  maxTokens: 4000,
+                  timeoutMs: 60_000,
+                });
+                
+                const contCleaned = this.cleanMarkdownOutput(cont);
+                this.logger.log(`[${platform}] Section ${i + 1} continuation ${contAttempt + 1}: +${contCleaned.length} chars`);
+                cleaned = cleaned + '\n\n' + contCleaned;
+              } catch (contError) {
+                this.logger.warn(`[${platform}] Section ${i + 1} continuation ${contAttempt + 1} failed: ${(contError as Error).message}`);
+                // Continue with what we have
+                break;
+              }
+            }
+          }
+          
+          // Section succeeded, break out of retry loop
+          break;
+        } catch (sectionError) {
+          const errorMsg = (sectionError as Error).message;
+          this.logger.error(`[${platform}] Section ${i + 1} attempt ${sectionRetry + 1}/${maxSectionRetries} failed: ${errorMsg}`);
+          
+          // If this was the last retry, cleaned stays null
+          if (sectionRetry === maxSectionRetries - 1) {
+            this.logger.error(`[${platform}] Section ${i + 1} FAILED after ${maxSectionRetries} retries`);
+          }
         }
       }
 
-      results.push(cleaned);
-      this.logger.log(`[${platform}] Section ${i + 1}/${totalSections} DONE: ${cleaned.length} chars (target: ${sectionMinOutput})`);
+      // Handle section result
+      if (cleaned !== null && cleaned.length > 0) {
+        results.push(cleaned);
+        lastSuccessfulSectionIndex = i;
+        this.logger.log(`[${platform}] Section ${i + 1}/${totalSections} DONE: ${cleaned.length} chars (target: ${sectionMinOutput})`);
+      } else {
+        // Section failed - decide whether to continue or return partial content
+        this.logger.error(`[${platform}] Section ${i + 1}/${totalSections} FAILED - no content generated`);
+        
+        if (results.length > 0) {
+          // We have partial content - return it instead of throwing everything away
+          const partialMerged = results.join('\n\n');
+          this.logger.warn(`[${platform}] Returning partial content: ${partialMerged.length} chars from ${results.length}/${totalSections} sections (sections 1-${lastSuccessfulSectionIndex + 1} succeeded, section ${i + 1} failed)`);
+          
+          // Add a note that content is incomplete (will be cleaned up by the caller if needed)
+          const incompleteNote = `\n\n---\n\n*Note: This article was partially generated. Some sections may be incomplete due to processing limitations.*`;
+          
+          return partialMerged + incompleteNote;
+        } else {
+          // No content at all - throw to trigger fallback
+          throw new Error(`Failed to generate any content: section ${i + 1} failed and no previous sections succeeded`);
+        }
+      }
     }
 
     const merged = results.join('\n\n');
@@ -1430,13 +1492,18 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
     // Final check - if still too short, try one more continuation
     if (merged.length < minExpectedLength * 0.7) {
       this.logger.warn(`[${platform}] Final output too short (${merged.length} < ${minExpectedLength * 0.7}). Attempting final continuation...`);
-      return await this.continueMarkdownGeneration(
-        systemPrompt,
-        merged,
-        originalBody,
-        minExpectedLength,
-        maxTokens,
-      );
+      try {
+        return await this.continueMarkdownGeneration(
+          systemPrompt,
+          merged,
+          originalBody,
+          minExpectedLength,
+          maxTokens,
+        );
+      } catch (contError) {
+        this.logger.warn(`[${platform}] Final continuation failed: ${(contError as Error).message}. Returning current content.`);
+        return merged;
+      }
     }
     
     return merged;
