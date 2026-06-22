@@ -1333,7 +1333,8 @@ ${body}
     const sections = this.splitIntoSections(originalBody, 4000);
     const totalSections = sections.length;
 
-    this.logger.log(`[${platform}] Generating iteratively: ${totalSections} sections`);
+    this.logger.log(`[${platform}] Generating iteratively: ${totalSections} sections, original=${originalBody.length} chars, minExpected=${minExpectedLength}`);
+    sections.forEach((s, i) => this.logger.log(`[${platform}] Section ${i + 1} input: ${s.length} chars`));
 
     const results: string[] = [];
 
@@ -1342,29 +1343,38 @@ ${body}
       const isFirst = i === 0;
       const isLast = i === totalSections - 1;
 
+      // Calculate minimum output for this section proportionally
+      const sectionMinOutput = Math.ceil((section.length / originalBody.length) * minExpectedLength * 1.1);
+
       const sectionPrompt = isFirst
         ? `Adapt this article for ${platform}. Section 1 of ${totalSections}.
 
 OUTPUT: Raw markdown only (NO JSON).
+MINIMUM OUTPUT: ${sectionMinOutput.toLocaleString()} characters for this section.
 
 TITLE: ${title}
 CATEGORY: ${category || 'General'}
 
-SECTION TO ADAPT:
+SECTION TO ADAPT (${section.length} chars - output should be similar length or longer):
 ${section}
 
-Write the introduction and this section. ${isLast ? 'Include conclusion.' : 'Do NOT write conclusion - more sections follow.'}`
+Write the introduction and this section COMPLETELY. ${isLast ? 'Include conclusion.' : 'Do NOT write conclusion - more sections follow.'}`
         : `Continue adapting for ${platform}. Section ${i + 1} of ${totalSections}.
+
+OUTPUT: Raw markdown only (NO JSON).
+MINIMUM OUTPUT: ${sectionMinOutput.toLocaleString()} characters for this section.
 
 PREVIOUS CONTENT ENDED WITH:
 ...${results[results.length - 1]?.slice(-300) || ''}
 
-NEXT SECTION TO ADAPT:
+NEXT SECTION TO ADAPT (${section.length} chars - output should be similar length or longer):
 ${section}
 
-Continue seamlessly. ${isLast ? 'This is the FINAL section - include conclusion with CTA.' : 'Do NOT write conclusion yet.'}`;
+Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the FINAL section - include conclusion with CTA.' : 'Do NOT write conclusion yet.'}`;
 
-      const { content: sectionContent } = await this.aiGateway.chatCompletionRaw({
+      this.logger.log(`[${platform}] Generating section ${i + 1}/${totalSections}...`);
+      
+      const { content: sectionContent, model } = await this.aiGateway.chatCompletionRaw({
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: sectionPrompt },
@@ -1375,32 +1385,60 @@ Continue seamlessly. ${isLast ? 'This is the FINAL section - include conclusion 
         timeoutMs: 120_000,
       });
 
-      let cleaned = this.cleanMarkdownOutput(sectionContent);
+      this.logger.log(`[${platform}] Section ${i + 1} raw response: ${sectionContent.length} chars from model ${model}`);
 
-      // Handle truncation within section
-      if (this.isContentTruncated(cleaned)) {
-        this.logger.warn(`[${platform}] Section ${i + 1} truncated, continuing...`);
-        const { content: cont } = await this.aiGateway.chatCompletionRaw({
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: sectionPrompt },
-            { role: 'assistant', content: sectionContent },
-            { role: 'user', content: 'Continue from exactly where you stopped. Complete this section.' },
-          ],
-          category: 'seo_generation',
-          temperature: 0.7,
-          maxTokens: 4000,
-          timeoutMs: 60_000,
-        });
-        cleaned = cleaned + '\n\n' + this.cleanMarkdownOutput(cont);
+      let cleaned = this.cleanMarkdownOutput(sectionContent);
+      this.logger.log(`[${platform}] Section ${i + 1} after cleaning: ${cleaned.length} chars`);
+
+      // Check if section is truncated or too short
+      const isTruncated = this.isContentTruncated(cleaned);
+      const isTooShort = cleaned.length < sectionMinOutput * 0.5;
+      
+      if (isTruncated || isTooShort) {
+        this.logger.warn(`[${platform}] Section ${i + 1} incomplete (truncated=${isTruncated}, tooShort=${isTooShort}, got ${cleaned.length}, need ${sectionMinOutput}). Continuing...`);
+        
+        // Try up to 2 continuations for this section
+        for (let contAttempt = 0; contAttempt < 2 && (this.isContentTruncated(cleaned) || cleaned.length < sectionMinOutput * 0.7); contAttempt++) {
+          this.logger.log(`[${platform}] Section ${i + 1} continuation attempt ${contAttempt + 1}...`);
+          
+          const { content: cont } = await this.aiGateway.chatCompletionRaw({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: sectionPrompt },
+              { role: 'assistant', content: cleaned },
+              { role: 'user', content: `Continue from exactly where you stopped. Your output was ${cleaned.length} chars but needs to be at least ${sectionMinOutput} chars. Complete this section fully.` },
+            ],
+            category: 'seo_generation',
+            temperature: 0.7,
+            maxTokens: 4000,
+            timeoutMs: 60_000,
+          });
+          
+          const contCleaned = this.cleanMarkdownOutput(cont);
+          this.logger.log(`[${platform}] Section ${i + 1} continuation ${contAttempt + 1}: +${contCleaned.length} chars`);
+          cleaned = cleaned + '\n\n' + contCleaned;
+        }
       }
 
       results.push(cleaned);
-      this.logger.log(`[${platform}] Section ${i + 1}/${totalSections}: ${cleaned.length} chars`);
+      this.logger.log(`[${platform}] Section ${i + 1}/${totalSections} DONE: ${cleaned.length} chars (target: ${sectionMinOutput})`);
     }
 
     const merged = results.join('\n\n');
-    this.logger.log(`[${platform}] Total: ${merged.length} chars`);
+    this.logger.log(`[${platform}] Total merged: ${merged.length} chars (target: ${minExpectedLength})`);
+    
+    // Final check - if still too short, try one more continuation
+    if (merged.length < minExpectedLength * 0.7) {
+      this.logger.warn(`[${platform}] Final output too short (${merged.length} < ${minExpectedLength * 0.7}). Attempting final continuation...`);
+      return await this.continueMarkdownGeneration(
+        systemPrompt,
+        merged,
+        originalBody,
+        minExpectedLength,
+        maxTokens,
+      );
+    }
+    
     return merged;
   }
 
@@ -1416,24 +1454,32 @@ Continue seamlessly. ${isLast ? 'This is the FINAL section - include conclusion 
   ): Promise<string> {
     let content = currentContent;
     let attempts = 0;
+    const maxAttempts = 5; // Increased from 3
 
-    while ((this.isContentTruncated(content) || content.length < minExpectedLength * 0.6) && attempts < 3) {
+    while ((this.isContentTruncated(content) || content.length < minExpectedLength * 0.7) && attempts < maxAttempts) {
       attempts++;
-      this.logger.log(`[continuation] Attempt ${attempts}: ${content.length} chars, target ${minExpectedLength}`);
+      const remaining = minExpectedLength - content.length;
+      this.logger.log(`[continuation] Attempt ${attempts}/${maxAttempts}: ${content.length} chars, target ${minExpectedLength}, need ~${remaining} more`);
 
       const headings = this.extractHeadings(originalBody);
-      const continuationPrompt = `Your previous output was ${content.length} characters - need at least ${minExpectedLength}.
+      const coveredHeadings = this.extractHeadings(content);
+      const missingHeadings = headings.filter(h => !coveredHeadings.some(c => c.toLowerCase().includes(h.toLowerCase().slice(0, 20))));
+      
+      this.logger.log(`[continuation] Missing headings: ${missingHeadings.length} of ${headings.length}`);
 
-Original article sections that may be missing:
-${headings.join('\n')}
+      const continuationPrompt = `Your previous output was ${content.length} characters - need at least ${minExpectedLength} (${remaining} more chars needed).
+
+MISSING SECTIONS from original article:
+${missingHeadings.length > 0 ? missingHeadings.join('\n') : 'Check if all sections are complete'}
 
 Continue from where you left off:
-...${content.slice(-200)}
+...${content.slice(-300)}
 
-OUTPUT: Raw markdown continuation (NO JSON). Complete all remaining sections.`;
+CRITICAL: Output at least ${Math.min(remaining + 500, 4000)} more characters of content.
+OUTPUT: Raw markdown continuation (NO JSON). Complete all remaining sections fully.`;
 
       try {
-        const { content: cont } = await this.aiGateway.chatCompletionRaw({
+        const { content: cont, model } = await this.aiGateway.chatCompletionRaw({
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'assistant', content: content },
@@ -1445,13 +1491,22 @@ OUTPUT: Raw markdown continuation (NO JSON). Complete all remaining sections.`;
           timeoutMs: 120_000,
         });
 
-        content = content + '\n\n' + this.cleanMarkdownOutput(cont);
+        const contCleaned = this.cleanMarkdownOutput(cont);
+        this.logger.log(`[continuation] Attempt ${attempts} got ${contCleaned.length} chars from ${model}`);
+        
+        if (contCleaned.length < 100) {
+          this.logger.warn(`[continuation] Attempt ${attempts} returned very short content, may be done`);
+          break;
+        }
+        
+        content = content + '\n\n' + contCleaned;
       } catch (err) {
         this.logger.warn(`Continuation ${attempts} failed: ${(err as Error).message}`);
         break;
       }
     }
 
+    this.logger.log(`[continuation] Final: ${content.length} chars after ${attempts} attempts (target: ${minExpectedLength})`);
     return content;
   }
 
