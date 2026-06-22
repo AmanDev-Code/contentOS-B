@@ -1207,7 +1207,10 @@ Output JSON:
       `[distribution] Merged ${totalSections} sections for ${platform}: total output=${mergedContent.length} chars (original body=${totalBodyLength} chars)`,
     );
 
-    return { content: mergedContent, platformTitle, hashtags, seoScore };
+    // Sanitize hashtags for platform requirements
+    const sanitizedHashtags = this.sanitizeHashtagsForPlatform(hashtags, platform);
+
+    return { content: mergedContent, platformTitle, hashtags: sanitizedHashtags, seoScore };
   }
 
   private async adaptContentForPlatformEnhanced(
@@ -1341,9 +1344,13 @@ ${body}
       return { content: generatedContent, platformTitle, hashtags, seoScore };
     } catch (error) {
       this.logger.error(`[${platform}] Adaptation failed: ${(error as Error).message}`);
+      const fallbackHashtags = this.sanitizeHashtagsForPlatform(
+        tags.slice(0, 5).map((t) => t.replace(/\s+/g, '')),
+        platform
+      );
       return {
         content: this.fallbackAdaptContent(post, platform),
-        hashtags: tags.slice(0, 5).map((t) => `#${t.replace(/\s+/g, '')}`),
+        hashtags: fallbackHashtags,
         seoScore: 50,
       };
     }
@@ -1673,14 +1680,47 @@ Output JSON:
       const cleaned = this.extractJsonFromAiResponse(metaResponse);
       const parsed = JSON.parse(cleaned);
 
+      // Sanitize hashtags for platform-specific requirements
+      let hashtags = Array.isArray(parsed.hashtags) ? parsed.hashtags : defaultHashtags;
+      hashtags = this.sanitizeHashtagsForPlatform(hashtags, platform);
+
       return {
         platformTitle: parsed.platformTitle || undefined,
-        hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : defaultHashtags,
+        hashtags,
         seoScore: typeof parsed.seoScore === 'number' ? parsed.seoScore : 70,
       };
     } catch {
-      return { platformTitle: undefined, hashtags: defaultHashtags, seoScore: 70 };
+      return { platformTitle: undefined, hashtags: this.sanitizeHashtagsForPlatform(defaultHashtags, platform), seoScore: 70 };
     }
+  }
+
+  /**
+   * Sanitize hashtags based on platform-specific requirements
+   * - Dev.to: Only alphanumeric characters allowed (no hyphens, underscores, or special chars)
+   * - Hashnode: Similar restrictions
+   * - LinkedIn/Twitter: More permissive but still sanitize
+   */
+  private sanitizeHashtagsForPlatform(hashtags: string[], platform: string): string[] {
+    return hashtags.map(tag => {
+      // Remove # prefix if present
+      let cleaned = tag.startsWith('#') ? tag.slice(1) : tag;
+      
+      // Platform-specific sanitization
+      if (platform === 'devto' || platform === 'hashnode') {
+        // Dev.to and Hashnode only allow alphanumeric characters
+        // Remove hyphens, underscores, spaces, and any non-alphanumeric chars
+        cleaned = cleaned.replace(/[-_\s]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      } else {
+        // For other platforms, just remove spaces and special chars but keep it readable
+        cleaned = cleaned.replace(/\s+/g, '').replace(/[^a-zA-Z0-9_-]/g, '');
+      }
+      
+      // Ensure tag is not empty and has reasonable length
+      if (cleaned.length === 0) return null;
+      if (cleaned.length > 30) cleaned = cleaned.slice(0, 30);
+      
+      return cleaned;
+    }).filter((tag): tag is string => tag !== null && tag.length > 0);
   }
 
   /**
