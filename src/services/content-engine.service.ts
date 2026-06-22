@@ -1257,7 +1257,14 @@ ${platformRules}
 SEO Guidelines:
 - Proper heading hierarchy (H2 > H3)
 - Keywords in headings and first paragraph
-- Demonstrate expertise and authority`;
+- Demonstrate expertise and authority
+
+URL RESTRICTIONS (CRITICAL - violations cause publish failures):
+- DO NOT include YouTube URLs or embeds (youtube.com, youtu.be)
+- DO NOT use placeholder/dummy URLs (example.com, yoursite.com, placeholder.com, test.com, foo.com, bar.com)
+- DO NOT invent fake URLs — only include real, verifiable links
+- DO NOT use platform-specific embed tags ({% youtube %}, {% embed %}, etc.) unless the platform explicitly supports them
+- If referencing external content, describe it in text rather than embedding`;
 
     const contentUserPrompt = `Adapt this article for ${platform}.
 
@@ -1726,11 +1733,18 @@ Output JSON:
 - Developer-community focused — practical and helpful
 - Include code examples with syntax highlighting
 - Add a "Prerequisites" section if technical
-- Use dev.to markdown extensions ({% embed %}, {% codepen %})
 - Conversational, peer-to-peer tone
 - Include "What I learned" or "Gotchas" sections
 - End with next steps or resources
-- MINIMUM LENGTH: 2000+ words for comprehensive articles — DO NOT summarize`,
+- MINIMUM LENGTH: 2000+ words for comprehensive articles — DO NOT summarize
+
+CRITICAL URL RESTRICTIONS (Dev.to will reject posts with these):
+- DO NOT include YouTube URLs or embeds (youtube.com, youtu.be)
+- DO NOT use Dev.to liquid tags like {% youtube %}, {% embed %}, {% codepen %}, {% codesandbox %}
+- DO NOT use placeholder/dummy URLs (example.com, yoursite.com, placeholder.com, test.com)
+- DO NOT invent fake URLs — only include real, verifiable links to the actual product/service being discussed
+- If you need to reference external content, describe it in text instead of embedding
+- All URLs must be real and functional — no made-up domains`,
 
       hashnode: `Hashnode Technical Blog:
 - Deep technical depth with clear explanations
