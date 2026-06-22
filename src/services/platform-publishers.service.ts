@@ -81,6 +81,7 @@ export class PlatformPublishersService {
     title: string,
     canonicalUrl: string,
     tags: string[],
+    coverImageUrl?: string,
   ): Promise<PublishResult> {
     if (this.isManualOnly(platform)) {
       return {
@@ -97,6 +98,7 @@ export class PlatformPublishersService {
           title,
           canonicalUrl,
           tags,
+          coverImageUrl,
         );
       case 'hashnode':
         return this.publishToHashnode(
@@ -105,6 +107,7 @@ export class PlatformPublishersService {
           title,
           canonicalUrl,
           tags,
+          coverImageUrl,
         );
       case 'medium':
         return this.publishToMedium(
@@ -115,9 +118,9 @@ export class PlatformPublishersService {
           tags,
         );
       case 'linkedin_article':
-        return this.publishToLinkedIn(credentials as any, content, title);
+        return this.publishToLinkedIn(credentials as any, content, title, coverImageUrl);
       case 'linkedin_post':
-        return this.publishLinkedInPost(credentials as any, content);
+        return this.publishLinkedInPost(credentials as any, content, coverImageUrl);
       case 'ghost':
         return this.publishToGhost(
           credentials as any,
@@ -125,9 +128,10 @@ export class PlatformPublishersService {
           title,
           canonicalUrl,
           tags,
+          coverImageUrl,
         );
       case 'beehiiv':
-        return this.publishToBeehiiv(credentials as any, content, title);
+        return this.publishToBeehiiv(credentials as any, content, title, coverImageUrl);
       case 'telegraph':
         return this.publishToTelegraph(
           credentials as any,
@@ -154,23 +158,30 @@ export class PlatformPublishersService {
     title: string,
     canonicalUrl: string,
     tags: string[],
+    coverImageUrl?: string,
   ): Promise<PublishResult> {
     try {
       this.logger.log(`Publishing to Dev.to: "${title}"`);
 
+      const articlePayload: Record<string, any> = {
+        title,
+        body_markdown: content,
+        published: true,
+        canonical_url: canonicalUrl,
+        tags: tags
+          .slice(0, 4)
+          .map((t) => t.toLowerCase().replace(/[^a-z0-9]/g, '')),
+      };
+
+      // Add cover image if provided (Dev.to uses main_image field)
+      if (coverImageUrl) {
+        articlePayload.main_image = coverImageUrl;
+        this.logger.log(`Dev.to: Including cover image: ${coverImageUrl}`);
+      }
+
       const response = await axios.post(
         'https://dev.to/api/articles',
-        {
-          article: {
-            title,
-            body_markdown: content,
-            published: true,
-            canonical_url: canonicalUrl,
-            tags: tags
-              .slice(0, 4)
-              .map((t) => t.toLowerCase().replace(/[^a-z0-9]/g, '')),
-          },
-        },
+        { article: articlePayload },
         {
           headers: {
             'api-key': credentials.api_key,
@@ -196,6 +207,7 @@ export class PlatformPublishersService {
     title: string,
     canonicalUrl: string,
     tags: string[],
+    coverImageUrl?: string,
   ): Promise<PublishResult> {
     try {
       this.logger.log(`Publishing to Hashnode: "${title}"`);
@@ -210,18 +222,26 @@ export class PlatformPublishersService {
         }
       `;
 
-      const variables = {
-        input: {
-          title,
-          contentMarkdown: content,
-          publicationId: credentials.publication_id,
-          tags: tags.slice(0, 5).map((t) => ({
-            slug: t.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
-            name: t,
-          })),
-          originalArticleURL: canonicalUrl,
-        },
+      const input: Record<string, any> = {
+        title,
+        contentMarkdown: content,
+        publicationId: credentials.publication_id,
+        tags: tags.slice(0, 5).map((t) => ({
+          slug: t.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+          name: t,
+        })),
+        originalArticleURL: canonicalUrl,
       };
+
+      // Add cover image if provided (Hashnode uses coverImageOptions)
+      if (coverImageUrl) {
+        input.coverImageOptions = {
+          coverImageURL: coverImageUrl,
+        };
+        this.logger.log(`Hashnode: Including cover image: ${coverImageUrl}`);
+      }
+
+      const variables = { input };
 
       const response = await axios.post(
         'https://gql.hashnode.com',
@@ -294,11 +314,26 @@ export class PlatformPublishersService {
     credentials: { access_token: string; author_urn: string },
     content: string,
     title: string,
+    coverImageUrl?: string,
   ): Promise<PublishResult> {
     try {
       this.logger.log(`Publishing LinkedIn article: "${title}"`);
 
-      const body = {
+      let imageUrn: string | undefined;
+
+      // If cover image provided, upload it to LinkedIn first
+      if (coverImageUrl) {
+        imageUrn = await this.uploadImageToLinkedIn(
+          credentials.access_token,
+          credentials.author_urn,
+          coverImageUrl,
+        );
+        if (imageUrn) {
+          this.logger.log(`LinkedIn: Image uploaded with URN: ${imageUrn}`);
+        }
+      }
+
+      const body: Record<string, any> = {
         author: credentials.author_urn,
         commentary: `${title}\n\n${content.slice(0, 2800)}`,
         visibility: 'PUBLIC',
@@ -310,6 +345,16 @@ export class PlatformPublishersService {
         lifecycleState: 'PUBLISHED',
         isReshareDisabledByAuthor: false,
       };
+
+      // Attach image if uploaded successfully
+      if (imageUrn) {
+        body.content = {
+          media: {
+            id: imageUrn,
+            title: title.slice(0, 100),
+          },
+        };
+      }
 
       const response = await axios.post(
         'https://api.linkedin.com/rest/posts',
@@ -341,11 +386,26 @@ export class PlatformPublishersService {
   async publishLinkedInPost(
     credentials: { access_token: string; author_urn: string },
     content: string,
+    coverImageUrl?: string,
   ): Promise<PublishResult> {
     try {
       this.logger.log('Publishing LinkedIn post (short-form)');
 
-      const body = {
+      let imageUrn: string | undefined;
+
+      // If cover image provided, upload it to LinkedIn first
+      if (coverImageUrl) {
+        imageUrn = await this.uploadImageToLinkedIn(
+          credentials.access_token,
+          credentials.author_urn,
+          coverImageUrl,
+        );
+        if (imageUrn) {
+          this.logger.log(`LinkedIn: Image uploaded with URN: ${imageUrn}`);
+        }
+      }
+
+      const body: Record<string, any> = {
         author: credentials.author_urn,
         commentary: content,
         visibility: 'PUBLIC',
@@ -357,6 +417,15 @@ export class PlatformPublishersService {
         lifecycleState: 'PUBLISHED',
         isReshareDisabledByAuthor: false,
       };
+
+      // Attach image if uploaded successfully
+      if (imageUrn) {
+        body.content = {
+          media: {
+            id: imageUrn,
+          },
+        };
+      }
 
       const response = await axios.post(
         'https://api.linkedin.com/rest/posts',
@@ -385,6 +454,69 @@ export class PlatformPublishersService {
     }
   }
 
+  /**
+   * Upload an image to LinkedIn and return the image URN.
+   * LinkedIn requires a 3-step process:
+   * 1. Initialize upload to get uploadUrl and image URN
+   * 2. PUT the image binary to the uploadUrl
+   * 3. Use the image URN in the post
+   */
+  private async uploadImageToLinkedIn(
+    accessToken: string,
+    authorUrn: string,
+    imageUrl: string,
+  ): Promise<string | undefined> {
+    try {
+      // Step 1: Initialize the upload
+      const initResponse = await axios.post(
+        'https://api.linkedin.com/rest/images?action=initializeUpload',
+        {
+          initializeUploadRequest: {
+            owner: authorUrn,
+          },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202401',
+            'X-Restli-Protocol-Version': '2.0.0',
+            'Content-Type': 'application/json',
+          },
+          timeout: REQUEST_TIMEOUT_MS,
+        },
+      );
+
+      const uploadUrl = initResponse.data?.value?.uploadUrl;
+      const imageUrn = initResponse.data?.value?.image;
+
+      if (!uploadUrl || !imageUrn) {
+        this.logger.warn('LinkedIn: Failed to initialize image upload');
+        return undefined;
+      }
+
+      // Step 2: Download the image from our MinIO URL
+      const imageResponse = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: REQUEST_TIMEOUT_MS,
+      });
+
+      // Step 3: Upload the image binary to LinkedIn's uploadUrl
+      await axios.put(uploadUrl, imageResponse.data, {
+        headers: {
+          'Content-Type': 'image/png',
+        },
+        timeout: REQUEST_TIMEOUT_MS,
+      });
+
+      return imageUrn;
+    } catch (err) {
+      this.logger.warn(
+        `LinkedIn image upload failed: ${(err as Error).message}`,
+      );
+      return undefined;
+    }
+  }
+
   // ===== NEW TIER 1 AUTO-PUBLISH PLATFORMS =====
 
   async publishToGhost(
@@ -393,6 +525,7 @@ export class PlatformPublishersService {
     title: string,
     canonicalUrl: string,
     tags: string[],
+    coverImageUrl?: string,
   ): Promise<PublishResult> {
     try {
       this.logger.log(`Publishing to Ghost: "${title}"`);
@@ -410,20 +543,24 @@ export class PlatformPublishersService {
       // Create JWT token for Ghost Admin API
       const jwt = await this.createGhostJwt(id, secret);
 
+      const postPayload: Record<string, any> = {
+        title,
+        html: this.markdownToHtml(content),
+        status: 'published',
+        canonical_url: canonicalUrl,
+        tags: tags.slice(0, 5).map((t) => ({ name: t })),
+      };
+
+      // Add feature image if provided
+      if (coverImageUrl) {
+        postPayload.feature_image = coverImageUrl;
+        this.logger.log(`Ghost: Including cover image: ${coverImageUrl}`);
+      }
+
       const apiUrl = credentials.api_url.replace(/\/$/, '');
       const response = await axios.post(
         `${apiUrl}/ghost/api/admin/posts/`,
-        {
-          posts: [
-            {
-              title,
-              html: this.markdownToHtml(content),
-              status: 'published',
-              canonical_url: canonicalUrl,
-              tags: tags.slice(0, 5).map((t) => ({ name: t })),
-            },
-          ],
-        },
+        { posts: [postPayload] },
         {
           headers: {
             Authorization: `Ghost ${jwt}`,
@@ -491,18 +628,27 @@ export class PlatformPublishersService {
     credentials: { api_key: string; publication_id: string },
     content: string,
     title: string,
+    coverImageUrl?: string,
   ): Promise<PublishResult> {
     try {
       this.logger.log(`Publishing to Beehiiv: "${title}"`);
 
+      const postPayload: Record<string, any> = {
+        title,
+        content_html: this.markdownToHtml(content),
+        status: 'confirmed', // 'draft' | 'confirmed' | 'archived'
+        send_to_subscribers: false, // Don't auto-send as email
+      };
+
+      // Add thumbnail image if provided
+      if (coverImageUrl) {
+        postPayload.thumbnail_url = coverImageUrl;
+        this.logger.log(`Beehiiv: Including cover image: ${coverImageUrl}`);
+      }
+
       const response = await axios.post(
         `https://api.beehiiv.com/v2/publications/${credentials.publication_id}/posts`,
-        {
-          title,
-          content_html: this.markdownToHtml(content),
-          status: 'confirmed', // 'draft' | 'confirmed' | 'archived'
-          send_to_subscribers: false, // Don't auto-send as email
-        },
+        postPayload,
         {
           headers: {
             Authorization: `Bearer ${credentials.api_key}`,

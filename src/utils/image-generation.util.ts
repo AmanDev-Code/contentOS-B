@@ -675,10 +675,30 @@ export interface PlatformCoverImageOptions {
   category?: string;
   excerpt?: string;
   hashtags?: string[];
+  showPlatformBranding?: boolean;
+}
+
+export type InlineImageStyle = 
+  | 'infographic'
+  | 'comparison'
+  | 'workflow'
+  | 'quote'
+  | 'statistic'
+  | 'checklist'
+  | 'timeline';
+
+export interface InlineImageOptions {
+  title: string;
+  style: InlineImageStyle;
+  platform: string;
+  data?: any;
+  sectionNumber?: number;
 }
 
 /**
  * Generate a platform-specific cover image
+ * Note: Platform branding (DEV.to, LinkedIn, etc.) is NOT shown on the image
+ * to keep it clean and professional. Only Trndinn branding is shown.
  */
 export async function generatePlatformCoverImage(
   options: PlatformCoverImageOptions,
@@ -717,11 +737,6 @@ export async function generatePlatformCoverImage(
     : '';
 
   const hashtagsText = hashtags?.slice(0, 3).join(' ') || '';
-  const hashtagsElement = hashtagsText
-    ? `<text x="80" y="${height - 40}" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="${style.accentColor}" letter-spacing="0.3">${escapeXml(hashtagsText)}</text>`
-    : '';
-
-  const platformLabel = getPlatformLabel(platform);
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -776,12 +791,9 @@ export async function generatePlatformCoverImage(
   <!-- Bottom separator -->
   <line x1="80" y1="${height - 65}" x2="${width - 80}" y2="${height - 65}" stroke="${style.borderColor}" stroke-width="1"/>
 
-  <!-- Footer -->
+  <!-- Footer - only trndinn.com, no platform name -->
   <text x="80" y="${height - 40}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" fill="${style.textMuted}" letter-spacing="0.4">trndinn.com</text>
   ${hashtagsText ? `<text x="${width - 80}" y="${height - 40}" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="${style.accentColor}" text-anchor="end" letter-spacing="0.3">${escapeXml(hashtagsText)}</text>` : ''}
-
-  <!-- Platform indicator -->
-  <text x="${width - 80}" y="75" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="${style.textMuted}" text-anchor="end" letter-spacing="0.5">${escapeXml(platformLabel)}</text>
 
   <!-- Accent dots -->
   <circle cx="${width - 60}" cy="${height - 45}" r="3" fill="${style.accentColor}" opacity="0.5"/>
@@ -884,4 +896,491 @@ export function platformUsesImages(platform: string): boolean {
     'huggingface_community',
   ]);
   return !noImagePlatforms.has(platform);
+}
+
+// ─── Diverse Inline Image Generation ─────────────────────────────────────────
+
+const INLINE_IMAGE_STYLES: Record<InlineImageStyle, {
+  bgStart: string;
+  bgEnd: string;
+  accent: string;
+  accentLight: string;
+  text: string;
+  textMuted: string;
+}> = {
+  infographic: {
+    bgStart: '#1a1f35',
+    bgEnd: '#0f1629',
+    accent: '#6366f1',
+    accentLight: '#818cf8',
+    text: '#f8fafc',
+    textMuted: '#94a3b8',
+  },
+  comparison: {
+    bgStart: '#0c1222',
+    bgEnd: '#1a2744',
+    accent: '#10b981',
+    accentLight: '#34d399',
+    text: '#f0fdf4',
+    textMuted: '#86efac',
+  },
+  workflow: {
+    bgStart: '#18181b',
+    bgEnd: '#27272a',
+    accent: '#f59e0b',
+    accentLight: '#fbbf24',
+    text: '#fefce8',
+    textMuted: '#fde047',
+  },
+  quote: {
+    bgStart: '#1e1b4b',
+    bgEnd: '#312e81',
+    accent: '#a78bfa',
+    accentLight: '#c4b5fd',
+    text: '#f5f3ff',
+    textMuted: '#ddd6fe',
+  },
+  statistic: {
+    bgStart: '#0c4a6e',
+    bgEnd: '#075985',
+    accent: '#38bdf8',
+    accentLight: '#7dd3fc',
+    text: '#f0f9ff',
+    textMuted: '#bae6fd',
+  },
+  checklist: {
+    bgStart: '#14532d',
+    bgEnd: '#166534',
+    accent: '#4ade80',
+    accentLight: '#86efac',
+    text: '#f0fdf4',
+    textMuted: '#bbf7d0',
+  },
+  timeline: {
+    bgStart: '#4c0519',
+    bgEnd: '#881337',
+    accent: '#fb7185',
+    accentLight: '#fda4af',
+    text: '#fff1f2',
+    textMuted: '#fecdd3',
+  },
+};
+
+/**
+ * Generate a diverse inline image with a specific style
+ */
+export async function generateInlineImage(
+  options: InlineImageOptions,
+): Promise<Buffer> {
+  const { title, style, platform, data, sectionNumber } = options;
+  const config = PLATFORM_IMAGE_CONFIGS[platform] || PLATFORM_IMAGE_CONFIGS.linkedin;
+  const colors = INLINE_IMAGE_STYLES[style];
+  const width = Math.floor(config.width * 0.85);
+  const height = Math.floor(config.height * 0.65);
+
+  switch (style) {
+    case 'infographic':
+      return generateInfographicImage(title, data, colors, width, height);
+    case 'comparison':
+      return generateComparisonImage(title, data, colors, width, height);
+    case 'workflow':
+      return generateWorkflowImage(title, data, colors, width, height);
+    case 'quote':
+      return generateQuoteImage(title, data, colors, width, height);
+    case 'statistic':
+      return generateStatisticImage(title, data, colors, width, height);
+    case 'checklist':
+      return generateChecklistImage(title, data, colors, width, height);
+    case 'timeline':
+      return generateTimelineImage(title, data, colors, width, height);
+    default:
+      return generateInfographicImage(title, data, colors, width, height);
+  }
+}
+
+async function generateInfographicImage(
+  title: string,
+  data: any,
+  colors: typeof INLINE_IMAGE_STYLES.infographic,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const items = data?.items || [
+    { label: 'Efficiency', value: 85 },
+    { label: 'Quality', value: 92 },
+    { label: 'Speed', value: 78 },
+  ];
+
+  const barHeight = 28;
+  const barGap = 16;
+  const startY = 120;
+  const maxValue = Math.max(...items.map((i: any) => i.value));
+
+  const bars = items.map((item: any, i: number) => {
+    const y = startY + i * (barHeight + barGap);
+    const barWidth = (item.value / maxValue) * (width - 200);
+    return `
+      <text x="60" y="${y + barHeight / 2 + 5}" font-family="system-ui, sans-serif" font-size="14" fill="${colors.textMuted}" text-anchor="end">${escapeXml(item.label)}</text>
+      <rect x="80" y="${y}" width="${width - 160}" height="${barHeight}" rx="4" fill="${colors.bgEnd}" opacity="0.5"/>
+      <rect x="80" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="${colors.accent}"/>
+      <text x="${80 + barWidth - 10}" y="${y + barHeight / 2 + 5}" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="${colors.text}" text-anchor="end">${item.value}%</text>
+    `;
+  }).join('');
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${colors.bgStart}"/>
+        <stop offset="100%" stop-color="${colors.bgEnd}"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    <rect x="0" y="0" width="4" height="${height}" fill="${colors.accent}"/>
+    <text x="60" y="60" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="700" fill="${colors.text}">${escapeXml(title.substring(0, 45))}</text>
+    <line x1="60" y1="80" x2="200" y2="80" stroke="${colors.accent}" stroke-width="2" opacity="0.6"/>
+    ${bars}
+    <text x="${width - 40}" y="${height - 20}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+  </svg>`;
+
+  return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
+}
+
+async function generateComparisonImage(
+  title: string,
+  data: any,
+  colors: typeof INLINE_IMAGE_STYLES.comparison,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const leftLabel = data?.left?.label || 'Before';
+  const rightLabel = data?.right?.label || 'After';
+  const leftItems = data?.left?.items || ['Manual process', 'Time-consuming', 'Error-prone'];
+  const rightItems = data?.right?.items || ['Automated', 'Fast', 'Accurate'];
+
+  const colWidth = (width - 100) / 2;
+  const itemStartY = 130;
+  const itemGap = 36;
+
+  const leftItemsSvg = leftItems.slice(0, 4).map((item: string, i: number) => `
+    <circle cx="70" cy="${itemStartY + i * itemGap}" r="6" fill="#ef4444" opacity="0.8"/>
+    <text x="90" y="${itemStartY + i * itemGap + 5}" font-family="system-ui, sans-serif" font-size="14" fill="${colors.textMuted}">${escapeXml(item.substring(0, 25))}</text>
+  `).join('');
+
+  const rightItemsSvg = rightItems.slice(0, 4).map((item: string, i: number) => `
+    <circle cx="${width / 2 + 30}" cy="${itemStartY + i * itemGap}" r="6" fill="${colors.accent}"/>
+    <text x="${width / 2 + 50}" y="${itemStartY + i * itemGap + 5}" font-family="system-ui, sans-serif" font-size="14" fill="${colors.text}">${escapeXml(item.substring(0, 25))}</text>
+  `).join('');
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${colors.bgStart}"/>
+        <stop offset="100%" stop-color="${colors.bgEnd}"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    <text x="${width / 2}" y="45" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="${colors.text}" text-anchor="middle">${escapeXml(title.substring(0, 40))}</text>
+    
+    <!-- Divider -->
+    <line x1="${width / 2}" y1="70" x2="${width / 2}" y2="${height - 40}" stroke="${colors.accent}" stroke-width="2" stroke-dasharray="6,4" opacity="0.5"/>
+    
+    <!-- Left column header -->
+    <rect x="40" y="75" width="${colWidth - 20}" height="32" rx="6" fill="#ef4444" opacity="0.15"/>
+    <text x="${40 + (colWidth - 20) / 2}" y="97" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#fca5a5" text-anchor="middle">${escapeXml(leftLabel)}</text>
+    
+    <!-- Right column header -->
+    <rect x="${width / 2 + 20}" y="75" width="${colWidth - 20}" height="32" rx="6" fill="${colors.accent}" opacity="0.2"/>
+    <text x="${width / 2 + 20 + (colWidth - 20) / 2}" y="97" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="${colors.accentLight}" text-anchor="middle">${escapeXml(rightLabel)}</text>
+    
+    ${leftItemsSvg}
+    ${rightItemsSvg}
+    
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+  </svg>`;
+
+  return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
+}
+
+async function generateWorkflowImage(
+  title: string,
+  data: any,
+  colors: typeof INLINE_IMAGE_STYLES.workflow,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const steps = data?.steps || ['Research', 'Plan', 'Execute', 'Review'];
+  const stepWidth = (width - 100) / steps.length;
+  const centerY = height / 2;
+
+  const stepsSvg = steps.slice(0, 5).map((step: string, i: number) => {
+    const x = 50 + i * stepWidth + stepWidth / 2;
+    const isLast = i === steps.length - 1;
+    return `
+      <circle cx="${x}" cy="${centerY}" r="28" fill="${colors.accent}"/>
+      <text x="${x}" y="${centerY + 6}" font-family="system-ui, sans-serif" font-size="18" font-weight="700" fill="${colors.bgStart}" text-anchor="middle">${i + 1}</text>
+      <text x="${x}" y="${centerY + 55}" font-family="system-ui, sans-serif" font-size="13" fill="${colors.text}" text-anchor="middle">${escapeXml(step.substring(0, 12))}</text>
+      ${!isLast ? `<line x1="${x + 35}" y1="${centerY}" x2="${x + stepWidth - 35}" y2="${centerY}" stroke="${colors.accentLight}" stroke-width="2" marker-end="url(#arrow)"/>` : ''}
+    `;
+  }).join('');
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${colors.bgStart}"/>
+        <stop offset="100%" stop-color="${colors.bgEnd}"/>
+      </linearGradient>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="${colors.accentLight}"/>
+      </marker>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    <text x="${width / 2}" y="45" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="${colors.text}" text-anchor="middle">${escapeXml(title.substring(0, 45))}</text>
+    ${stepsSvg}
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+  </svg>`;
+
+  return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
+}
+
+async function generateQuoteImage(
+  title: string,
+  data: any,
+  colors: typeof INLINE_IMAGE_STYLES.quote,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const quote = data?.quote || title;
+  const author = data?.author || '';
+  const quoteLines = wrapText(quote, Math.floor(width / 18)).slice(0, 4);
+
+  const quoteTspans = quoteLines.map((line, i) => 
+    `<tspan x="${width / 2}" dy="${i === 0 ? 0 : 32}">${escapeXml(line)}</tspan>`
+  ).join('');
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${colors.bgStart}"/>
+        <stop offset="100%" stop-color="${colors.bgEnd}"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    
+    <!-- Large quote mark -->
+    <text x="50" y="90" font-family="Georgia, serif" font-size="120" fill="${colors.accent}" opacity="0.3">"</text>
+    
+    <!-- Quote text -->
+    <text x="${width / 2}" y="${height / 2 - quoteLines.length * 16}" font-family="Georgia, serif" font-size="22" font-style="italic" fill="${colors.text}" text-anchor="middle">
+      ${quoteTspans}
+    </text>
+    
+    ${author ? `<text x="${width / 2}" y="${height - 50}" font-family="system-ui, sans-serif" font-size="14" fill="${colors.textMuted}" text-anchor="middle">— ${escapeXml(author)}</text>` : ''}
+    
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+  </svg>`;
+
+  return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
+}
+
+async function generateStatisticImage(
+  title: string,
+  data: any,
+  colors: typeof INLINE_IMAGE_STYLES.statistic,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const stats = data?.stats || [
+    { value: '85%', label: 'Increase' },
+    { value: '3x', label: 'Faster' },
+    { value: '50+', label: 'Features' },
+  ];
+
+  const statWidth = (width - 80) / stats.length;
+  const centerY = height / 2;
+
+  const statsSvg = stats.slice(0, 4).map((stat: any, i: number) => {
+    const x = 40 + i * statWidth + statWidth / 2;
+    return `
+      <text x="${x}" y="${centerY - 10}" font-family="system-ui, -apple-system, sans-serif" font-size="42" font-weight="800" fill="${colors.accent}" text-anchor="middle">${escapeXml(stat.value)}</text>
+      <text x="${x}" y="${centerY + 25}" font-family="system-ui, sans-serif" font-size="14" fill="${colors.textMuted}" text-anchor="middle">${escapeXml(stat.label)}</text>
+    `;
+  }).join('');
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${colors.bgStart}"/>
+        <stop offset="100%" stop-color="${colors.bgEnd}"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    <text x="${width / 2}" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="600" fill="${colors.text}" text-anchor="middle">${escapeXml(title.substring(0, 50))}</text>
+    <line x1="${width / 2 - 60}" y1="70" x2="${width / 2 + 60}" y2="70" stroke="${colors.accent}" stroke-width="2" opacity="0.5"/>
+    ${statsSvg}
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+  </svg>`;
+
+  return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
+}
+
+async function generateChecklistImage(
+  title: string,
+  data: any,
+  colors: typeof INLINE_IMAGE_STYLES.checklist,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const items = data?.items || ['Step one complete', 'Step two complete', 'Step three pending', 'Step four pending'];
+  const checked = data?.checked || [true, true, false, false];
+
+  const startY = 100;
+  const itemGap = 40;
+
+  const itemsSvg = items.slice(0, 5).map((item: string, i: number) => {
+    const y = startY + i * itemGap;
+    const isChecked = checked[i] ?? false;
+    return `
+      <rect x="50" y="${y - 12}" width="24" height="24" rx="4" fill="${isChecked ? colors.accent : 'transparent'}" stroke="${colors.accent}" stroke-width="2"/>
+      ${isChecked ? `<path d="M55 ${y} l4 4 l8 -8" stroke="${colors.bgStart}" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+      <text x="90" y="${y + 5}" font-family="system-ui, sans-serif" font-size="15" fill="${isChecked ? colors.text : colors.textMuted}" ${!isChecked ? 'opacity="0.7"' : ''}>${escapeXml(item.substring(0, 35))}</text>
+    `;
+  }).join('');
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${colors.bgStart}"/>
+        <stop offset="100%" stop-color="${colors.bgEnd}"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    <text x="50" y="55" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="${colors.text}">${escapeXml(title.substring(0, 40))}</text>
+    <line x1="50" y1="72" x2="180" y2="72" stroke="${colors.accent}" stroke-width="2" opacity="0.6"/>
+    ${itemsSvg}
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+  </svg>`;
+
+  return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
+}
+
+async function generateTimelineImage(
+  title: string,
+  data: any,
+  colors: typeof INLINE_IMAGE_STYLES.timeline,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const events = data?.events || [
+    { label: 'Phase 1', desc: 'Research' },
+    { label: 'Phase 2', desc: 'Development' },
+    { label: 'Phase 3', desc: 'Launch' },
+  ];
+
+  const startX = 80;
+  const endX = width - 80;
+  const lineY = height / 2 + 20;
+  const eventSpacing = (endX - startX) / (events.length - 1 || 1);
+
+  const eventsSvg = events.slice(0, 5).map((event: any, i: number) => {
+    const x = startX + i * eventSpacing;
+    return `
+      <circle cx="${x}" cy="${lineY}" r="10" fill="${colors.accent}"/>
+      <circle cx="${x}" cy="${lineY}" r="5" fill="${colors.bgStart}"/>
+      <text x="${x}" y="${lineY - 25}" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="${colors.text}" text-anchor="middle">${escapeXml(event.label)}</text>
+      <text x="${x}" y="${lineY + 35}" font-family="system-ui, sans-serif" font-size="11" fill="${colors.textMuted}" text-anchor="middle">${escapeXml((event.desc || '').substring(0, 15))}</text>
+    `;
+  }).join('');
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${colors.bgStart}"/>
+        <stop offset="100%" stop-color="${colors.bgEnd}"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    <text x="${width / 2}" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="${colors.text}" text-anchor="middle">${escapeXml(title.substring(0, 45))}</text>
+    
+    <!-- Timeline line -->
+    <line x1="${startX}" y1="${lineY}" x2="${endX}" y2="${lineY}" stroke="${colors.accent}" stroke-width="3" opacity="0.4"/>
+    
+    ${eventsSvg}
+    
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+  </svg>`;
+
+  return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
+}
+
+/**
+ * Detect the best inline image style based on content analysis
+ */
+export function detectInlineImageStyle(sectionTitle: string, sectionContent: string): InlineImageStyle {
+  const text = `${sectionTitle} ${sectionContent}`.toLowerCase();
+
+  if (/(?:vs\.?|versus|compar|alternative|difference|before.*after|old.*new)/i.test(text)) {
+    return 'comparison';
+  }
+  if (/(?:step|process|workflow|how to|guide|tutorial|phase)/i.test(text)) {
+    return 'workflow';
+  }
+  if (/(?:quote|said|according to|expert|opinion)/i.test(text)) {
+    return 'quote';
+  }
+  if (/(?:\d+%|\d+x|increase|decrease|growth|metric|statistic|number|data)/i.test(text)) {
+    return 'statistic';
+  }
+  if (/(?:checklist|todo|task|requirement|must|should|need)/i.test(text)) {
+    return 'checklist';
+  }
+  if (/(?:timeline|roadmap|milestone|schedule|plan|phase)/i.test(text)) {
+    return 'timeline';
+  }
+
+  return 'infographic';
+}
+
+/**
+ * Extract data for inline images from content
+ */
+export function extractInlineImageData(style: InlineImageStyle, content: string): any {
+  switch (style) {
+    case 'comparison': {
+      const items = content.match(/[-•]\s*([^\n]+)/g)?.slice(0, 4).map(s => s.replace(/^[-•]\s*/, '')) || [];
+      const midpoint = Math.ceil(items.length / 2);
+      return {
+        left: { label: 'Before', items: items.slice(0, midpoint) },
+        right: { label: 'After', items: items.slice(midpoint) },
+      };
+    }
+    case 'workflow': {
+      const steps = content.match(/(?:step\s*\d+[:\s]*|^\d+\.\s*)([^\n]+)/gim)?.slice(0, 5).map(s => 
+        s.replace(/^(?:step\s*\d+[:\s]*|\d+\.\s*)/i, '').trim()
+      ) || ['Plan', 'Execute', 'Review'];
+      return { steps };
+    }
+    case 'statistic': {
+      const stats: { value: string; label: string }[] = [];
+      const matches = content.matchAll(/(\d+[%x+]?|\$[\d,]+)\s*(?:[-–—]\s*)?([^\n,]+)/g);
+      for (const match of matches) {
+        if (stats.length >= 4) break;
+        stats.push({ value: match[1], label: match[2].trim().substring(0, 20) });
+      }
+      return { stats: stats.length > 0 ? stats : undefined };
+    }
+    case 'checklist': {
+      const items = content.match(/[-•✓✗☐☑]\s*([^\n]+)/g)?.slice(0, 5).map(s => s.replace(/^[-•✓✗☐☑]\s*/, '')) || [];
+      const checked = items.map((_, i) => i < Math.ceil(items.length / 2));
+      return { items, checked };
+    }
+    case 'timeline': {
+      const events = content.match(/(?:phase|step|stage|milestone)\s*\d*[:\s]*([^\n]+)/gi)?.slice(0, 5).map((s, i) => ({
+        label: `Phase ${i + 1}`,
+        desc: s.replace(/^(?:phase|step|stage|milestone)\s*\d*[:\s]*/i, '').trim().substring(0, 20),
+      })) || [];
+      return { events: events.length > 0 ? events : undefined };
+    }
+    default:
+      return undefined;
+  }
 }

@@ -18,6 +18,10 @@ import {
   generatePlatformCoverImage,
   platformUsesImages,
   PLATFORM_IMAGE_CONFIGS,
+  generateInlineImage,
+  detectInlineImageStyle,
+  extractInlineImageData,
+  InlineImageStyle,
 } from '../utils/image-generation.util';
 
 export interface GeneratePlanInput {
@@ -561,7 +565,10 @@ Requirements:
 
     // Generate cover image if platform uses images
     let coverImageUrl: string | undefined;
+    const inlineImages: { position: number; url: string; alt: string; style: string }[] = [];
+    
     if (platformUsesImages(platform) && this.minioService) {
+      // Generate cover image
       try {
         const imageBuffer = await generatePlatformCoverImage({
           title: adaptedResult.platformTitle || post.title,
@@ -583,13 +590,34 @@ Requirements:
       } catch (imgError) {
         this.logger.warn(`Failed to generate cover image for ${platform}: ${(imgError as Error).message}`);
       }
+
+      // Generate inline images for long-form platforms
+      if (this.isLongFormPlatform(platform)) {
+        try {
+          const generatedInlineImages = await this.generateInlineImagesForContent(
+            adaptedResult.content,
+            platform,
+            post.slug || postId,
+          );
+          inlineImages.push(...generatedInlineImages);
+          this.logger.log(`Generated ${inlineImages.length} inline images for ${platform}`);
+        } catch (inlineError) {
+          this.logger.warn(`Failed to generate inline images for ${platform}: ${(inlineError as Error).message}`);
+        }
+      }
+    }
+
+    // Insert inline images into the adapted content
+    let finalContent = adaptedResult.content;
+    if (inlineImages.length > 0) {
+      finalContent = this.insertInlineImagesIntoContent(adaptedResult.content, inlineImages);
     }
 
     // Calculate character count
-    const characterCount = adaptedResult.content.length;
+    const characterCount = finalContent.length;
 
     // Calculate simple engagement score based on content quality signals
-    const engagementScore = this.calculateEngagementScore(adaptedResult.content, platform);
+    const engagementScore = this.calculateEngagementScore(finalContent, platform);
 
     const { data, error } = await client
       .from('blog_distributions')
@@ -598,10 +626,10 @@ Requirements:
           post_id: postId,
           platform,
           status: 'ready',
-          adapted_content: adaptedResult.content,
+          adapted_content: finalContent,
           platform_title: adaptedResult.platformTitle,
           cover_image_url: coverImageUrl,
-          inline_images: [],
+          inline_images: inlineImages,
           hashtags: adaptedResult.hashtags,
           character_count: characterCount,
           seo_score: adaptedResult.seoScore,
@@ -616,6 +644,131 @@ Requirements:
 
     if (error) throw error;
     return data;
+  }
+
+  /**
+   * Generate diverse inline images for article content
+   */
+  private async generateInlineImagesForContent(
+    content: string,
+    platform: string,
+    slugOrId: string,
+  ): Promise<{ position: number; url: string; alt: string; style: string }[]> {
+    const images: { position: number; url: string; alt: string; style: string }[] = [];
+    
+    if (!this.minioService) return images;
+
+    // Split content into sections by headings
+    const sections = content.split(/(?=^##\s)/m).filter(s => s.trim());
+    
+    // Select 2-3 sections for inline images (not all sections)
+    const sectionIndices = this.selectSectionsForImages(sections);
+    
+    // Use different styles for variety
+    const styleRotation: InlineImageStyle[] = ['infographic', 'comparison', 'workflow', 'statistic', 'checklist', 'timeline'];
+    
+    for (let i = 0; i < sectionIndices.length; i++) {
+      const sectionIndex = sectionIndices[i];
+      const section = sections[sectionIndex];
+      if (!section) continue;
+
+      // Extract section title
+      const titleMatch = section.match(/^##\s*(.+)$/m);
+      const sectionTitle = titleMatch ? titleMatch[1].trim() : `Section ${sectionIndex + 1}`;
+      
+      // Detect best style for this section or use rotation for variety
+      const detectedStyle = detectInlineImageStyle(sectionTitle, section);
+      const style = i === 0 ? detectedStyle : styleRotation[(i + sectionIndex) % styleRotation.length];
+      
+      // Extract data for the image
+      const imageData = extractInlineImageData(style, section);
+      
+      try {
+        const imageBuffer = await generateInlineImage({
+          title: sectionTitle,
+          style,
+          platform,
+          data: imageData,
+          sectionNumber: sectionIndex + 1,
+        });
+
+        const objectName = `blog/distribution/${slugOrId}/${platform}-inline-${i + 1}-${Date.now()}.png`;
+        await this.minioService.uploadFile(
+          'contentos-media',
+          objectName,
+          imageBuffer,
+          'image/png',
+        );
+        const imageUrl = await this.minioService.getPublicUrl('contentos-media', objectName);
+
+        // Calculate position (character index after the section heading)
+        let position = 0;
+        for (let j = 0; j <= sectionIndex; j++) {
+          position += sections[j]?.length || 0;
+        }
+        // Position after the first paragraph of the section
+        const firstParagraphEnd = section.indexOf('\n\n', section.indexOf('\n') + 1);
+        if (firstParagraphEnd > 0) {
+          position = position - section.length + firstParagraphEnd;
+        }
+
+        images.push({
+          position,
+          url: imageUrl,
+          alt: `${style.charAt(0).toUpperCase() + style.slice(1)}: ${sectionTitle}`,
+          style,
+        });
+      } catch (err) {
+        this.logger.warn(`Failed to generate inline image for section "${sectionTitle}": ${(err as Error).message}`);
+      }
+    }
+
+    return images;
+  }
+
+  /**
+   * Select which sections should have inline images (2-3 sections, spread out)
+   */
+  private selectSectionsForImages(sections: string[]): number[] {
+    if (sections.length <= 2) return [];
+    if (sections.length <= 4) return [1]; // Just one image in the middle
+    if (sections.length <= 6) return [1, 3]; // Two images spread out
+    
+    // For longer articles, pick 3 sections spread throughout
+    const step = Math.floor(sections.length / 4);
+    return [step, step * 2, step * 3].filter(i => i > 0 && i < sections.length - 1);
+  }
+
+  /**
+   * Insert inline images into content at appropriate positions
+   */
+  private insertInlineImagesIntoContent(
+    content: string,
+    images: { position: number; url: string; alt: string; style: string }[],
+  ): string {
+    if (images.length === 0) return content;
+
+    // Sort images by position descending so we can insert from end to start
+    const sortedImages = [...images].sort((a, b) => b.position - a.position);
+    
+    let result = content;
+    for (const img of sortedImages) {
+      // Find a good insertion point (after a paragraph break)
+      let insertPos = img.position;
+      
+      // Look for the next paragraph break after the position
+      const nextBreak = result.indexOf('\n\n', insertPos);
+      if (nextBreak !== -1 && nextBreak - insertPos < 500) {
+        insertPos = nextBreak + 2;
+      }
+      
+      // Create markdown image with alt text
+      const imageMarkdown = `\n\n![${img.alt}](${img.url})\n\n`;
+      
+      result = result.slice(0, insertPos) + imageMarkdown + result.slice(insertPos);
+    }
+
+    return result;
   }
 
   private calculateEngagementScore(content: string, platform: string): number {
@@ -819,13 +972,19 @@ Output JSON:
         timeoutMs: 120_000,
       });
 
-      let sectionContent = aiResponse;
+      let sectionContent = '';
       let parsedOk = false;
       try {
         const cleaned = this.extractJsonFromAiResponse(aiResponse);
         const parsed = JSON.parse(cleaned);
-        sectionContent = parsed.content || aiResponse;
-        parsedOk = true;
+        if (typeof parsed.content === 'string' && parsed.content.trim()) {
+          sectionContent = parsed.content;
+          parsedOk = true;
+        } else {
+          this.logger.warn(
+            `[distribution] Batch ${i + 1}/${totalSections} parsed JSON missing content field for ${platform}; raw response withheld`,
+          );
+        }
         if (isFirst) {
           platformTitle = parsed.platformTitle ?? undefined;
           hashtags = Array.isArray(parsed.hashtags) ? parsed.hashtags : [];
@@ -833,7 +992,7 @@ Output JSON:
         }
       } catch {
         this.logger.warn(
-          `[distribution] Batch ${i + 1}/${totalSections} JSON parse failed for ${platform}; using raw`,
+          `[distribution] Batch ${i + 1}/${totalSections} JSON parse failed for ${platform}; section content will be empty`,
         );
       }
 
@@ -860,13 +1019,13 @@ Output JSON:
           try {
             const mc = this.extractJsonFromAiResponse(mergedRaw);
             const mp = JSON.parse(mc);
-            sectionContent = mp.content || sectionContent;
+            if (typeof mp.content === 'string' && mp.content.trim()) sectionContent = mp.content;
           } catch {
             if (!parsedOk) {
               try {
                 const cc = this.extractJsonFromAiResponse(cont);
                 const cp = JSON.parse(cc);
-                if (cp.content && !this.isContentTruncated(cp.content)) sectionContent = cp.content;
+                if (typeof cp.content === 'string' && cp.content.trim() && !this.isContentTruncated(cp.content)) sectionContent = cp.content;
               } catch { /* keep existing */ }
             }
           }
@@ -982,7 +1141,11 @@ Remember: Create authentic, platform-native content that provides real value. Do
       const cleaned = this.extractJsonFromAiResponse(aiResponse);
       const parsed = JSON.parse(cleaned);
 
-      let generatedContent: string = parsed.content || aiResponse;
+      if (typeof parsed.content !== 'string' || !parsed.content.trim()) {
+        throw new Error(`AI response parsed but "content" field is missing or empty for ${platform}`);
+      }
+
+      let generatedContent: string = parsed.content;
 
       // Detect truncation and retry once with a continuation prompt
       if (this.isContentTruncated(generatedContent)) {
@@ -1013,13 +1176,15 @@ Remember: Create authentic, platform-native content that provides real value. Do
           try {
             const mergedCleaned = this.extractJsonFromAiResponse(mergedRaw);
             const mergedParsed = JSON.parse(mergedCleaned);
-            generatedContent = mergedParsed.content || generatedContent;
+            if (typeof mergedParsed.content === 'string' && mergedParsed.content.trim()) {
+              generatedContent = mergedParsed.content;
+            }
           } catch {
             // Merged JSON didn't parse — try the continuation alone
             try {
               const contCleaned = this.extractJsonFromAiResponse(continuationResponse);
               const contParsed = JSON.parse(contCleaned);
-              if (contParsed.content && !this.isContentTruncated(contParsed.content)) {
+              if (typeof contParsed.content === 'string' && contParsed.content.trim() && !this.isContentTruncated(contParsed.content)) {
                 generatedContent = contParsed.content;
               }
             } catch {
@@ -2145,6 +2310,7 @@ Format: Submission title (factual) + brief context comment`,
       post.title,
       canonicalUrl,
       tags,
+      dist.cover_image_url ?? undefined,
     );
 
     if (result.success) {
