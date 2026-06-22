@@ -1313,7 +1313,198 @@ async function generateTimelineImage(
 }
 
 /**
- * Detect the best inline image style based on content analysis
+ * AI-driven image decision interface
+ */
+export interface AIImageDecision {
+  shouldGenerateImage: boolean;
+  reason: string;
+  style?: InlineImageStyle;
+  title?: string;
+  data?: any;
+}
+
+/**
+ * Sections that typically don't benefit from images
+ */
+const SKIP_IMAGE_PATTERNS = [
+  /faq|frequently\s*asked/i,
+  /conclusion|summary|wrap\s*up|final\s*thoughts/i,
+  /introduction|overview|about\s*this/i,
+  /table\s*of\s*contents/i,
+  /disclaimer|legal|terms/i,
+  /references|sources|citations/i,
+];
+
+/**
+ * Check if a section should skip image generation based on title
+ */
+export function shouldSkipImageForSection(sectionTitle: string): boolean {
+  return SKIP_IMAGE_PATTERNS.some(pattern => pattern.test(sectionTitle));
+}
+
+/**
+ * Build the AI prompt for image decision
+ */
+export function buildImageDecisionPrompt(sectionTitle: string, sectionContent: string): string {
+  return `Analyze this article section and decide if a visual image would add value.
+
+SECTION TITLE: ${sectionTitle}
+
+SECTION CONTENT (first 1500 chars):
+${sectionContent.substring(0, 1500)}
+
+AVAILABLE IMAGE STYLES:
+1. "comparison" - Side-by-side comparison (e.g., Before/After, Tool A vs Tool B, Old way vs New way)
+   - Requires: left.label, left.items[], right.label, right.items[]
+2. "workflow" - Step-by-step process flow with numbered steps
+   - Requires: steps[] (array of step names, max 5)
+3. "statistic" - Key metrics/numbers display
+   - Requires: stats[] (array of {value: "85%", label: "Increase"}, max 4)
+4. "checklist" - Checklist with checked/unchecked items
+   - Requires: items[] (array of strings), checked[] (array of booleans)
+5. "timeline" - Timeline with phases/milestones
+   - Requires: events[] (array of {label: "Phase 1", desc: "Description"}, max 5)
+6. "infographic" - Bar chart showing metrics/percentages
+   - Requires: items[] (array of {label: "Category", value: 85}, max 5)
+
+DECISION RULES:
+- Return shouldGenerateImage: false for FAQ sections, conclusions, introductions, or sections without visualizable data
+- Only generate an image if the content has SPECIFIC data that can be visualized
+- Extract ACTUAL data from the content - do NOT use generic placeholders
+- The image title should be specific to the content, not generic
+
+Respond with JSON only:
+{
+  "shouldGenerateImage": boolean,
+  "reason": "Brief explanation of decision",
+  "style": "comparison|workflow|statistic|checklist|timeline|infographic" (only if shouldGenerateImage is true),
+  "title": "Specific title for the image based on content" (only if shouldGenerateImage is true),
+  "data": { ... style-specific data extracted from content ... } (only if shouldGenerateImage is true)
+}`;
+}
+
+/**
+ * Parse AI response for image decision
+ */
+export function parseImageDecisionResponse(response: string): AIImageDecision {
+  try {
+    let cleaned = response.trim();
+    const jsonMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      cleaned = jsonMatch[1].trim();
+    }
+    
+    const parsed = JSON.parse(cleaned);
+    
+    if (typeof parsed.shouldGenerateImage !== 'boolean') {
+      return { shouldGenerateImage: false, reason: 'Invalid AI response format' };
+    }
+    
+    if (!parsed.shouldGenerateImage) {
+      return { shouldGenerateImage: false, reason: parsed.reason || 'AI decided no image needed' };
+    }
+    
+    const validStyles: InlineImageStyle[] = ['comparison', 'workflow', 'statistic', 'checklist', 'timeline', 'infographic'];
+    if (!validStyles.includes(parsed.style)) {
+      return { shouldGenerateImage: false, reason: `Invalid style: ${parsed.style}` };
+    }
+    
+    return {
+      shouldGenerateImage: true,
+      reason: parsed.reason || 'AI decided image would add value',
+      style: parsed.style,
+      title: parsed.title || 'Visual Summary',
+      data: parsed.data,
+    };
+  } catch (err) {
+    return { shouldGenerateImage: false, reason: `Failed to parse AI response: ${(err as Error).message}` };
+  }
+}
+
+/**
+ * Validate and sanitize image data based on style
+ */
+export function validateImageData(style: InlineImageStyle, data: any): any {
+  if (!data) return getDefaultDataForStyle(style);
+  
+  switch (style) {
+    case 'comparison': {
+      const left = data.left || {};
+      const right = data.right || {};
+      return {
+        left: {
+          label: String(left.label || 'Before').substring(0, 20),
+          items: Array.isArray(left.items) ? left.items.slice(0, 4).map((s: any) => String(s).substring(0, 30)) : ['Item 1', 'Item 2'],
+        },
+        right: {
+          label: String(right.label || 'After').substring(0, 20),
+          items: Array.isArray(right.items) ? right.items.slice(0, 4).map((s: any) => String(s).substring(0, 30)) : ['Item 1', 'Item 2'],
+        },
+      };
+    }
+    case 'workflow': {
+      const steps = Array.isArray(data.steps) ? data.steps.slice(0, 5).map((s: any) => String(s).substring(0, 20)) : ['Step 1', 'Step 2', 'Step 3'];
+      return { steps };
+    }
+    case 'statistic': {
+      const stats = Array.isArray(data.stats) ? data.stats.slice(0, 4).map((s: any) => ({
+        value: String(s.value || '0').substring(0, 10),
+        label: String(s.label || 'Metric').substring(0, 20),
+      })) : [{ value: '85%', label: 'Improvement' }];
+      return { stats };
+    }
+    case 'checklist': {
+      const items = Array.isArray(data.items) ? data.items.slice(0, 5).map((s: any) => String(s).substring(0, 35)) : ['Item 1', 'Item 2'];
+      const checked = Array.isArray(data.checked) ? data.checked.slice(0, 5) : items.map(() => true);
+      return { items, checked };
+    }
+    case 'timeline': {
+      const events = Array.isArray(data.events) ? data.events.slice(0, 5).map((e: any) => ({
+        label: String(e.label || 'Phase').substring(0, 15),
+        desc: String(e.desc || '').substring(0, 20),
+      })) : [{ label: 'Phase 1', desc: 'Start' }];
+      return { events };
+    }
+    case 'infographic': {
+      const items = Array.isArray(data.items) ? data.items.slice(0, 5).map((i: any) => ({
+        label: String(i.label || 'Category').substring(0, 20),
+        value: Math.min(100, Math.max(0, Number(i.value) || 50)),
+      })) : [{ label: 'Category', value: 75 }];
+      return { items };
+    }
+    default:
+      return data;
+  }
+}
+
+/**
+ * Get default data for a style (fallback)
+ */
+function getDefaultDataForStyle(style: InlineImageStyle): any {
+  switch (style) {
+    case 'comparison':
+      return {
+        left: { label: 'Before', items: ['Manual process', 'Time-consuming'] },
+        right: { label: 'After', items: ['Automated', 'Efficient'] },
+      };
+    case 'workflow':
+      return { steps: ['Plan', 'Execute', 'Review'] };
+    case 'statistic':
+      return { stats: [{ value: '85%', label: 'Improvement' }] };
+    case 'checklist':
+      return { items: ['Task 1', 'Task 2'], checked: [true, false] };
+    case 'timeline':
+      return { events: [{ label: 'Phase 1', desc: 'Start' }, { label: 'Phase 2', desc: 'Complete' }] };
+    case 'infographic':
+      return { items: [{ label: 'Metric', value: 75 }] };
+    default:
+      return {};
+  }
+}
+
+/**
+ * @deprecated Use AI-driven image decisions instead
+ * Legacy function kept for backward compatibility
  */
 export function detectInlineImageStyle(sectionTitle: string, sectionContent: string): InlineImageStyle {
   const text = `${sectionTitle} ${sectionContent}`.toLowerCase();
@@ -1341,7 +1532,8 @@ export function detectInlineImageStyle(sectionTitle: string, sectionContent: str
 }
 
 /**
- * Extract data for inline images from content
+ * @deprecated Use AI-driven image decisions instead
+ * Legacy function kept for backward compatibility
  */
 export function extractInlineImageData(style: InlineImageStyle, content: string): any {
   switch (style) {

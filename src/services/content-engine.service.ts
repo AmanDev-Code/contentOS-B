@@ -22,6 +22,11 @@ import {
   detectInlineImageStyle,
   extractInlineImageData,
   InlineImageStyle,
+  shouldSkipImageForSection,
+  buildImageDecisionPrompt,
+  parseImageDecisionResponse,
+  validateImageData,
+  AIImageDecision,
 } from '../utils/image-generation.util';
 
 export interface GeneratePlanInput {
@@ -647,7 +652,7 @@ Requirements:
   }
 
   /**
-   * Generate diverse inline images for article content
+   * Generate diverse inline images for article content using AI-driven decisions
    */
   private async generateInlineImagesForContent(
     content: string,
@@ -661,14 +666,12 @@ Requirements:
     // Split content into sections by headings
     const sections = content.split(/(?=^##\s)/m).filter(s => s.trim());
     
-    // Select 2-3 sections for inline images (not all sections)
-    const sectionIndices = this.selectSectionsForImages(sections);
+    // Select candidate sections for inline images (not all sections)
+    const candidateIndices = this.selectSectionsForImages(sections);
     
-    // Use different styles for variety
-    const styleRotation: InlineImageStyle[] = ['infographic', 'comparison', 'workflow', 'statistic', 'checklist', 'timeline'];
-    
-    for (let i = 0; i < sectionIndices.length; i++) {
-      const sectionIndex = sectionIndices[i];
+    // Process each candidate section with AI decision
+    for (let i = 0; i < candidateIndices.length && images.length < 3; i++) {
+      const sectionIndex = candidateIndices[i];
       const section = sections[sectionIndex];
       if (!section) continue;
 
@@ -676,23 +679,39 @@ Requirements:
       const titleMatch = section.match(/^##\s*(.+)$/m);
       const sectionTitle = titleMatch ? titleMatch[1].trim() : `Section ${sectionIndex + 1}`;
       
-      // Detect best style for this section or use rotation for variety
-      const detectedStyle = detectInlineImageStyle(sectionTitle, section);
-      const style = i === 0 ? detectedStyle : styleRotation[(i + sectionIndex) % styleRotation.length];
+      // Quick check: skip sections that typically don't need images
+      if (shouldSkipImageForSection(sectionTitle)) {
+        this.logger.debug(`[${platform}] Skipping image for section "${sectionTitle}" - matches skip pattern`);
+        continue;
+      }
       
-      // Extract data for the image
-      const imageData = extractInlineImageData(style, section);
+      // Use AI to decide if and what image to generate
+      let decision: AIImageDecision;
+      try {
+        decision = await this.getAIImageDecision(sectionTitle, section);
+      } catch (err) {
+        this.logger.warn(`[${platform}] AI image decision failed for "${sectionTitle}": ${(err as Error).message}`);
+        continue;
+      }
+      
+      if (!decision.shouldGenerateImage) {
+        this.logger.debug(`[${platform}] AI decided no image for "${sectionTitle}": ${decision.reason}`);
+        continue;
+      }
+      
+      // Validate and sanitize the data
+      const validatedData = validateImageData(decision.style!, decision.data);
       
       try {
         const imageBuffer = await generateInlineImage({
-          title: sectionTitle,
-          style,
+          title: decision.title || sectionTitle,
+          style: decision.style!,
           platform,
-          data: imageData,
+          data: validatedData,
           sectionNumber: sectionIndex + 1,
         });
 
-        const objectName = `blog/distribution/${slugOrId}/${platform}-inline-${i + 1}-${Date.now()}.png`;
+        const objectName = `blog/distribution/${slugOrId}/${platform}-inline-${images.length + 1}-${Date.now()}.png`;
         await this.minioService.uploadFile(
           'contentos-media',
           objectName,
@@ -715,9 +734,11 @@ Requirements:
         images.push({
           position,
           url: imageUrl,
-          alt: `${style.charAt(0).toUpperCase() + style.slice(1)}: ${sectionTitle}`,
-          style,
+          alt: `${decision.style!.charAt(0).toUpperCase() + decision.style!.slice(1)}: ${decision.title || sectionTitle}`,
+          style: decision.style!,
         });
+        
+        this.logger.log(`[${platform}] Generated ${decision.style} image for "${sectionTitle}": ${decision.reason}`);
       } catch (err) {
         this.logger.warn(`Failed to generate inline image for section "${sectionTitle}": ${(err as Error).message}`);
       }
@@ -727,16 +748,48 @@ Requirements:
   }
 
   /**
-   * Select which sections should have inline images (2-3 sections, spread out)
+   * Use AI to decide if and what image to generate for a section
+   */
+  private async getAIImageDecision(sectionTitle: string, sectionContent: string): Promise<AIImageDecision> {
+    const prompt = buildImageDecisionPrompt(sectionTitle, sectionContent);
+    
+    try {
+      const { content: aiResponse } = await this.aiGateway.chatCompletionRaw({
+        messages: [
+          { 
+            role: 'system', 
+            content: 'You are an expert at analyzing content and deciding what visual images would add value. Respond with JSON only.' 
+          },
+          { role: 'user', content: prompt },
+        ],
+        jsonObject: true,
+        category: 'text',
+        maxTokens: 500,
+      });
+      
+      return parseImageDecisionResponse(aiResponse);
+    } catch (err) {
+      this.logger.warn(`AI image decision call failed: ${(err as Error).message}`);
+      return { shouldGenerateImage: false, reason: 'AI call failed' };
+    }
+  }
+
+  /**
+   * Select candidate sections for inline images (AI will filter further)
+   * Returns more candidates than needed since AI will decide which actually get images
    */
   private selectSectionsForImages(sections: string[]): number[] {
     if (sections.length <= 2) return [];
-    if (sections.length <= 4) return [1]; // Just one image in the middle
-    if (sections.length <= 6) return [1, 3]; // Two images spread out
+    if (sections.length <= 4) return [1, 2]; // Give AI 2 candidates
+    if (sections.length <= 6) return [1, 2, 3, 4]; // Give AI 4 candidates
     
-    // For longer articles, pick 3 sections spread throughout
-    const step = Math.floor(sections.length / 4);
-    return [step, step * 2, step * 3].filter(i => i > 0 && i < sections.length - 1);
+    // For longer articles, pick candidates spread throughout (skip first and last)
+    const candidates: number[] = [];
+    const step = Math.floor((sections.length - 2) / 5); // Aim for ~5 candidates
+    for (let i = 1; i < sections.length - 1 && candidates.length < 6; i += Math.max(1, step)) {
+      candidates.push(i);
+    }
+    return candidates;
   }
 
   /**
