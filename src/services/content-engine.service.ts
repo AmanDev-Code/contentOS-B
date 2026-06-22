@@ -803,22 +803,72 @@ Requirements:
   }
 
   /**
-   * Returns true when content appears to be cut off mid-sentence.
-   * Heuristic: last non-whitespace char is not a sentence-ending punctuation
-   * or a standard markdown closing marker.
+   * Returns true when content appears to be cut off mid-sentence or is incomplete.
+   * Enhanced heuristics:
+   * 1. Last character check (original)
+   * 2. Incomplete markdown structures (unclosed code blocks, lists)
+   * 3. Ends with common truncation patterns
    */
   private isContentTruncated(content: string): boolean {
     const trimmed = content.trimEnd();
     if (!trimmed) return false;
+
+    // Check for incomplete markdown code blocks
+    const codeBlockOpens = (trimmed.match(/```/g) || []).length;
+    if (codeBlockOpens % 2 !== 0) return true;
+
+    // Check for common truncation patterns (mid-word, mid-sentence indicators)
+    const truncationPatterns = [
+      /\s+t$/i, // ends with " t" (common truncation)
+      /\s+th$/i, // ends with " th"
+      /\s+the$/i, // ends with " the"
+      /\s+a$/i, // ends with " a"
+      /\s+an$/i, // ends with " an"
+      /\s+and$/i, // ends with " and"
+      /\s+or$/i, // ends with " or"
+      /\s+to$/i, // ends with " to"
+      /\s+in$/i, // ends with " in"
+      /\s+of$/i, // ends with " of"
+      /\s+for$/i, // ends with " for"
+      /\s+with$/i, // ends with " with"
+      /\s+is$/i, // ends with " is"
+      /\s+are$/i, // ends with " are"
+      /\s+was$/i, // ends with " was"
+      /\s+be$/i, // ends with " be"
+      /\s+that$/i, // ends with " that"
+      /\s+this$/i, // ends with " this"
+      /\s+which$/i, // ends with " which"
+      /\s+can$/i, // ends with " can"
+      /\s+will$/i, // ends with " will"
+      /[,;:]\s*$/, // ends with comma, semicolon, or colon
+      /\s+-\s*$/, // ends with " - " (incomplete list item)
+    ];
+
+    for (const pattern of truncationPatterns) {
+      if (pattern.test(trimmed)) return true;
+    }
+
     const lastChar = trimmed[trimmed.length - 1];
-    const sentenceEnders = new Set(['.', '!', '?', ')', ']', '"', "'", '`', '-']);
+    const sentenceEnders = new Set(['.', '!', '?', ')', ']', '"', "'", '`', '-', '*', '_']);
     // Also accept markdown HR (---) and code-fence close (```)
     if (trimmed.endsWith('---') || trimmed.endsWith('```')) return false;
     return !sentenceEnders.has(lastChar);
   }
 
   /**
+   * Check if generated content meets minimum length requirements.
+   * Returns true if content is too short and needs regeneration.
+   */
+  private isContentTooShort(content: string, minExpectedLength: number): boolean {
+    const actualLength = content.length;
+    // Allow 30% tolerance below minimum (some adaptation may legitimately be shorter)
+    const threshold = Math.floor(minExpectedLength * 0.7);
+    return actualLength < threshold;
+  }
+
+  /**
    * Long-form platforms need considerably more output tokens.
+   * Increased to 16000 for long-form to ensure full article generation.
    * Short-form platforms (twitter threads, linkedin posts, etc.) are fine with fewer.
    */
   private getMaxTokensForPlatform(platform: string): number {
@@ -835,7 +885,8 @@ Requirements:
       'newsletter',
       'substack',
     ]);
-    return longFormPlatforms.has(platform) ? 8000 : 4500;
+    // 16000 tokens ≈ 12000 words output capacity for long-form
+    return longFormPlatforms.has(platform) ? 16000 : 4500;
   }
 
   private isLongFormPlatform(platform: string): boolean {
@@ -921,53 +972,72 @@ Requirements:
     let hashtags: string[] = [];
     let seoScore = 70;
 
-    // Calculate expected section length
+    // Calculate expected section length - be more aggressive about minimum output
     const totalBodyLength = (post.body ?? '').length;
     const avgSectionLength = Math.floor(totalBodyLength / totalSections);
-    const minSectionOutput = Math.max(Math.floor(avgSectionLength * 0.85), 2000);
+    // Require at least 90% of input section length as output (increased from 85%)
+    const minSectionOutput = Math.max(Math.floor(avgSectionLength * 0.9), 3000);
 
     for (let i = 0; i < totalSections; i++) {
       const section = sections[i];
       const isFirst = i === 0;
       const isLast = i === totalSections - 1;
 
-      const batchPrompt = isFirst
-        ? `Adapt this article for ${platform}.
+      // Calculate section-specific minimum based on actual section length
+      const sectionMinOutput = Math.max(Math.floor(section.length * 0.9), 2500);
 
+      const batchPrompt = isFirst
+        ? `Adapt this article section for ${platform}.
+
+=== ARTICLE METADATA ===
 ORIGINAL TITLE: ${title}
 CATEGORY: ${post.content_category || 'General'}
 TAGS: ${tags.join(', ')}
 TOTAL SECTIONS: ${totalSections} (processing section 1 of ${totalSections})
-SECTION LENGTH: ${section.length.toLocaleString()} chars
-MINIMUM OUTPUT FOR THIS SECTION: ${minSectionOutput.toLocaleString()} chars
 
-CONTENT SECTION ${i + 1}/${totalSections}:
+=== LENGTH REQUIREMENTS ===
+⚠️ INPUT SECTION LENGTH: ${section.length.toLocaleString()} characters
+⚠️ MINIMUM OUTPUT REQUIRED: ${sectionMinOutput.toLocaleString()} characters
+⚠️ DO NOT SUMMARIZE — adapt ALL content with FULL details
+
+=== CONTENT SECTION ${i + 1}/${totalSections} ===
 ${section}
 
-IMPORTANT: Adapt the FULL content of this section — do NOT summarize or shorten. Include all details, examples, and key points. Output must be at least ${minSectionOutput.toLocaleString()} characters.
-${isLast ? '' : 'NOTE: More sections follow. Write the opening/introduction section only — do NOT write a conclusion yet. Complete every sentence.'}
+=== INSTRUCTIONS ===
+- Adapt the FULL content of this section — include ALL details, examples, statistics, and key points
+- Your output MUST be at least ${sectionMinOutput.toLocaleString()} characters
+- Add platform-specific formatting (Dev.to frontmatter for first section, etc.)
+- Complete every sentence — never end mid-word
+${isLast ? '- This is the FINAL section. Write a strong conclusion with CTA.' : '- More sections follow. Write the opening/introduction. Do NOT write a conclusion yet.'}
 
 Output JSON:
 {
-  "content": "The adapted content for this section",
+  "content": "The FULL adapted content for this section (${sectionMinOutput.toLocaleString()}+ chars)",
   "platformTitle": "Platform-optimized title",
-  "hashtags": ["tag1", "tag2"],
+  "hashtags": ["tag1", "tag2", "tag3", "tag4"],
   "seoScore": 75
 }`
         : `Continue adapting the same article for ${platform}.
 
-SECTION LENGTH: ${section.length.toLocaleString()} chars
-MINIMUM OUTPUT FOR THIS SECTION: ${minSectionOutput.toLocaleString()} chars
+=== LENGTH REQUIREMENTS ===
+⚠️ INPUT SECTION LENGTH: ${section.length.toLocaleString()} characters
+⚠️ MINIMUM OUTPUT REQUIRED: ${sectionMinOutput.toLocaleString()} characters
+⚠️ DO NOT SUMMARIZE — adapt ALL content with FULL details
 
-CONTENT SECTION ${i + 1}/${totalSections}:
+=== CONTENT SECTION ${i + 1}/${totalSections} ===
 ${section}
 
-IMPORTANT: Adapt the FULL content of this section — do NOT summarize or shorten. Include all details, examples, and key points. Output must be at least ${minSectionOutput.toLocaleString()} characters.
-${isLast ? 'This is the FINAL section. Write a strong conclusion.' : 'More sections follow. Do NOT write a conclusion yet. Complete every sentence.'}
+=== INSTRUCTIONS ===
+- Adapt the FULL content of this section — include ALL details, examples, statistics, and key points
+- Your output MUST be at least ${sectionMinOutput.toLocaleString()} characters
+- If this section has comparison tables, include them fully formatted
+- If this section has FAQs, include ALL questions and answers
+- Complete every sentence — never end mid-word
+${isLast ? '- This is the FINAL section. Write a strong conclusion with CTA.' : '- More sections follow. Do NOT write a conclusion yet.'}
 
 Output JSON:
 {
-  "content": "The adapted content for this section (continuation, no title repeat)",
+  "content": "The FULL adapted content for this section (${sectionMinOutput.toLocaleString()}+ chars, continuation, no title repeat)",
   "platformTitle": null,
   "hashtags": [],
   "seoScore": 0
@@ -981,7 +1051,7 @@ Output JSON:
         category: 'seo_generation',
         temperature: 0.75,
         maxTokens,
-        timeoutMs: 120_000,
+        timeoutMs: 180_000, // Increased timeout for longer sections
       });
 
       let sectionContent = '';
@@ -1008,10 +1078,18 @@ Output JSON:
         );
       }
 
-      // Truncation continuation for this batch
-      if (this.isContentTruncated(sectionContent)) {
-        this.logger.warn(`[distribution] Batch ${i + 1} truncated for ${platform}; retrying continuation`);
+      // Check for truncation OR content being too short
+      const isTruncated = this.isContentTruncated(sectionContent);
+      const isTooShort = sectionContent.length < sectionMinOutput * 0.7; // 70% threshold
+
+      if (isTruncated || isTooShort) {
+        const reason = isTruncated ? 'truncated' : `too short (${sectionContent.length} chars vs ${sectionMinOutput} min)`;
+        this.logger.warn(`[distribution] Batch ${i + 1} ${reason} for ${platform}; retrying continuation`);
         try {
+          const continuationPrompt = isTruncated
+            ? 'The previous response was cut off mid-sentence. Continue from EXACTLY where it stopped and complete ALL remaining content, then close the JSON properly. Do not restart.'
+            : `The previous response was too short (${sectionContent.length} chars). The section needs at least ${sectionMinOutput} chars. Please regenerate with FULL details — include ALL examples, statistics, and explanations from the original. Do NOT summarize.`;
+
           const { content: cont } = await this.aiGateway.chatCompletionRaw({
             messages: [
               { role: 'system', content: systemPrompt },
@@ -1019,38 +1097,62 @@ Output JSON:
               { role: 'assistant', content: aiResponse },
               {
                 role: 'user',
-                content: 'The previous response was cut off. Continue and complete it, then close the JSON properly.',
+                content: continuationPrompt,
               },
             ],
             category: 'seo_generation',
-            temperature: 0.7,
-            maxTokens: Math.round(maxTokens * 0.6),
-            timeoutMs: 60_000,
+            temperature: 0.75,
+            maxTokens: Math.round(maxTokens * 0.75), // More tokens for continuation
+            timeoutMs: 90_000,
           });
-          const mergedRaw = aiResponse + cont;
-          try {
-            const mc = this.extractJsonFromAiResponse(mergedRaw);
-            const mp = JSON.parse(mc);
-            if (typeof mp.content === 'string' && mp.content.trim()) sectionContent = mp.content;
-          } catch {
-            if (!parsedOk) {
-              try {
-                const cc = this.extractJsonFromAiResponse(cont);
-                const cp = JSON.parse(cc);
-                if (typeof cp.content === 'string' && cp.content.trim() && !this.isContentTruncated(cp.content)) sectionContent = cp.content;
-              } catch { /* keep existing */ }
+
+          if (isTruncated) {
+            // For truncation, try to merge
+            const mergedRaw = aiResponse + cont;
+            try {
+              const mc = this.extractJsonFromAiResponse(mergedRaw);
+              const mp = JSON.parse(mc);
+              if (typeof mp.content === 'string' && mp.content.trim()) sectionContent = mp.content;
+            } catch {
+              if (!parsedOk) {
+                try {
+                  const cc = this.extractJsonFromAiResponse(cont);
+                  const cp = JSON.parse(cc);
+                  if (typeof cp.content === 'string' && cp.content.trim() && !this.isContentTruncated(cp.content)) sectionContent = cp.content;
+                } catch { /* keep existing */ }
+              }
             }
+          } else {
+            // For too-short content, try to use the new response if it's longer
+            try {
+              const cc = this.extractJsonFromAiResponse(cont);
+              const cp = JSON.parse(cc);
+              if (typeof cp.content === 'string' && cp.content.trim() && cp.content.length > sectionContent.length) {
+                sectionContent = cp.content;
+                this.logger.log(`[distribution] Batch ${i + 1} retry produced longer content: ${sectionContent.length} chars`);
+              }
+            } catch { /* keep existing */ }
           }
         } catch (retryErr) {
           this.logger.warn(`[distribution] Batch ${i + 1} continuation failed: ${(retryErr as Error).message}`);
         }
       }
 
+      // Log section output length for debugging
+      this.logger.log(
+        `[distribution] Batch ${i + 1}/${totalSections} for ${platform}: input=${section.length} chars, output=${sectionContent.length} chars`,
+      );
+
       sectionResults.push(sectionContent.trim());
     }
 
     // Merge all sections with a blank line separator
     const mergedContent = sectionResults.join('\n\n');
+
+    // Log final merged content length
+    this.logger.log(
+      `[distribution] Merged ${totalSections} sections for ${platform}: total output=${mergedContent.length} chars (original body=${totalBodyLength} chars)`,
+    );
 
     return { content: mergedContent, platformTitle, hashtags, seoScore };
   }
@@ -1081,27 +1183,46 @@ Output JSON:
     // Calculate expected minimum length based on original content
     const originalLength = body.length;
     const minExpectedLength = Math.max(
-      Math.floor(originalLength * 0.85), // At least 85% of original length
-      this.isLongFormPlatform(platform) ? 8000 : 2000, // Minimum floor
+      Math.floor(originalLength * 0.9), // At least 90% of original length (increased from 85%)
+      this.isLongFormPlatform(platform) ? 10000 : 2000, // Higher minimum floor for long-form
     );
 
-    const systemPrompt = `You are an expert content strategist who creates authentic, engaging content for different platforms. Your content should feel genuine and native to each platform — never robotic or templated.
+    const systemPrompt = `You are an expert content strategist who creates authentic, engaging, COMPREHENSIVE content for different platforms. Your content should feel genuine and native to each platform — never robotic or templated.
 
-CRITICAL GUIDELINES:
+=== CRITICAL LENGTH REQUIREMENTS ===
+⚠️ MANDATORY: Your output MUST be AT LEAST ${minExpectedLength.toLocaleString()} characters.
+⚠️ The original content is ${originalLength.toLocaleString()} characters — your adapted version should be SIMILAR in length.
+⚠️ DO NOT SUMMARIZE. DO NOT SHORTEN. DO NOT CONDENSE.
+⚠️ Include EVERY section, EVERY example, EVERY detail from the original.
+⚠️ If the original has 5 alternatives, your output MUST have 5 alternatives with full details.
+⚠️ If the original has comparison tables, your output MUST have comparison tables.
+⚠️ If the original has FAQs, your output MUST have FAQs.
+
+=== CONTENT GUIDELINES ===
 1. AUTHENTICITY: Write like a real person sharing valuable insights, not a marketing bot
 2. PLATFORM-NATIVE: Match the exact tone, format, and conventions of ${platform}
 3. VALUE-FIRST: Lead with insights and value, not self-promotion
 4. UNIQUE ANGLE: Don't just summarize — add a fresh perspective or insight
 5. ENGAGEMENT: Include elements that naturally encourage interaction
 6. COMPLETENESS: Always finish every sentence and section — never cut off mid-thought
-7. FULL LENGTH: The adapted content MUST be comprehensive and detailed. DO NOT summarize or shorten the content. The output should be AT LEAST ${minExpectedLength.toLocaleString()} characters (original is ${originalLength.toLocaleString()} chars). Include ALL key points, examples, and details from the original.
+7. SEO OPTIMIZATION: Include proper heading hierarchy (H1 > H2 > H3), keywords in headings, meta-friendly structure
+8. EEAT PRINCIPLES: Demonstrate Experience, Expertise, Authoritativeness, and Trustworthiness
+
+=== STRUCTURE REQUIREMENTS ===
+- Complete introduction that hooks the reader
+- ALL main sections from the original (do not skip any)
+- Detailed coverage of each point with examples
+- Comparison tables where the original has them
+- FAQ section if the original has one
+- Strong conclusion with call-to-action
+- Platform-appropriate formatting (frontmatter for Dev.to, etc.)
 
 Platform-specific rules:
 ${platformRules}
 
 OUTPUT FORMAT (JSON):
 {
-  "content": "The full adapted content ready to publish",
+  "content": "The FULL adapted content ready to publish — must be ${minExpectedLength.toLocaleString()}+ characters",
   "platformTitle": "Platform-optimized title (may differ from original)",
   "hashtags": ["relevant", "hashtags", "for", "platform"],
   "seoScore": 75
@@ -1113,9 +1234,10 @@ The seoScore should be 0-100 based on:
 - Engagement potential
 - Platform best practices adherence`;
 
-    // For large articles, use section-based batching to avoid prompt truncation
-    const BATCH_THRESHOLD = 8000;
-    const BATCH_SIZE = 6000;
+    // For large articles, use section-based batching to ensure full content generation
+    // Lowered threshold to 6000 chars to trigger batching earlier for better results
+    const BATCH_THRESHOLD = 6000;
+    const BATCH_SIZE = 5000;
 
     if (body.length > BATCH_THRESHOLD) {
       const sections = this.splitIntoSections(body, BATCH_SIZE);
@@ -1136,35 +1258,53 @@ The seoScore should be 0-100 based on:
     // Single-call path (body fits within threshold, or batching failed as fallback)
     const userPrompt = `Adapt this article for ${platform}:
 
+=== ARTICLE METADATA ===
 ORIGINAL TITLE: ${title}
 CATEGORY: ${post.content_category || 'General'}
 TAGS: ${tags.join(', ')}
 ORIGINAL LENGTH: ${body.length.toLocaleString()} characters
 MINIMUM REQUIRED OUTPUT: ${minExpectedLength.toLocaleString()} characters
 
-CONTENT:
+=== ORIGINAL CONTENT (ADAPT ALL OF THIS) ===
 ${body}
 
-IMPORTANT INSTRUCTIONS:
-- Create authentic, platform-native content that provides real value
-- DO NOT summarize or shorten — adapt the FULL content for this platform
-- Include ALL sections, examples, and key points from the original
-- The output must be comprehensive and detailed (at least ${minExpectedLength.toLocaleString()} chars)
-- Complete every sentence fully — the response must not end mid-sentence`;
+=== MANDATORY REQUIREMENTS ===
+⚠️ Your output MUST be at least ${minExpectedLength.toLocaleString()} characters.
+⚠️ DO NOT summarize — adapt the FULL content with ALL details.
+⚠️ Include EVERY section from the original:
+   - Introduction
+   - All main points/alternatives/features
+   - Comparison tables (if present)
+   - FAQs (if present)
+   - Conclusion with CTA
+⚠️ Complete every sentence — never end mid-word or mid-thought.
+⚠️ Add platform-specific formatting (frontmatter for Dev.to, etc.)`;
 
-    try {
+    // Helper function to generate content with retry for short output
+    const generateWithLengthValidation = async (
+      attempt: number,
+      previousContent?: string,
+    ): Promise<{ content: string; platformTitle?: string; hashtags: string[]; seoScore: number }> => {
+      const isRetry = attempt > 1;
+      const retryPrompt = isRetry && previousContent
+        ? `${userPrompt}
+
+⚠️ CRITICAL: Your previous attempt was only ${previousContent.length.toLocaleString()} characters — that's TOO SHORT!
+The minimum is ${minExpectedLength.toLocaleString()} characters. You MUST include ALL content from the original.
+DO NOT summarize. Expand each section with full details, examples, and explanations.`
+        : userPrompt;
+
       const { content: aiResponse } = await this.aiGateway.chatCompletionRaw({
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
+          { role: 'user', content: retryPrompt },
         ],
         category: 'seo_generation',
-        temperature: 0.75,
+        temperature: isRetry ? 0.8 : 0.75, // Slightly higher temp on retry for variation
         maxTokens,
-        timeoutMs: 120_000,
+        timeoutMs: 180_000, // Increased timeout for longer content
       });
 
-      // Parse the JSON response
       const cleaned = this.extractJsonFromAiResponse(aiResponse);
       const parsed = JSON.parse(cleaned);
 
@@ -1183,18 +1323,18 @@ IMPORTANT INSTRUCTIONS:
           const { content: continuationResponse } = await this.aiGateway.chatCompletionRaw({
             messages: [
               { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt },
+              { role: 'user', content: retryPrompt },
               { role: 'assistant', content: aiResponse },
               {
                 role: 'user',
                 content:
-                  'The previous response was cut off. Please continue from exactly where it stopped and complete the content, then close the JSON object properly.',
+                  'The previous response was cut off mid-sentence. Please continue from EXACTLY where it stopped (the last word was incomplete) and complete ALL remaining content, then close the JSON object properly. Do not restart — just continue.',
               },
             ],
             category: 'seo_generation',
             temperature: 0.7,
-            maxTokens: Math.round(maxTokens * 0.6),
-            timeoutMs: 60_000,
+            maxTokens: Math.round(maxTokens * 0.75), // More tokens for continuation
+            timeoutMs: 90_000,
           });
 
           // Try to merge: the continuation may be a completion of the truncated JSON
@@ -1233,6 +1373,41 @@ IMPORTANT INSTRUCTIONS:
         hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
         seoScore: typeof parsed.seoScore === 'number' ? parsed.seoScore : 70,
       };
+    };
+
+    try {
+      // First attempt
+      let result = await generateWithLengthValidation(1);
+
+      // Check if content is too short and retry with stronger prompts
+      if (this.isContentTooShort(result.content, minExpectedLength)) {
+        this.logger.warn(
+          `[distribution] Content for ${platform} is too short (${result.content.length} chars vs ${minExpectedLength} min). Retrying with stronger length enforcement.`,
+        );
+        try {
+          const retryResult = await generateWithLengthValidation(2, result.content);
+          // Use retry result if it's longer
+          if (retryResult.content.length > result.content.length) {
+            result = retryResult;
+            this.logger.log(
+              `[distribution] Retry produced longer content for ${platform}: ${result.content.length} chars`,
+            );
+          }
+        } catch (retryError) {
+          this.logger.warn(
+            `[distribution] Length retry failed for ${platform}: ${(retryError as Error).message}; using original short content`,
+          );
+        }
+      }
+
+      // Final length check and warning
+      if (this.isContentTooShort(result.content, minExpectedLength)) {
+        this.logger.warn(
+          `[distribution] Final content for ${platform} is still short: ${result.content.length} chars (expected ${minExpectedLength}+). Consider manual review.`,
+        );
+      }
+
+      return result;
     } catch (error) {
       this.logger.error(
         `Enhanced platform adaptation failed for ${platform}: ${(error as Error).message}`,
