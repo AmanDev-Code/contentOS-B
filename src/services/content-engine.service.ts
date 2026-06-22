@@ -1177,249 +1177,339 @@ Output JSON:
     const body = post.body ?? excerpt;
     const tags = post.tags ?? [];
 
-    // Get platform-specific rules with enhanced authenticity guidelines
     const platformRules = this.getEnhancedPlatformRules(platform);
-
-    // Calculate expected minimum length based on original content
     const originalLength = body.length;
     const minExpectedLength = Math.max(
-      Math.floor(originalLength * 0.9), // At least 90% of original length (increased from 85%)
-      this.isLongFormPlatform(platform) ? 10000 : 2000, // Higher minimum floor for long-form
+      Math.floor(originalLength * 0.85),
+      this.isLongFormPlatform(platform) ? 8000 : 2000,
     );
-
-    const systemPrompt = `You are an expert content strategist who creates authentic, engaging, COMPREHENSIVE content for different platforms. Your content should feel genuine and native to each platform — never robotic or templated.
-
-=== CRITICAL LENGTH REQUIREMENTS ===
-⚠️ MANDATORY: Your output MUST be AT LEAST ${minExpectedLength.toLocaleString()} characters.
-⚠️ The original content is ${originalLength.toLocaleString()} characters — your adapted version should be SIMILAR in length.
-⚠️ DO NOT SUMMARIZE. DO NOT SHORTEN. DO NOT CONDENSE.
-⚠️ Include EVERY section, EVERY example, EVERY detail from the original.
-⚠️ If the original has 5 alternatives, your output MUST have 5 alternatives with full details.
-⚠️ If the original has comparison tables, your output MUST have comparison tables.
-⚠️ If the original has FAQs, your output MUST have FAQs.
-
-=== CONTENT GUIDELINES ===
-1. AUTHENTICITY: Write like a real person sharing valuable insights, not a marketing bot
-2. PLATFORM-NATIVE: Match the exact tone, format, and conventions of ${platform}
-3. VALUE-FIRST: Lead with insights and value, not self-promotion
-4. UNIQUE ANGLE: Don't just summarize — add a fresh perspective or insight
-5. ENGAGEMENT: Include elements that naturally encourage interaction
-6. COMPLETENESS: Always finish every sentence and section — never cut off mid-thought
-7. SEO OPTIMIZATION: Include proper heading hierarchy (H1 > H2 > H3), keywords in headings, meta-friendly structure
-8. EEAT PRINCIPLES: Demonstrate Experience, Expertise, Authoritativeness, and Trustworthiness
-
-=== STRUCTURE REQUIREMENTS ===
-- Complete introduction that hooks the reader
-- ALL main sections from the original (do not skip any)
-- Detailed coverage of each point with examples
-- Comparison tables where the original has them
-- FAQ section if the original has one
-- Strong conclusion with call-to-action
-- Platform-appropriate formatting (frontmatter for Dev.to, etc.)
-
-Platform-specific rules:
-${platformRules}
-
-OUTPUT FORMAT (JSON):
-{
-  "content": "The FULL adapted content ready to publish — must be ${minExpectedLength.toLocaleString()}+ characters",
-  "platformTitle": "Platform-optimized title (may differ from original)",
-  "hashtags": ["relevant", "hashtags", "for", "platform"],
-  "seoScore": 75
-}
-
-The seoScore should be 0-100 based on:
-- Keyword presence and placement
-- Readability and structure
-- Engagement potential
-- Platform best practices adherence`;
-
-    // For large articles, use section-based batching to ensure full content generation
-    // Lowered threshold to 6000 chars to trigger batching earlier for better results
-    const BATCH_THRESHOLD = 6000;
-    const BATCH_SIZE = 5000;
-
-    if (body.length > BATCH_THRESHOLD) {
-      const sections = this.splitIntoSections(body, BATCH_SIZE);
-      if (sections.length > 1) {
-        try {
-          return await this.processBatchedContent(post, platform, sections, systemPrompt);
-        } catch (batchError) {
-          this.logger.error(
-            `Batched processing failed for ${platform}: ${(batchError as Error).message} — falling back to single-call with head`,
-          );
-          // Fall through to single-call below using just the first ~8000 chars as graceful degradation
-        }
-      }
-    }
-
     const maxTokens = this.getMaxTokensForPlatform(platform);
 
-    // Single-call path (body fits within threshold, or batching failed as fallback)
-    const userPrompt = `Adapt this article for ${platform}:
+    // CRITICAL FIX: Generate content as PLAIN MARKDOWN (not JSON) to avoid truncation
+    // JSON output causes AI to truncate content inside the "content" field
+    const contentSystemPrompt = `You are an expert content strategist adapting articles for ${platform}.
 
-=== ARTICLE METADATA ===
+OUTPUT FORMAT: Raw markdown ONLY. Do NOT wrap in JSON. Do NOT use code blocks around the entire output.
+
+CRITICAL REQUIREMENTS:
+1. Output MUST be at least ${minExpectedLength.toLocaleString()} characters
+2. DO NOT summarize - adapt the FULL original content
+3. Include ALL sections, examples, and details from the original
+4. Complete every sentence - never cut off mid-thought
+5. Use ${platform}-specific formatting
+
+Platform rules:
+${platformRules}
+
+SEO Guidelines:
+- Proper heading hierarchy (H2 > H3)
+- Keywords in headings and first paragraph
+- Demonstrate expertise and authority`;
+
+    const contentUserPrompt = `Adapt this article for ${platform}.
+
+OUTPUT: Raw markdown only - NO JSON wrapper, NO code blocks around the output.
+
 ORIGINAL TITLE: ${title}
 CATEGORY: ${post.content_category || 'General'}
-TAGS: ${tags.join(', ')}
-ORIGINAL LENGTH: ${body.length.toLocaleString()} characters
-MINIMUM REQUIRED OUTPUT: ${minExpectedLength.toLocaleString()} characters
+ORIGINAL LENGTH: ${originalLength.toLocaleString()} characters
+MINIMUM OUTPUT: ${minExpectedLength.toLocaleString()} characters
 
-=== ORIGINAL CONTENT (ADAPT ALL OF THIS) ===
+=== ORIGINAL CONTENT (ADAPT ALL OF THIS - DO NOT SKIP ANY SECTION) ===
 ${body}
 
-=== MANDATORY REQUIREMENTS ===
-⚠️ Your output MUST be at least ${minExpectedLength.toLocaleString()} characters.
-⚠️ DO NOT summarize — adapt the FULL content with ALL details.
-⚠️ Include EVERY section from the original:
-   - Introduction
-   - All main points/alternatives/features
-   - Comparison tables (if present)
-   - FAQs (if present)
-   - Conclusion with CTA
-⚠️ Complete every sentence — never end mid-word or mid-thought.
-⚠️ Add platform-specific formatting (frontmatter for Dev.to, etc.)`;
-
-    // Helper function to generate content with retry for short output
-    const generateWithLengthValidation = async (
-      attempt: number,
-      previousContent?: string,
-    ): Promise<{ content: string; platformTitle?: string; hashtags: string[]; seoScore: number }> => {
-      const isRetry = attempt > 1;
-      const retryPrompt = isRetry && previousContent
-        ? `${userPrompt}
-
-⚠️ CRITICAL: Your previous attempt was only ${previousContent.length.toLocaleString()} characters — that's TOO SHORT!
-The minimum is ${minExpectedLength.toLocaleString()} characters. You MUST include ALL content from the original.
-DO NOT summarize. Expand each section with full details, examples, and explanations.`
-        : userPrompt;
-
-      const { content: aiResponse } = await this.aiGateway.chatCompletionRaw({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: retryPrompt },
-        ],
-        category: 'seo_generation',
-        temperature: isRetry ? 0.8 : 0.75, // Slightly higher temp on retry for variation
-        maxTokens,
-        timeoutMs: 180_000, // Increased timeout for longer content
-      });
-
-      const cleaned = this.extractJsonFromAiResponse(aiResponse);
-      const parsed = JSON.parse(cleaned);
-
-      if (typeof parsed.content !== 'string' || !parsed.content.trim()) {
-        throw new Error(`AI response parsed but "content" field is missing or empty for ${platform}`);
-      }
-
-      let generatedContent: string = parsed.content;
-
-      // Detect truncation and retry once with a continuation prompt
-      if (this.isContentTruncated(generatedContent)) {
-        this.logger.warn(
-          `Platform content for ${platform} appears truncated (ends: "…${generatedContent.slice(-40)}"). Retrying with continuation.`,
-        );
-        try {
-          const { content: continuationResponse } = await this.aiGateway.chatCompletionRaw({
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: retryPrompt },
-              { role: 'assistant', content: aiResponse },
-              {
-                role: 'user',
-                content:
-                  'The previous response was cut off mid-sentence. Please continue from EXACTLY where it stopped (the last word was incomplete) and complete ALL remaining content, then close the JSON object properly. Do not restart — just continue.',
-              },
-            ],
-            category: 'seo_generation',
-            temperature: 0.7,
-            maxTokens: Math.round(maxTokens * 0.75), // More tokens for continuation
-            timeoutMs: 90_000,
-          });
-
-          // Try to merge: the continuation may be a completion of the truncated JSON
-          // or a standalone full response — handle both
-          const mergedRaw = aiResponse + continuationResponse;
-          try {
-            const mergedCleaned = this.extractJsonFromAiResponse(mergedRaw);
-            const mergedParsed = JSON.parse(mergedCleaned);
-            if (typeof mergedParsed.content === 'string' && mergedParsed.content.trim()) {
-              generatedContent = mergedParsed.content;
-            }
-          } catch {
-            // Merged JSON didn't parse — try the continuation alone
-            try {
-              const contCleaned = this.extractJsonFromAiResponse(continuationResponse);
-              const contParsed = JSON.parse(contCleaned);
-              if (typeof contParsed.content === 'string' && contParsed.content.trim() && !this.isContentTruncated(contParsed.content)) {
-                generatedContent = contParsed.content;
-              }
-            } catch {
-              this.logger.warn(
-                `Continuation parse failed for ${platform}; using original truncated content`,
-              );
-            }
-          }
-        } catch (retryError) {
-          this.logger.warn(
-            `Truncation retry failed for ${platform}: ${(retryError as Error).message}`,
-          );
-        }
-      }
-
-      return {
-        content: generatedContent,
-        platformTitle: parsed.platformTitle,
-        hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
-        seoScore: typeof parsed.seoScore === 'number' ? parsed.seoScore : 70,
-      };
-    };
+=== REQUIREMENTS ===
+- Output the FULL adapted article as raw markdown
+- Include ALL sections from the original (intro, all main points, tables, FAQs, conclusion)
+- Add ${platform}-specific formatting (frontmatter for Dev.to, etc.)
+- Minimum ${minExpectedLength.toLocaleString()} characters - DO NOT summarize
+- Complete every sentence - never end mid-word`;
 
     try {
-      // First attempt
-      let result = await generateWithLengthValidation(1);
+      // STEP 1: Generate content as plain markdown (not JSON)
+      let generatedContent = '';
 
-      // Check if content is too short and retry with stronger prompts
-      if (this.isContentTooShort(result.content, minExpectedLength)) {
-        this.logger.warn(
-          `[distribution] Content for ${platform} is too short (${result.content.length} chars vs ${minExpectedLength} min). Retrying with stronger length enforcement.`,
+      if (body.length > 8000) {
+        // For long articles, generate iteratively by sections
+        generatedContent = await this.generateContentIteratively(
+          contentSystemPrompt,
+          body,
+          title,
+          platform,
+          post.content_category,
+          minExpectedLength,
+          maxTokens,
         );
-        try {
-          const retryResult = await generateWithLengthValidation(2, result.content);
-          // Use retry result if it's longer
-          if (retryResult.content.length > result.content.length) {
-            result = retryResult;
-            this.logger.log(
-              `[distribution] Retry produced longer content for ${platform}: ${result.content.length} chars`,
-            );
-          }
-        } catch (retryError) {
-          this.logger.warn(
-            `[distribution] Length retry failed for ${platform}: ${(retryError as Error).message}; using original short content`,
+      } else {
+        // Single-pass for shorter articles
+        const { content: rawContent } = await this.aiGateway.chatCompletionRaw({
+          messages: [
+            { role: 'system', content: contentSystemPrompt },
+            { role: 'user', content: contentUserPrompt },
+          ],
+          category: 'seo_generation',
+          temperature: 0.7,
+          maxTokens,
+          timeoutMs: 180_000,
+        });
+
+        generatedContent = this.cleanMarkdownOutput(rawContent);
+
+        // Continue if truncated or too short
+        if (this.isContentTruncated(generatedContent) || generatedContent.length < minExpectedLength * 0.6) {
+          this.logger.warn(`[${platform}] Content incomplete (${generatedContent.length} chars). Continuing...`);
+          generatedContent = await this.continueMarkdownGeneration(
+            contentSystemPrompt,
+            generatedContent,
+            body,
+            minExpectedLength,
+            maxTokens,
           );
         }
       }
 
-      // Final length check and warning
-      if (this.isContentTooShort(result.content, minExpectedLength)) {
-        this.logger.warn(
-          `[distribution] Final content for ${platform} is still short: ${result.content.length} chars (expected ${minExpectedLength}+). Consider manual review.`,
-        );
-      }
-
-      return result;
-    } catch (error) {
-      this.logger.error(
-        `Enhanced platform adaptation failed for ${platform}: ${(error as Error).message}`,
+      // STEP 2: Generate metadata separately (quick call, small output)
+      const { platformTitle, hashtags, seoScore } = await this.generateContentMetadata(
+        title,
+        generatedContent,
+        tags,
+        platform,
       );
-      // Fallback to basic adaptation
-      const fallbackContent = this.fallbackAdaptContent(post, platform);
+
+      this.logger.log(`[${platform}] Generated ${generatedContent.length} chars (target: ${minExpectedLength})`);
+
+      return { content: generatedContent, platformTitle, hashtags, seoScore };
+    } catch (error) {
+      this.logger.error(`[${platform}] Adaptation failed: ${(error as Error).message}`);
       return {
-        content: fallbackContent,
+        content: this.fallbackAdaptContent(post, platform),
         hashtags: tags.slice(0, 5).map((t) => `#${t.replace(/\s+/g, '')}`),
         seoScore: 50,
       };
     }
+  }
+
+  /**
+   * Clean markdown output - remove JSON wrappers if AI added them despite instructions
+   */
+  private cleanMarkdownOutput(raw: string): string {
+    let content = raw.trim();
+
+    // Remove markdown code block wrapper
+    if (content.startsWith('```markdown') || content.startsWith('```md')) {
+      content = content.replace(/^```(?:markdown|md)\n?/, '').replace(/\n?```$/, '');
+    } else if (content.startsWith('```') && !content.startsWith('```json')) {
+      content = content.replace(/^```\n?/, '').replace(/\n?```$/, '');
+    }
+
+    // If AI wrapped in JSON despite instructions, extract content field
+    if (content.startsWith('{') && content.includes('"content"')) {
+      try {
+        const cleaned = this.extractJsonFromAiResponse(content);
+        const parsed = JSON.parse(cleaned);
+        if (parsed.content && typeof parsed.content === 'string') {
+          content = parsed.content;
+        }
+      } catch {
+        // Not valid JSON, use as-is
+      }
+    }
+
+    return content.trim();
+  }
+
+  /**
+   * Generate long content iteratively by processing sections
+   */
+  private async generateContentIteratively(
+    systemPrompt: string,
+    originalBody: string,
+    title: string,
+    platform: string,
+    category: string | null | undefined,
+    minExpectedLength: number,
+    maxTokens: number,
+  ): Promise<string> {
+    const sections = this.splitIntoSections(originalBody, 4000);
+    const totalSections = sections.length;
+
+    this.logger.log(`[${platform}] Generating iteratively: ${totalSections} sections`);
+
+    const results: string[] = [];
+
+    for (let i = 0; i < totalSections; i++) {
+      const section = sections[i];
+      const isFirst = i === 0;
+      const isLast = i === totalSections - 1;
+
+      const sectionPrompt = isFirst
+        ? `Adapt this article for ${platform}. Section 1 of ${totalSections}.
+
+OUTPUT: Raw markdown only (NO JSON).
+
+TITLE: ${title}
+CATEGORY: ${category || 'General'}
+
+SECTION TO ADAPT:
+${section}
+
+Write the introduction and this section. ${isLast ? 'Include conclusion.' : 'Do NOT write conclusion - more sections follow.'}`
+        : `Continue adapting for ${platform}. Section ${i + 1} of ${totalSections}.
+
+PREVIOUS CONTENT ENDED WITH:
+...${results[results.length - 1]?.slice(-300) || ''}
+
+NEXT SECTION TO ADAPT:
+${section}
+
+Continue seamlessly. ${isLast ? 'This is the FINAL section - include conclusion with CTA.' : 'Do NOT write conclusion yet.'}`;
+
+      const { content: sectionContent } = await this.aiGateway.chatCompletionRaw({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: sectionPrompt },
+        ],
+        category: 'seo_generation',
+        temperature: 0.7,
+        maxTokens: Math.min(maxTokens, 8000),
+        timeoutMs: 120_000,
+      });
+
+      let cleaned = this.cleanMarkdownOutput(sectionContent);
+
+      // Handle truncation within section
+      if (this.isContentTruncated(cleaned)) {
+        this.logger.warn(`[${platform}] Section ${i + 1} truncated, continuing...`);
+        const { content: cont } = await this.aiGateway.chatCompletionRaw({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: sectionPrompt },
+            { role: 'assistant', content: sectionContent },
+            { role: 'user', content: 'Continue from exactly where you stopped. Complete this section.' },
+          ],
+          category: 'seo_generation',
+          temperature: 0.7,
+          maxTokens: 4000,
+          timeoutMs: 60_000,
+        });
+        cleaned = cleaned + '\n\n' + this.cleanMarkdownOutput(cont);
+      }
+
+      results.push(cleaned);
+      this.logger.log(`[${platform}] Section ${i + 1}/${totalSections}: ${cleaned.length} chars`);
+    }
+
+    const merged = results.join('\n\n');
+    this.logger.log(`[${platform}] Total: ${merged.length} chars`);
+    return merged;
+  }
+
+  /**
+   * Continue markdown generation if initial output was truncated or too short
+   */
+  private async continueMarkdownGeneration(
+    systemPrompt: string,
+    currentContent: string,
+    originalBody: string,
+    minExpectedLength: number,
+    maxTokens: number,
+  ): Promise<string> {
+    let content = currentContent;
+    let attempts = 0;
+
+    while ((this.isContentTruncated(content) || content.length < minExpectedLength * 0.6) && attempts < 3) {
+      attempts++;
+      this.logger.log(`[continuation] Attempt ${attempts}: ${content.length} chars, target ${minExpectedLength}`);
+
+      const headings = this.extractHeadings(originalBody);
+      const continuationPrompt = `Your previous output was ${content.length} characters - need at least ${minExpectedLength}.
+
+Original article sections that may be missing:
+${headings.join('\n')}
+
+Continue from where you left off:
+...${content.slice(-200)}
+
+OUTPUT: Raw markdown continuation (NO JSON). Complete all remaining sections.`;
+
+      try {
+        const { content: cont } = await this.aiGateway.chatCompletionRaw({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'assistant', content: content },
+            { role: 'user', content: continuationPrompt },
+          ],
+          category: 'seo_generation',
+          temperature: 0.7,
+          maxTokens: Math.min(maxTokens, 8000),
+          timeoutMs: 120_000,
+        });
+
+        content = content + '\n\n' + this.cleanMarkdownOutput(cont);
+      } catch (err) {
+        this.logger.warn(`Continuation ${attempts} failed: ${(err as Error).message}`);
+        break;
+      }
+    }
+
+    return content;
+  }
+
+  /**
+   * Generate metadata (title, hashtags, score) separately from content
+   */
+  private async generateContentMetadata(
+    originalTitle: string,
+    content: string,
+    tags: string[],
+    platform: string,
+  ): Promise<{ platformTitle?: string; hashtags: string[]; seoScore: number }> {
+    const defaultHashtags = tags.slice(0, 5).map(t => `#${t.replace(/\s+/g, '')}`);
+
+    try {
+      const { content: metaResponse } = await this.aiGateway.chatCompletionRaw({
+        messages: [
+          { role: 'system', content: 'Generate metadata as JSON only. Be concise.' },
+          {
+            role: 'user',
+            content: `Generate metadata for this ${platform} article:
+
+TITLE: ${originalTitle}
+CONTENT PREVIEW: ${content.slice(0, 500)}...
+TAGS: ${tags.join(', ')}
+
+Output JSON:
+{"platformTitle": "optimized title", "hashtags": ["tag1", "tag2"], "seoScore": 75}`,
+          },
+        ],
+        category: 'seo_generation',
+        temperature: 0.3,
+        maxTokens: 300,
+        timeoutMs: 20_000,
+      });
+
+      const cleaned = this.extractJsonFromAiResponse(metaResponse);
+      const parsed = JSON.parse(cleaned);
+
+      return {
+        platformTitle: parsed.platformTitle || undefined,
+        hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : defaultHashtags,
+        seoScore: typeof parsed.seoScore === 'number' ? parsed.seoScore : 70,
+      };
+    } catch {
+      return { platformTitle: undefined, hashtags: defaultHashtags, seoScore: 70 };
+    }
+  }
+
+  /**
+   * Extract headings from markdown content
+   */
+  private extractHeadings(content: string): string[] {
+    const headings: string[] = [];
+    for (const line of content.split('\n')) {
+      if (/^#{1,3}\s+/.test(line)) headings.push(line.trim());
+    }
+    return headings;
   }
 
   private getEnhancedPlatformRules(platform: string): string {
