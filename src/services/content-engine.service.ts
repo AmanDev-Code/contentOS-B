@@ -1422,6 +1422,7 @@ ${body}
       // Calculate minimum output for this section proportionally
       const sectionMinOutput = Math.ceil((section.length / originalBody.length) * minExpectedLength * 1.1);
 
+      const isDevTo = platform === 'devto';
       const sectionPrompt = isFirst
         ? `Adapt this article for ${platform}. Section 1 of ${totalSections}.
 
@@ -1438,7 +1439,9 @@ Write the introduction and this section COMPLETELY. ${isLast ? 'Include conclusi
         : `Continue adapting for ${platform}. Section ${i + 1} of ${totalSections}.
 
 OUTPUT: Raw markdown only (NO JSON).
-MINIMUM OUTPUT: ${sectionMinOutput.toLocaleString()} characters for this section.
+MINIMUM OUTPUT: ${sectionMinOutput.toLocaleString()} characters for this section.${isDevTo ? `
+
+CRITICAL: Do NOT add any YAML frontmatter (no --- blocks). The frontmatter was already written in section 1. Start directly with markdown content.` : ''}
 
 PREVIOUS CONTENT ENDED WITH:
 ...${results[results.length - 1]?.slice(-300) || ''}
@@ -1553,9 +1556,15 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
       }
     }
 
-    const merged = results.join('\n\n');
-    this.logger.log(`[${platform}] Total merged: ${merged.length} chars (target: ${minExpectedLength})`);
-    
+    const rawMerged = results.join('\n\n');
+    this.logger.log(`[${platform}] Total merged: ${rawMerged.length} chars (target: ${minExpectedLength})`);
+
+    // For Dev.to: strip any duplicate YAML frontmatter blocks introduced by iterative generation
+    const merged = platform === 'devto' ? this.sanitizeDevToFrontmatter(rawMerged) : rawMerged;
+    if (platform === 'devto' && merged !== rawMerged) {
+      this.logger.log(`[devto] Sanitized frontmatter — content reduced from ${rawMerged.length} to ${merged.length} chars`);
+    }
+
     // Final check - if still too short, try one more continuation
     if (merged.length < minExpectedLength * 0.7) {
       this.logger.warn(`[${platform}] Final output too short (${merged.length} < ${minExpectedLength * 0.7}). Attempting final continuation...`);
@@ -1574,6 +1583,67 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
     }
     
     return merged;
+  }
+
+  /**
+   * Strip duplicate YAML frontmatter blocks from Dev.to content.
+   *
+   * Iterative section generation can produce multiple `---...---` blocks (one per section).
+   * Dev.to only accepts a single frontmatter block at the very top.
+   * This method:
+   *  1. Extracts every `---...---` block from the content.
+   *  2. Keeps only the first one (or re-builds a clean one from it).
+   *  3. Sanitizes the tags field — removes hyphens and ensures alphanumeric-only tokens.
+   *  4. Returns: clean frontmatter + remaining body with all other frontmatter stripped.
+   */
+  private sanitizeDevToFrontmatter(content: string): string {
+    // Match all YAML frontmatter blocks (--- ... ---) anywhere in the content
+    const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---/gm;
+    const allMatches: { full: string; body: string; index: number }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = frontmatterRegex.exec(content)) !== null) {
+      allMatches.push({ full: m[0], body: m[1], index: m.index });
+    }
+
+    if (allMatches.length === 0) {
+      // No frontmatter at all — nothing to sanitize
+      return content;
+    }
+
+    // Use the first frontmatter block as the canonical one
+    const firstBlock = allMatches[0];
+
+    // Sanitize the tags line: replace hyphens inside tag tokens, keep alphanumeric
+    const sanitizedBody = firstBlock.body.replace(
+      /^(tags\s*:\s*)(.+)$/m,
+      (_line, prefix: string, tagsPart: string) => {
+        // Support both YAML array style [tag1, tag2] and comma-separated string
+        const isArrayStyle = tagsPart.trim().startsWith('[');
+        const rawTags = isArrayStyle
+          ? tagsPart.replace(/[\[\]]/g, '').split(',')
+          : tagsPart.split(',');
+        const cleanTags = rawTags
+          .map((t) => t.trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase())
+          .filter((t) => t.length > 0)
+          .slice(0, 4); // Dev.to max 4 tags
+        return `${prefix}${cleanTags.join(', ')}`;
+      },
+    );
+
+    const cleanFrontmatter = `---\n${sanitizedBody}\n---`;
+
+    // Remove ALL frontmatter blocks from the body, then prepend the single clean one
+    let body = content;
+    // Remove blocks from last to first so indices stay valid
+    for (let i = allMatches.length - 1; i >= 0; i--) {
+      const block = allMatches[i];
+      body = body.slice(0, block.index) + body.slice(block.index + block.full.length);
+    }
+
+    // Trim any leading whitespace/newlines that were between/around the blocks
+    body = body.replace(/^\s+/, '');
+
+    return `${cleanFrontmatter}\n\n${body}`;
   }
 
   /**
@@ -1769,7 +1839,9 @@ Output JSON:
 - MINIMUM LENGTH: 2000+ words — comprehensive and detailed`,
 
       devto: `Dev.to Article:
-- Start with YAML front matter: title, published: false, tags (max 4)
+- Start with EXACTLY ONE YAML front matter block at the very top: title, published: false, tags (max 4, alphanumeric only)
+- Tags MUST be alphanumeric only — NO hyphens, NO underscores, NO spaces (e.g. "socialmedia" not "social-media", "smallbusiness" not "small-business")
+- Do NOT add any YAML frontmatter (--- blocks) anywhere else in the article — only ONE at the very beginning
 - Developer-community focused — practical and helpful
 - Include code examples with syntax highlighting
 - Add a "Prerequisites" section if technical
@@ -1784,7 +1856,20 @@ CRITICAL URL RESTRICTIONS (Dev.to will reject posts with these):
 - DO NOT use placeholder/dummy URLs (example.com, yoursite.com, placeholder.com, test.com)
 - DO NOT invent fake URLs — only include real, verifiable links to the actual product/service being discussed
 - If you need to reference external content, describe it in text instead of embedding
-- All URLs must be real and functional — no made-up domains`,
+- All URLs must be real and functional — no made-up domains
+
+CRITICAL FRONTMATTER RULES:
+- ONE frontmatter block only — at the very top, nowhere else
+- Tags: alphanumeric only, lowercase, no hyphens (socialmedia not social-media)
+- Maximum 4 tags
+- Example of CORRECT output format:
+---
+title: Your Article Title Here
+published: false
+tags: hootsuitealternative, socialmedia, tools, smallbusiness
+---
+
+[rest of article content with NO more --- blocks]`,
 
       hashnode: `Hashnode Technical Blog:
 - Deep technical depth with clear explanations
