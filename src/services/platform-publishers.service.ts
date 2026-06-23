@@ -334,7 +334,47 @@ export class PlatformPublishersService {
     username: string,
   ): Promise<string | null> {
     try {
-      const query = `
+      // First try: use the "me" query to get user's own publications
+      const meQuery = `
+        query Me {
+          me {
+            publications(first: 10) {
+              edges {
+                node {
+                  id
+                  title
+                  url
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const meResponse = await axios.post(
+        'https://gql.hashnode.com',
+        { query: meQuery },
+        {
+          headers: {
+            Authorization: token,
+            'Content-Type': 'application/json',
+          },
+          timeout: REQUEST_TIMEOUT_MS,
+        },
+      );
+
+      const publications =
+        meResponse.data?.data?.me?.publications?.edges ?? [];
+      if (publications.length > 0) {
+        const pubId = publications[0].node.id;
+        this.logger.log(
+          `Hashnode: Resolved publication ID ${pubId} via "me" query (${publications[0].node.title})`,
+        );
+        return pubId;
+      }
+
+      // Fallback: try host-based lookup with .hashnode.dev suffix
+      const hostQuery = `
         query GetPublication($host: String!) {
           publication(host: $host) {
             id
@@ -342,14 +382,13 @@ export class PlatformPublishersService {
         }
       `;
 
-      // Try with .hashnode.dev suffix first (most common)
       const host = username.includes('.')
         ? username
         : `${username}.hashnode.dev`;
 
       const response = await axios.post(
         'https://gql.hashnode.com',
-        { query, variables: { host } },
+        { query: hostQuery, variables: { host } },
         {
           headers: {
             Authorization: token,
