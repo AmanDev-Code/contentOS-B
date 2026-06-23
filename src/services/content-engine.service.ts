@@ -1646,7 +1646,7 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
     const firstBlock = allMatches[0];
 
     // Sanitize the tags line: replace hyphens inside tag tokens, keep alphanumeric
-    const sanitizedBody = firstBlock.body.replace(
+    let sanitizedBody = firstBlock.body.replace(
       /^(tags\s*:\s*)(.+)$/m,
       (_line, prefix: string, tagsPart: string) => {
         // Support both YAML array style [tag1, tag2] and comma-separated string
@@ -1661,6 +1661,13 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
         return `${prefix}${cleanTags.join(', ')}`;
       },
     );
+
+    // Force published: true — AI often generates published: false which overrides the API param
+    if (/^published\s*:/m.test(sanitizedBody)) {
+      sanitizedBody = sanitizedBody.replace(/^published\s*:.*$/m, 'published: true');
+    } else {
+      sanitizedBody = `published: true\n${sanitizedBody}`;
+    }
 
     const cleanFrontmatter = `---\n${sanitizedBody}\n---`;
 

@@ -163,9 +163,22 @@ export class PlatformPublishersService {
     try {
       this.logger.log(`Publishing to Dev.to: "${title}"`);
 
+      // Ensure any frontmatter in body_markdown has published: true
+      // Dev.to frontmatter overrides API params, so we must fix it in the content
+      let sanitizedContent = content;
+      const fmMatch = sanitizedContent.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      if (fmMatch) {
+        const fmBody = fmMatch[1];
+        if (/^published\s*:\s*false/m.test(fmBody)) {
+          const fixedFm = fmBody.replace(/^published\s*:.*$/m, 'published: true');
+          sanitizedContent = sanitizedContent.replace(fmMatch[0], `---\n${fixedFm}\n---`);
+          this.logger.log('Dev.to: Fixed published: false in frontmatter');
+        }
+      }
+
       const articlePayload: Record<string, any> = {
         title,
-        body_markdown: content,
+        body_markdown: sanitizedContent,
         published: true,
         canonical_url: canonicalUrl,
         tags: tags
@@ -203,7 +216,7 @@ export class PlatformPublishersService {
   }
 
   async publishToHashnode(
-    credentials: { token: string; publication_id: string },
+    credentials: { token: string; publication_id?: string; username?: string },
     content: string,
     title: string,
     canonicalUrl: string,
@@ -213,11 +226,40 @@ export class PlatformPublishersService {
     try {
       this.logger.log(`Publishing to Hashnode: "${title}"`);
 
+      // Resolve publication_id: use stored value or look it up from username
+      let publicationId: string | undefined = credentials.publication_id;
+      if (!publicationId && credentials.username) {
+        publicationId =
+          (await this.resolveHashnodePublicationId(
+            credentials.token,
+            credentials.username,
+          )) ?? undefined;
+        if (!publicationId) {
+          return {
+            success: false,
+            error: `Hashnode: Could not resolve publication ID for username "${credentials.username}". Please add publication_id to your credentials.`,
+          };
+        }
+        this.logger.log(
+          `Hashnode: Resolved publication ID ${publicationId} from username "${credentials.username}"`,
+        );
+      }
+
+      if (!publicationId) {
+        return {
+          success: false,
+          error:
+            'Hashnode: Missing publication_id in credentials. Please reconnect with your publication ID.',
+        };
+      }
+
       const mutation = `
         mutation PublishPost($input: PublishPostInput!) {
           publishPost(input: $input) {
             post {
               url
+              id
+              slug
             }
           }
         }
@@ -226,13 +268,17 @@ export class PlatformPublishersService {
       const input: Record<string, any> = {
         title,
         contentMarkdown: content,
-        publicationId: credentials.publication_id,
+        publicationId,
         tags: tags.slice(0, 5).map((t) => ({
           slug: t.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
           name: t,
         })),
-        originalArticleURL: canonicalUrl,
       };
+
+      // Only include originalArticleURL if it's a valid external URL
+      if (canonicalUrl && canonicalUrl.startsWith('http')) {
+        input.originalArticleURL = canonicalUrl;
+      }
 
       // Add cover image if provided (Hashnode uses coverImageOptions)
       if (coverImageUrl) {
@@ -262,13 +308,64 @@ export class PlatformPublishersService {
         return { success: false, error: `Hashnode: ${gqlError}` };
       }
 
-      const url = response.data?.data?.publishPost?.post?.url;
+      const post = response.data?.data?.publishPost?.post;
+      const url = post?.url;
+      if (!url && post?.slug && credentials.username) {
+        // Construct URL from slug if API doesn't return it
+        const constructedUrl = `https://${credentials.username}.hashnode.dev/${post.slug}`;
+        this.logger.log(`Hashnode publish success (constructed URL): ${constructedUrl}`);
+        return { success: true, url: constructedUrl };
+      }
       this.logger.log(`Hashnode publish success: ${url}`);
       return { success: true, url };
     } catch (err) {
       const message = this.extractErrorMessage(err, 'Hashnode');
       this.logger.error(`Hashnode publish failed: ${message}`);
       return { success: false, error: message };
+    }
+  }
+
+  /**
+   * Resolve a Hashnode publication ID from a username/host.
+   * Uses the Hashnode GraphQL API to look up the publication.
+   */
+  private async resolveHashnodePublicationId(
+    token: string,
+    username: string,
+  ): Promise<string | null> {
+    try {
+      const query = `
+        query GetPublication($host: String!) {
+          publication(host: $host) {
+            id
+          }
+        }
+      `;
+
+      // Try with .hashnode.dev suffix first (most common)
+      const host = username.includes('.')
+        ? username
+        : `${username}.hashnode.dev`;
+
+      const response = await axios.post(
+        'https://gql.hashnode.com',
+        { query, variables: { host } },
+        {
+          headers: {
+            Authorization: token,
+            'Content-Type': 'application/json',
+          },
+          timeout: REQUEST_TIMEOUT_MS,
+        },
+      );
+
+      const pubId = response.data?.data?.publication?.id;
+      return pubId || null;
+    } catch (err) {
+      this.logger.warn(
+        `Failed to resolve Hashnode publication ID for "${username}": ${(err as Error).message}`,
+      );
+      return null;
     }
   }
 
