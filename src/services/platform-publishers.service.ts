@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosError } from 'axios';
+import { ScraperCredentialsService } from './scrapers/scraper-credentials.service';
 
 export interface PublishResult {
   success: boolean;
@@ -52,6 +53,22 @@ const REQUEST_TIMEOUT_MS = 30_000;
 @Injectable()
 export class PlatformPublishersService {
   private readonly logger = new Logger(PlatformPublishersService.name);
+
+  constructor(
+    private readonly scraperCredentials: ScraperCredentialsService,
+  ) {}
+
+  private async getLinkedInVersion(): Promise<string> {
+    try {
+      const effective = await this.scraperCredentials.getEffective();
+      if (effective.linkedinApiVersion?.trim()) {
+        return effective.linkedinApiVersion.trim();
+      }
+    } catch {
+      // Fall through to env/default
+    }
+    return process.env.LINKEDIN_API_VERSION || '202604';
+  }
 
   isManualOnly(platform: string): boolean {
     return MANUAL_ONLY_PLATFORMS.has(platform);
@@ -499,7 +516,7 @@ export class PlatformPublishersService {
         {
           headers: {
             Authorization: `Bearer ${credentials.access_token}`,
-            'LinkedIn-Version': '202401',
+            'LinkedIn-Version': await this.getLinkedInVersion(),
             'X-Restli-Protocol-Version': '2.0.0',
             'Content-Type': 'application/json',
           },
@@ -570,7 +587,7 @@ export class PlatformPublishersService {
         {
           headers: {
             Authorization: `Bearer ${credentials.access_token}`,
-            'LinkedIn-Version': '202401',
+            'LinkedIn-Version': await this.getLinkedInVersion(),
             'X-Restli-Protocol-Version': '2.0.0',
             'Content-Type': 'application/json',
           },
@@ -615,7 +632,7 @@ export class PlatformPublishersService {
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202401',
+            'LinkedIn-Version': await this.getLinkedInVersion(),
             'X-Restli-Protocol-Version': '2.0.0',
             'Content-Type': 'application/json',
           },
