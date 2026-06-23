@@ -169,8 +169,9 @@ export class PlatformPublishersService {
         published: true,
         canonical_url: canonicalUrl,
         tags: tags
-          .slice(0, 4)
-          .map((t) => t.toLowerCase().replace(/[^a-z0-9]/g, '')),
+          .map((t) => t.toLowerCase().replace(/[^a-z0-9]/g, ''))
+          .filter((t) => t.length > 0)
+          .slice(0, 4),
       };
 
       // Add cover image if provided (Dev.to uses main_image field)
