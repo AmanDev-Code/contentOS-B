@@ -1267,7 +1267,8 @@ URL RESTRICTIONS (CRITICAL - violations cause publish failures):
 - DO NOT use placeholder/dummy URLs (example.com, yoursite.com, placeholder.com, test.com, foo.com, bar.com)
 - DO NOT invent fake URLs — only include real, verifiable links
 - DO NOT use platform-specific embed tags ({% youtube %}, {% embed %}, etc.) unless the platform explicitly supports them
-- If referencing external content, describe it in text rather than embedding`;
+- If referencing external content, describe it in text rather than embedding
+- INTERNAL LINKS: Always use full absolute URLs for Trndinn links (e.g., https://trndinn.com/features, https://trndinn.com/pricing, https://trndinn.com/auth) — NEVER use relative paths like /features or /pricing as they won't work on external platforms`;
 
     const contentUserPrompt = `Adapt this article for ${platform}.
 
@@ -1341,6 +1342,9 @@ ${body}
 
       this.logger.log(`[${platform}] Generated ${generatedContent.length} chars (target: ${minExpectedLength})`);
 
+      // Post-process: convert any relative URLs to absolute
+      generatedContent = this.convertRelativeUrlsToAbsolute(generatedContent);
+
       return { content: generatedContent, platformTitle, hashtags, seoScore };
     } catch (error) {
       this.logger.error(`[${platform}] Adaptation failed: ${(error as Error).message}`);
@@ -1349,7 +1353,7 @@ ${body}
         platform
       );
       return {
-        content: this.fallbackAdaptContent(post, platform),
+        content: this.convertRelativeUrlsToAbsolute(this.fallbackAdaptContent(post, platform)),
         hashtags: fallbackHashtags,
         seoScore: 50,
       };
@@ -1383,6 +1387,34 @@ ${body}
     }
 
     return content.trim();
+  }
+
+  /**
+   * Convert relative URLs (e.g., /auth, /pricing) to absolute URLs with trndinn.com domain.
+   * This ensures links work as proper backlinks when published on external platforms.
+   */
+  private convertRelativeUrlsToAbsolute(content: string): string {
+    const baseUrl = 'https://trndinn.com';
+
+    // Match markdown links with relative paths: [text](/path)
+    content = content.replace(
+      /\[([^\]]*)\]\(\/([\w\-\/\?\#\&\=\.]+)\)/g,
+      (_, text, path) => `[${text}](${baseUrl}/${path})`,
+    );
+
+    // Match bare href-style relative URLs in any remaining HTML: href="/path"
+    content = content.replace(
+      /href=["']\/([\w\-\/\?\#\&\=\.]+)["']/g,
+      (_, path) => `href="${baseUrl}/${path}"`,
+    );
+
+    // Match plain relative URLs that appear after parentheses or standalone: (e.g., (/features))
+    content = content.replace(
+      /\(\/([\w\-\/]+)\)/g,
+      (_, path) => `(${baseUrl}/${path})`,
+    );
+
+    return content;
   }
 
   /**
@@ -1857,6 +1889,7 @@ CRITICAL URL RESTRICTIONS (Dev.to will reject posts with these):
 - DO NOT invent fake URLs — only include real, verifiable links to the actual product/service being discussed
 - If you need to reference external content, describe it in text instead of embedding
 - All URLs must be real and functional — no made-up domains
+- INTERNAL LINKS MUST USE FULL URLs: Use https://trndinn.com/features NOT /features, https://trndinn.com/pricing NOT /pricing, https://trndinn.com/auth NOT /auth — relative paths do NOT work on Dev.to
 
 CRITICAL FRONTMATTER RULES:
 - ONE frontmatter block only — at the very top, nowhere else
