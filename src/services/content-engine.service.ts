@@ -1854,7 +1854,14 @@ Output JSON:
 - Include personal experience or case study angle
 - Add 3-5 relevant hashtags at the end
 - End with a thought-provoking question
-- Structure: Hook → Context → Insights → Takeaways → CTA`,
+- Structure: Hook → Context → Insights → Takeaways → CTA
+- FORMATTING: LinkedIn articles do NOT support Markdown. Use PLAIN TEXT formatting:
+  • Use ALL CAPS or line breaks for emphasis instead of ** or #
+  • Write headings as standalone lines in UPPERCASE or Title Case (no # prefix)
+  • Use • or — for bullet points (not - or *)
+  • Write links as plain URLs or "Link text: https://url" (not [text](url))
+  • Use blank lines between paragraphs for readability
+  • No code blocks, no markdown tables — use plain text tables with spacing if needed`,
 
       linkedin_post: `LinkedIn Post (Short-form):
 - MAX 1300 characters total
@@ -2081,7 +2088,7 @@ Format: Submission title (factual) + brief context comment`,
 
     switch (platform) {
       case 'linkedin_article':
-        return `# ${title}\n\n${body}\n\n---\n${hashtags}`;
+        return `${title}\n\n${body.replace(/^#{1,3}\s+/gm, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1: $2')}\n\n---\n${hashtags}`;
       case 'linkedin_post':
         return `${title}\n\n${excerpt.slice(0, 1200)}\n\n${hashtags}`;
       case 'twitter_thread':
