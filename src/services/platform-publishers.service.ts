@@ -135,7 +135,7 @@ export class PlatformPublishersService {
           tags,
         );
       case 'linkedin_article':
-        return this.publishToLinkedIn(credentials as any, content, title, coverImageUrl);
+        return this.publishToLinkedIn(credentials as any, content, title, coverImageUrl, canonicalUrl);
       case 'linkedin_post':
         return this.publishLinkedInPost(credentials as any, content, coverImageUrl);
       case 'ghost':
@@ -469,13 +469,13 @@ export class PlatformPublishersService {
     content: string,
     title: string,
     coverImageUrl?: string,
+    canonicalUrl?: string,
   ): Promise<PublishResult> {
     try {
       this.logger.log(`Publishing LinkedIn article: "${title}"`);
 
       let imageUrn: string | undefined;
 
-      // If cover image provided, upload it to LinkedIn first
       if (coverImageUrl) {
         imageUrn = await this.uploadImageToLinkedIn(
           credentials.access_token,
@@ -487,28 +487,31 @@ export class PlatformPublishersService {
         }
       }
 
+      // LinkedIn does not have a public API for native long-form articles.
+      // Use the "article" content type which creates a rich link card post
+      // that links to the canonical blog URL — this is the closest to an article.
+      const commentary = content.slice(0, 2800);
+
       const body: Record<string, any> = {
         author: credentials.author_urn,
-        commentary: `${title}\n\n${content.slice(0, 2800)}`,
+        commentary,
         visibility: 'PUBLIC',
         distribution: {
           feedDistribution: 'MAIN_FEED',
           targetEntities: [],
           thirdPartyDistributionChannels: [],
         },
+        content: {
+          article: {
+            source: canonicalUrl || 'https://trndinn.com/blog',
+            title: title.slice(0, 200),
+            description: content.slice(0, 250).replace(/[#*_~<>\\]/g, ''),
+            ...(imageUrn ? { thumbnail: imageUrn } : {}),
+          },
+        },
         lifecycleState: 'PUBLISHED',
         isReshareDisabledByAuthor: false,
       };
-
-      // Attach image if uploaded successfully
-      if (imageUrn) {
-        body.content = {
-          media: {
-            id: imageUrn,
-            title: title.slice(0, 100),
-          },
-        };
-      }
 
       const response = await axios.post(
         'https://api.linkedin.com/rest/posts',
