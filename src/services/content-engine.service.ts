@@ -1485,7 +1485,8 @@ ${body}
   }
 
   /**
-   * Process LinkedIn article content: strip markdown and generate inline images.
+   * Process LinkedIn article content: strip markdown, generate inline images,
+   * deduplicate sections, and consolidate hashtags.
    * This is called specifically for linkedin_article platform after content generation.
    */
   private async processLinkedInArticleContent(
@@ -1494,6 +1495,12 @@ ${body}
   ): Promise<string> {
     // First, strip markdown while preserving structure
     let processedContent = this.stripMarkdownForLinkedIn(content);
+
+    // Deduplicate repeated sections (detect ALL-CAPS headings that appear multiple times)
+    processedContent = this.deduplicateLinkedInSections(processedContent);
+
+    // Consolidate all hashtags to the very end
+    processedContent = this.consolidateHashtagsToEnd(processedContent);
 
     // Find all [IMAGE: ...] placeholders
     const imagePlaceholderRegex = /\[IMAGE:\s*([^\]]+)\]/g;
@@ -1511,10 +1518,21 @@ ${body}
       return processedContent;
     }
 
-    this.logger.log(`[linkedin_article] Found ${placeholders.length} image placeholders to generate`);
+    // Limit to 3 images max
+    const limitedPlaceholders = placeholders.slice(0, 3);
+    
+    // Remove excess placeholders beyond the first 3
+    if (placeholders.length > 3) {
+      for (let i = 3; i < placeholders.length; i++) {
+        processedContent = processedContent.replace(placeholders[i].match, '');
+      }
+      this.logger.log(`[linkedin_article] Removed ${placeholders.length - 3} excess image placeholders`);
+    }
+
+    this.logger.log(`[linkedin_article] Found ${limitedPlaceholders.length} image placeholders to generate`);
 
     // Generate images for each placeholder
-    for (const placeholder of placeholders) {
+    for (const placeholder of limitedPlaceholders) {
       try {
         // Create an optimized prompt for the image
         const imagePrompt = this.createLinkedInImagePrompt(placeholder.description);
@@ -1546,10 +1564,10 @@ ${body}
 
         if (uploadErr) {
           this.logger.warn(`[linkedin_article] Image upload failed: ${uploadErr.message}`);
-          // Replace with instruction to add image manually
+          // Replace with simple format for manual addition
           processedContent = processedContent.replace(
             placeholder.match,
-            `\n[INSERT IMAGE HERE]\nImage: "${placeholder.description}"\n(Image generation failed - please add manually)\n`,
+            `\n[Image: ${placeholder.description}]\n(Image generation failed - add manually)\n`,
           );
           continue;
         }
@@ -1561,26 +1579,124 @@ ${body}
 
         const imageUrl = urlData?.publicUrl || '';
 
-        // Replace placeholder with formatted image block
-        const imageBlock = `
-[INSERT IMAGE HERE]
-Image: "${placeholder.description}"
-URL: ${imageUrl}
-`;
+        // Replace placeholder with simplified image block (just description + URL)
+        const imageBlock = `\n[Image: ${placeholder.description}]\n${imageUrl}\n`;
         processedContent = processedContent.replace(placeholder.match, imageBlock);
 
         this.logger.log(`[linkedin_article] Image generated and uploaded: ${imageUrl}`);
       } catch (error) {
         this.logger.error(`[linkedin_article] Image generation failed for "${placeholder.description}": ${(error as Error).message}`);
-        // Replace with instruction to add image manually
+        // Replace with simple format for manual addition
         processedContent = processedContent.replace(
           placeholder.match,
-          `\n[INSERT IMAGE HERE]\nImage: "${placeholder.description}"\n(Image generation failed - please add manually)\n`,
+          `\n[Image: ${placeholder.description}]\n(Image generation failed - add manually)\n`,
         );
       }
     }
 
     return processedContent;
+  }
+
+  /**
+   * Deduplicate repeated sections in LinkedIn article content.
+   * Detects ALL-CAPS headings that appear multiple times and keeps only the first occurrence.
+   */
+  private deduplicateLinkedInSections(content: string): string {
+    // Split content into sections by dividers (———)
+    const dividerRegex = /———/g;
+    const sections = content.split(dividerRegex);
+    
+    // Track seen headings (ALL-CAPS lines at the start of sections)
+    const seenHeadings = new Set<string>();
+    const deduplicatedSections: string[] = [];
+    
+    for (const section of sections) {
+      const trimmedSection = section.trim();
+      if (!trimmedSection) continue;
+      
+      // Extract the first line to check if it's an ALL-CAPS heading
+      const lines = trimmedSection.split('\n');
+      const firstLine = lines[0]?.trim() || '';
+      
+      // Check if first line is an ALL-CAPS heading (at least 3 words, all caps)
+      const isAllCapsHeading = /^[A-Z][A-Z\s\d\-:,!?']+$/.test(firstLine) && 
+                               firstLine.length > 10 &&
+                               firstLine.split(/\s+/).length >= 2;
+      
+      if (isAllCapsHeading) {
+        // Normalize heading for comparison (remove extra spaces, punctuation)
+        const normalizedHeading = firstLine.replace(/[^A-Z\s]/g, '').replace(/\s+/g, ' ').trim();
+        
+        if (seenHeadings.has(normalizedHeading)) {
+          // Skip this duplicate section
+          this.logger.log(`[linkedin_article] Removing duplicate section: "${firstLine}"`);
+          continue;
+        }
+        
+        seenHeadings.add(normalizedHeading);
+      }
+      
+      deduplicatedSections.push(trimmedSection);
+    }
+    
+    // Rejoin sections with dividers
+    return deduplicatedSections.join('\n\n———\n\n');
+  }
+
+  /**
+   * Consolidate all hashtags to the very end of the content.
+   * Finds all #hashtag patterns, removes them from the body, dedupes, and adds once at the end.
+   */
+  private consolidateHashtagsToEnd(content: string): string {
+    // Find all hashtags in the content
+    const hashtagRegex = /#[A-Za-z][A-Za-z0-9_]*/g;
+    const allHashtags: string[] = [];
+    let match;
+    
+    while ((match = hashtagRegex.exec(content)) !== null) {
+      allHashtags.push(match[0]);
+    }
+    
+    if (allHashtags.length === 0) {
+      return content;
+    }
+    
+    // Remove all hashtags from the content
+    let cleanedContent = content.replace(hashtagRegex, '');
+    
+    // Clean up any lines that are now empty or just whitespace after hashtag removal
+    cleanedContent = cleanedContent.replace(/^\s*\n/gm, '\n');
+    
+    // Collapse excessive blank lines
+    cleanedContent = cleanedContent.replace(/\n{3,}/g, '\n\n');
+    
+    // Dedupe hashtags (case-insensitive) and limit to 5
+    const seenLower = new Set<string>();
+    const uniqueHashtags: string[] = [];
+    
+    for (const tag of allHashtags) {
+      const lower = tag.toLowerCase();
+      if (!seenLower.has(lower)) {
+        seenLower.add(lower);
+        uniqueHashtags.push(tag);
+      }
+    }
+    
+    // Limit to 5 hashtags
+    const finalHashtags = uniqueHashtags.slice(0, 5);
+    
+    // Ensure content ends with a divider before hashtags
+    cleanedContent = cleanedContent.trim();
+    if (!cleanedContent.endsWith('———')) {
+      cleanedContent += '\n\n———';
+    }
+    
+    // Add hashtags at the very end
+    cleanedContent += '\n\n' + finalHashtags.join(' ');
+    
+    this.logger.log(`[linkedin_article] Consolidated ${allHashtags.length} hashtags to ${finalHashtags.length} unique at end`);
+    
+    return cleanedContent;
   }
 
   /**
@@ -2045,6 +2161,12 @@ Output JSON:
       // ===== TIER 1: AUTO-PUBLISH PLATFORMS =====
       linkedin_article: `Adapt the blog content into a LinkedIn Article with RICH STRUCTURE.
 
+CRITICAL CONSTRAINTS — MUST FOLLOW:
+• TOTAL LENGTH: 1500-2000 words MAXIMUM. Do NOT exceed this limit.
+• NO REPETITION: Each section heading appears EXACTLY ONCE. Do NOT repeat any section.
+• HASHTAGS: Place hashtags ONLY at the very end after the final ——— divider. NO hashtags anywhere else in the article.
+• IMAGES: Include exactly 2-3 [IMAGE: ...] placeholders total, no more.
+
 CRITICAL: LinkedIn does NOT render markdown. Write in PLAIN TEXT with visual structure.
 
 FORMAT RULES:
@@ -2055,16 +2177,14 @@ FORMAT RULES:
 • Links: Write as plain text with URL in parentheses: text (https://url)
 • NO markdown syntax: NO #, NO **, NO *, NO [text](url), NO ![image](url)
 
-INLINE IMAGES (REQUIRED):
-• Include 2-3 image placeholders throughout the article
+INLINE IMAGES (exactly 2-3 total):
 • Format: [IMAGE: descriptive alt text for the image]
 • Place images after key sections to illustrate points
 • Examples:
-  - [IMAGE: Comparison chart showing Hootsuite pricing vs alternatives]
-  - [IMAGE: Dashboard screenshot showing AI content generation interface]
-  - [IMAGE: Infographic of social media scheduling workflow]
+  - [IMAGE: Comparison chart showing pricing vs alternatives]
+  - [IMAGE: Dashboard screenshot showing key feature]
 
-STRUCTURE:
+STRUCTURE (each section appears ONCE):
 • Opening paragraph (2-3 sentences) — hook the reader
 • ——— divider
 • FIRST SECTION HEADING (ALL-CAPS)
@@ -2072,19 +2192,17 @@ STRUCTURE:
 • [IMAGE: relevant visual]
 • ——— divider
 • SECOND SECTION HEADING (ALL-CAPS)
-• Continue pattern...
+• Continue pattern (4-6 sections total)...
 • ——— divider
-• CLOSING SECTION
+• CLOSING SECTION (e.g., "THE BOTTOM LINE")
 • ——— divider
-• Hashtags at the very end (3-5 relevant hashtags)
+• #Hashtag1 #Hashtag2 #Hashtag3 (3-5 hashtags, ONLY here at the end)
 
 CONTENT:
-• Keep full depth of original blog — do not summarize
+• Condense the original blog to fit 1500-2000 words — prioritize key insights
 • Include comparison data if comparing products
 • Write for SEO: keywords in headings and text
-• Write for GEO: facts, statistics, named entities
-• Write for AEO: Q&A pairs, direct answers
-• Do NOT repeat content across sections
+• Do NOT repeat content across sections — each point appears once
 • End with a question before the hashtags`,
 
       linkedin_post: `LinkedIn Post (Short-form):
