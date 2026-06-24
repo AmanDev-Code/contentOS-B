@@ -1513,6 +1513,11 @@ ${body}
         generatedContent = this.stripMarkdownForLinkedIn(generatedContent);
       }
 
+      // Post-process: strip markdown syntax for Medium (WYSIWYG editor doesn't render markdown)
+      if (platform === 'medium') {
+        generatedContent = this.stripMarkdownForMedium(generatedContent);
+      }
+
       return { content: generatedContent, platformTitle, hashtags, seoScore };
     } catch (error) {
       this.logger.error(`[${platform}] Adaptation failed: ${(error as Error).message}`);
@@ -1632,6 +1637,66 @@ ${body}
     // PRESERVE em-dash dividers (———) - don't remove them
     // Convert markdown horizontal rules (---, ***, ___) to em-dash dividers
     content = content.replace(/^[-*_]{3,}\s*$/gm, '———');
+
+    // Collapse excessive blank lines (more than 2) to max 2
+    content = content.replace(/\n{3,}/g, '\n\n');
+
+    // Clean up any double spaces
+    content = content.replace(/  +/g, ' ');
+
+    return content.trim();
+  }
+
+  /**
+   * Strip markdown syntax from Medium content for clean copy/paste.
+   * Medium's editor is WYSIWYG and does NOT render markdown when pasting.
+   * 
+   * PRESERVES:
+   * - Em-dash dividers (———)
+   * - Bullet points (•)
+   * - Plain text structure
+   * 
+   * CONVERTS:
+   * - Headers to plain text with spacing
+   * - Images to [Image: alt] with URL on next line
+   * - Links to text (url) format
+   * 
+   * REMOVES:
+   * - Markdown heading markers (#, ##, etc.)
+   * - Bold/italic markers (**, *, __, _)
+   * - Code blocks and backticks
+   */
+  private stripMarkdownForMedium(content: string): string {
+    // Convert headers to plain text with line breaks for visual separation
+    // ## Header -> \nHeader\n (preserves structure without markdown)
+    content = content.replace(/^#{1,6}\s+(.+)$/gm, '\n$1\n');
+
+    // Remove bold markers: **text** → text
+    content = content.replace(/\*\*([^*]+)\*\*/g, '$1');
+    content = content.replace(/__([^_]+)__/g, '$1');
+
+    // Remove italic markers: *text* → text (but not bullet points)
+    content = content.replace(/(?<![*\w])\*([^*\n]+)\*(?![*\w])/g, '$1');
+    content = content.replace(/(?<![_\w])_([^_\n]+)_(?![_\w])/g, '$1');
+
+    // Convert markdown images to readable format with URL
+    // ![alt](url) → \n[Image: alt]\nurl\n
+    content = content.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '\n[Image: $1]\n$2\n');
+
+    // Convert markdown links [text](url) → text (url)
+    content = content.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+
+    // Convert markdown bullet points to clean bullets
+    content = content.replace(/^[-*]\s+/gm, '• ');
+
+    // Remove code backticks
+    content = content.replace(/`([^`]+)`/g, '$1');
+
+    // Remove code blocks entirely (Medium doesn't support code well anyway)
+    content = content.replace(/```[\s\S]*?```/g, '');
+
+    // Convert markdown horizontal rules (---, ***, ___) to em-dash dividers
+    content = content.replace(/^[-*_]{3,}\s*$/gm, '\n———\n');
 
     // Collapse excessive blank lines (more than 2) to max 2
     content = content.replace(/\n{3,}/g, '\n\n');
@@ -2407,23 +2472,47 @@ CRITICAL: MUST be under 3000 characters total. Be concise.`,
 
       medium: `Medium Article (MAX 15000 characters / ~2500 words)
 
-Medium uses a rich text editor. Content should paste cleanly.
+Medium uses a WYSIWYG editor that does NOT render markdown. Write in PLAIN TEXT only.
 
-FORMAT:
-• Use ## for H2 headings, ### for H3
-• Short paragraphs (2-3 sentences)
-• Bullet lists for key points
-• Bold for emphasis sparingly
+FORMAT (NO MARKDOWN):
+• Write section headings on their own line (no # symbols)
+• Use • for bullet points (not - or *)
+• Use ——— for section dividers (not ---)
+• NO **bold** or *italic* markers - just write plain text
+• NO [text](url) links - write: text (url)
+• NO ![](url) images - write: [Image: description] then URL on next line
 
 STRUCTURE:
-1. TL;DR or Key Takeaways (3-5 bullets)
+1. TL;DR or Key Takeaways (3-5 bullets with •)
 2. Engaging intro (different angle than original)
-3. 4-6 main sections with clear headings
+3. 4-6 main sections with clear headings (plain text, no #)
 4. Conclusion with reflection or CTA
+
+EXAMPLE FORMAT:
+TL;DR
+
+• First key point here
+• Second key point here
+• Third key point here
+
+———
+
+Why This Matters
+
+Opening paragraph that hooks the reader...
+
+———
+
+The First Major Point
+
+Content explaining this point...
+
+[Image: Chart showing comparison]
+https://example.com/image.png
 
 TONE: Conversational, editorial, storytelling approach.
 
-CRITICAL: Never repeat sections. Each idea appears once.`,
+CRITICAL: NO MARKDOWN SYNTAX. Write everything in plain text. Never repeat sections.`,
 
       devto: `Dev.to Article (MAX 20000 characters)
 
