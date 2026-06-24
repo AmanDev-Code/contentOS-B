@@ -83,6 +83,49 @@ export class ContentEngineService {
   private static readonly TRNDINN_OAUTH_SOURCE = 'trndinn_oauth';
   private static readonly TOKEN_EXPIRY_SKEW_MS = 60_000;
 
+  /**
+   * Hard character limits for each platform.
+   * These are ENFORCED after all generation and processing.
+   * Limits are based on platform API limits and best practices.
+   */
+  private static readonly PLATFORM_CHARACTER_LIMITS: Record<string, number> = {
+    // Auto-publish platforms
+    linkedin_post: 3000,        // LinkedIn post limit is 3000 chars
+    linkedin_article: 8000,     // ~1500-2000 words for readability
+    devto: 20000,               // Dev.to has no hard limit, but 20k is reasonable
+    hashnode: 20000,            // Similar to Dev.to
+    medium: 15000,              // Medium articles ~3000 words max
+    ghost: 15000,               // Ghost blog posts
+    beehiiv: 10000,             // Newsletter format, shorter
+    telegraph: 10000,           // Telegraph articles
+    blogger: 15000,             // Blogger posts
+    // Submit for review platforms
+    hackernoon: 15000,          // Editorial content
+    towards_ai: 15000,          // Technical articles
+    analytics_vidhya: 15000,    // Data science articles
+    freecodecamp: 15000,        // Tutorial content
+    smashing_magazine: 15000,   // Web dev articles
+    sitepoint: 15000,           // Technical tutorials
+    readwrite: 12000,           // Tech news/analysis
+    yourstory: 12000,           // Startup stories
+    startuptalky: 12000,        // Startup content
+    inc42: 12000,               // Indian startup ecosystem
+    techstory: 12000,           // Tech stories
+    // Discussion platforms
+    reddit: 10000,              // Reddit self-post limit is 40k, but 10k is optimal
+    indiehackers: 10000,        // Community posts
+    producthunt_discussions: 5000, // Product Hunt discussions
+    growthhackers: 8000,        // Growth marketing
+    hackernews: 2000,           // HN prefers brief, link to full article
+    huggingface_community: 8000, // ML community posts
+    // Social/other platforms
+    twitter_thread: 4000,       // ~15 tweets max (280 * 15)
+    newsletter: 10000,          // Email newsletters
+    substack: 12000,            // Substack posts
+    facebook: 3000,             // Facebook posts
+    instagram: 2200,            // Instagram caption limit
+  };
+
   constructor(
     private readonly supabase: SupabaseService,
     private readonly aiGateway: AiGatewayService,
@@ -120,6 +163,78 @@ export class ContentEngineService {
       this.logger.warn(`stripAiMetadata failed, using original buffer: ${msg}`);
       return imageBuffer;
     }
+  }
+
+  /**
+   * Enforce hard character limits for a platform.
+   * Truncates content intelligently at sentence/paragraph boundaries when possible.
+   * This is the FINAL step before saving/publishing - ensures content never exceeds platform limits.
+   */
+  private enforceCharacterLimit(content: string, platform: string): string {
+    const limit = ContentEngineService.PLATFORM_CHARACTER_LIMITS[platform];
+    if (!limit || content.length <= limit) {
+      return content;
+    }
+
+    const originalLength = content.length;
+    this.logger.warn(`[${platform}] Content exceeds limit: ${originalLength} chars > ${limit} limit. Truncating...`);
+
+    // Try to truncate at a good boundary
+    let truncated = content.substring(0, limit);
+
+    // For platforms with hashtags at the end, preserve them
+    const hashtagMatch = content.match(/(\n+[-—]+\n+)?(\s*#\w+(\s+#\w+)*\s*)$/);
+    const hashtagSection = hashtagMatch ? hashtagMatch[0] : '';
+    const hashtagLength = hashtagSection.length;
+
+    if (hashtagLength > 0 && hashtagLength < limit * 0.1) {
+      // Preserve hashtags if they're less than 10% of the limit
+      truncated = content.substring(0, limit - hashtagLength - 50); // Leave room for ellipsis
+    }
+
+    // Find the last complete sentence or paragraph
+    const lastParagraphBreak = truncated.lastIndexOf('\n\n');
+    const lastSentenceEnd = Math.max(
+      truncated.lastIndexOf('. '),
+      truncated.lastIndexOf('.\n'),
+      truncated.lastIndexOf('! '),
+      truncated.lastIndexOf('!\n'),
+      truncated.lastIndexOf('? '),
+      truncated.lastIndexOf('?\n'),
+    );
+
+    // Prefer paragraph break if it's not too far back (within 20% of limit)
+    if (lastParagraphBreak > limit * 0.8) {
+      truncated = truncated.substring(0, lastParagraphBreak);
+    } else if (lastSentenceEnd > limit * 0.7) {
+      truncated = truncated.substring(0, lastSentenceEnd + 1);
+    }
+
+    // Add ellipsis and hashtags back if applicable
+    truncated = truncated.trim();
+    if (!truncated.endsWith('.') && !truncated.endsWith('!') && !truncated.endsWith('?')) {
+      truncated += '...';
+    }
+
+    if (hashtagLength > 0) {
+      truncated += '\n\n' + hashtagSection.trim();
+    }
+
+    // Final safety check - hard cut if still over
+    if (truncated.length > limit) {
+      truncated = truncated.substring(0, limit - 3) + '...';
+    }
+
+    this.logger.log(`[${platform}] Truncated from ${originalLength} to ${truncated.length} chars`);
+    return truncated;
+  }
+
+  /**
+   * Get the character limit for a platform.
+   * Returns undefined if no limit is defined.
+   */
+  private getPlatformCharacterLimit(platform: string): number | undefined {
+    return ContentEngineService.PLATFORM_CHARACTER_LIMITS[platform];
   }
 
   /**
@@ -650,7 +765,11 @@ Requirements:
       finalContent = this.insertInlineImagesIntoContent(adaptedResult.content, inlineImages);
     }
 
-    // Calculate character count
+    // CRITICAL: Enforce hard character limits as the FINAL step
+    // This ensures content never exceeds platform limits regardless of generation
+    finalContent = this.enforceCharacterLimit(finalContent, platform);
+
+    // Calculate character count (after enforcement)
     const characterCount = finalContent.length;
 
     // Calculate simple engagement score based on content quality signals
@@ -1272,6 +1391,7 @@ Output JSON:
       this.isLongFormPlatform(platform) ? 8000 : 2000,
     );
     const maxTokens = this.getMaxTokensForPlatform(platform);
+    const charLimit = this.getPlatformCharacterLimit(platform) || 15000;
 
     // CRITICAL FIX: Generate content as PLAIN MARKDOWN (not JSON) to avoid truncation
     // JSON output causes AI to truncate content inside the "content" field
@@ -1279,12 +1399,20 @@ Output JSON:
 
 OUTPUT FORMAT: Raw markdown ONLY. Do NOT wrap in JSON. Do NOT use code blocks around the entire output.
 
-CRITICAL REQUIREMENTS:
-1. Output MUST be at least ${minExpectedLength.toLocaleString()} characters
-2. DO NOT summarize - adapt the FULL original content
-3. Include ALL sections, examples, and details from the original
-4. Complete every sentence - never cut off mid-thought
-5. Use ${platform}-specific formatting
+CRITICAL CHARACTER LIMIT: ${charLimit.toLocaleString()} characters maximum for ${platform}.
+This is a HARD LIMIT. Content will be truncated if it exceeds this.
+
+CRITICAL ANTI-REPETITION RULES:
+1. NEVER repeat a section heading or topic
+2. Each idea, statistic, or example appears EXACTLY ONCE
+3. If you've already covered a point, do NOT mention it again
+4. Check your output before finishing - remove any duplicates
+
+QUALITY OVER QUANTITY:
+- Concise, valuable content beats long, repetitive content
+- Every paragraph should add new information
+- Cut fluff and filler phrases
+- Stay WELL UNDER the character limit
 
 Platform rules:
 ${platformRules}
@@ -1308,18 +1436,18 @@ OUTPUT: Raw markdown only - NO JSON wrapper, NO code blocks around the output.
 
 ORIGINAL TITLE: ${title}
 CATEGORY: ${post.content_category || 'General'}
-ORIGINAL LENGTH: ${originalLength.toLocaleString()} characters
-MINIMUM OUTPUT: ${minExpectedLength.toLocaleString()} characters
 
-=== ORIGINAL CONTENT (ADAPT ALL OF THIS - DO NOT SKIP ANY SECTION) ===
+CHARACTER LIMIT: ${charLimit.toLocaleString()} characters maximum. Quality over quantity.
+
+=== ORIGINAL CONTENT (CONDENSE AND ADAPT - DO NOT REPEAT SECTIONS) ===
 ${body}
 
 === REQUIREMENTS ===
-- Output the FULL adapted article as raw markdown
-- Include ALL sections from the original (intro, all main points, tables, FAQs, conclusion)
-- Add ${platform}-specific formatting (frontmatter for Dev.to, etc.)
-- Minimum ${minExpectedLength.toLocaleString()} characters - DO NOT summarize
-- Complete every sentence - never end mid-word`;
+- Adapt the content for ${platform} audience and format
+- Each section/topic appears ONCE only - no repetition
+- STAY UNDER ${charLimit.toLocaleString()} characters - be concise
+- Complete every sentence - never end mid-word
+- Follow the platform-specific formatting rules`;
 
     try {
       // STEP 1: Generate content as plain markdown (not JSON)
@@ -1351,9 +1479,9 @@ ${body}
 
         generatedContent = this.cleanMarkdownOutput(rawContent);
 
-        // Continue if truncated or too short
-        if (this.isContentTruncated(generatedContent) || generatedContent.length < minExpectedLength * 0.6) {
-          this.logger.warn(`[${platform}] Content incomplete (${generatedContent.length} chars). Continuing...`);
+        // Continue only if truncated (cut off mid-sentence)
+        if (this.isContentTruncated(generatedContent)) {
+          this.logger.warn(`[${platform}] Content truncated (${generatedContent.length} chars). Continuing...`);
           generatedContent = await this.continueMarkdownGeneration(
             contentSystemPrompt,
             generatedContent,
@@ -1362,6 +1490,9 @@ ${body}
             maxTokens,
           );
         }
+        
+        // Apply universal deduplication
+        generatedContent = this.deduplicateContent(generatedContent, platform);
       }
 
       // STEP 2: Generate metadata separately (quick call, small output)
@@ -1372,7 +1503,7 @@ ${body}
         platform,
       );
 
-      this.logger.log(`[${platform}] Generated ${generatedContent.length} chars (target: ${minExpectedLength})`);
+      this.logger.log(`[${platform}] Generated ${generatedContent.length} chars`);
 
       // Post-process: convert any relative URLs to absolute
       generatedContent = this.convertRelativeUrlsToAbsolute(generatedContent);
@@ -1781,8 +1912,12 @@ ${body}
   ): Promise<string> {
     const sections = this.splitIntoSections(originalBody, 4000);
     const totalSections = sections.length;
+    const charLimit = this.getPlatformCharacterLimit(platform) || 15000;
+    
+    // Calculate per-section target based on total limit
+    const perSectionLimit = Math.floor(charLimit / totalSections);
 
-    this.logger.log(`[${platform}] Generating iteratively: ${totalSections} sections, original=${originalBody.length} chars, minExpected=${minExpectedLength}`);
+    this.logger.log(`[${platform}] Generating iteratively: ${totalSections} sections, original=${originalBody.length} chars, charLimit=${charLimit}`);
     sections.forEach((s, i) => this.logger.log(`[${platform}] Section ${i + 1} input: ${s.length} chars`));
 
     const results: string[] = [];
@@ -1793,37 +1928,49 @@ ${body}
       const isFirst = i === 0;
       const isLast = i === totalSections - 1;
 
-      // Calculate minimum output for this section proportionally
-      const sectionMinOutput = Math.ceil((section.length / originalBody.length) * minExpectedLength * 1.1);
+      // Calculate target output for this section based on platform limit
+      const sectionTargetOutput = Math.min(perSectionLimit, 4000);
 
       const isDevTo = platform === 'devto';
+      
+      // Build list of headings already covered to prevent repetition
+      const coveredHeadings = results.length > 0 
+        ? this.extractHeadings(results.join('\n\n')).slice(0, 10).join(', ')
+        : '';
+      
       const sectionPrompt = isFirst
         ? `Adapt this article for ${platform}. Section 1 of ${totalSections}.
 
 OUTPUT: Raw markdown only (NO JSON).
-MINIMUM OUTPUT: ${sectionMinOutput.toLocaleString()} characters for this section.
+TARGET: ~${sectionTargetOutput.toLocaleString()} characters for this section.
+TOTAL LIMIT: ${charLimit.toLocaleString()} characters for entire article.
 
 TITLE: ${title}
 CATEGORY: ${category || 'General'}
 
-SECTION TO ADAPT (${section.length} chars - output should be similar length or longer):
+ANTI-REPETITION: Each heading/topic appears ONCE in the entire article. Do NOT repeat content.
+
+SECTION TO ADAPT:
 ${section}
 
-Write the introduction and this section COMPLETELY. ${isLast ? 'Include conclusion.' : 'Do NOT write conclusion - more sections follow.'}`
+Write the introduction and this section. ${isLast ? 'Include conclusion.' : 'Do NOT write conclusion - more sections follow.'}`
         : `Continue adapting for ${platform}. Section ${i + 1} of ${totalSections}.
 
 OUTPUT: Raw markdown only (NO JSON).
-MINIMUM OUTPUT: ${sectionMinOutput.toLocaleString()} characters for this section.${isDevTo ? `
+TARGET: ~${sectionTargetOutput.toLocaleString()} characters for this section.
+TOTAL LIMIT: ${charLimit.toLocaleString()} characters for entire article.${isDevTo ? `
 
-CRITICAL: Do NOT add any YAML frontmatter (no --- blocks). The frontmatter was already written in section 1. Start directly with markdown content.` : ''}
+CRITICAL: Do NOT add any YAML frontmatter (no --- blocks). The frontmatter was already written in section 1.` : ''}
+
+ALREADY COVERED (DO NOT REPEAT): ${coveredHeadings || 'None yet'}
 
 PREVIOUS CONTENT ENDED WITH:
-...${results[results.length - 1]?.slice(-300) || ''}
+...${results[results.length - 1]?.slice(-200) || ''}
 
-NEXT SECTION TO ADAPT (${section.length} chars - output should be similar length or longer):
+NEXT SECTION TO ADAPT:
 ${section}
 
-Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the FINAL section - include conclusion with CTA.' : 'Do NOT write conclusion yet.'}`;
+Continue seamlessly. Do NOT repeat any headings or content from previous sections. ${isLast ? 'This is the FINAL section - include brief conclusion.' : 'Do NOT write conclusion yet.'}`;
 
       this.logger.log(`[${platform}] Generating section ${i + 1}/${totalSections}...`);
       
@@ -1856,39 +2003,32 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
           cleaned = this.cleanMarkdownOutput(sectionContent);
           this.logger.log(`[${platform}] Section ${i + 1} after cleaning: ${cleaned.length} chars`);
 
-          // Check if section is truncated or too short
+          // Check if section is truncated (but don't force minimum length - quality over quantity)
           const isTruncated = this.isContentTruncated(cleaned);
-          const isTooShort = cleaned.length < sectionMinOutput * 0.5;
           
-          if (isTruncated || isTooShort) {
-            this.logger.warn(`[${platform}] Section ${i + 1} incomplete (truncated=${isTruncated}, tooShort=${isTooShort}, got ${cleaned.length}, need ${sectionMinOutput}). Continuing...`);
+          if (isTruncated) {
+            this.logger.warn(`[${platform}] Section ${i + 1} truncated, attempting continuation...`);
             
-            // Try up to 2 continuations for this section
-            for (let contAttempt = 0; contAttempt < 2 && (this.isContentTruncated(cleaned) || cleaned.length < sectionMinOutput * 0.7); contAttempt++) {
-              this.logger.log(`[${platform}] Section ${i + 1} continuation attempt ${contAttempt + 1}...`);
+            // Try one continuation for truncated content
+            try {
+              const { content: cont } = await this.aiGateway.chatCompletionRaw({
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: sectionPrompt },
+                  { role: 'assistant', content: cleaned },
+                  { role: 'user', content: `Continue from exactly where you stopped. Complete the current sentence/paragraph. Do NOT repeat any content.` },
+                ],
+                category: 'seo_generation',
+                temperature: 0.7,
+                maxTokens: 2000,
+                timeoutMs: 60_000,
+              });
               
-              try {
-                const { content: cont } = await this.aiGateway.chatCompletionRaw({
-                  messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: sectionPrompt },
-                    { role: 'assistant', content: cleaned },
-                    { role: 'user', content: `Continue from exactly where you stopped. Your output was ${cleaned.length} chars but needs to be at least ${sectionMinOutput} chars. Complete this section fully.` },
-                  ],
-                  category: 'seo_generation',
-                  temperature: 0.7,
-                  maxTokens: 4000,
-                  timeoutMs: 60_000,
-                });
-                
-                const contCleaned = this.cleanMarkdownOutput(cont);
-                this.logger.log(`[${platform}] Section ${i + 1} continuation ${contAttempt + 1}: +${contCleaned.length} chars`);
-                cleaned = cleaned + '\n\n' + contCleaned;
-              } catch (contError) {
-                this.logger.warn(`[${platform}] Section ${i + 1} continuation ${contAttempt + 1} failed: ${(contError as Error).message}`);
-                // Continue with what we have
-                break;
-              }
+              const contCleaned = this.cleanMarkdownOutput(cont);
+              this.logger.log(`[${platform}] Section ${i + 1} continuation: +${contCleaned.length} chars`);
+              cleaned = cleaned + '\n\n' + contCleaned;
+            } catch (contError) {
+              this.logger.warn(`[${platform}] Section ${i + 1} continuation failed: ${(contError as Error).message}`);
             }
           }
           
@@ -1909,7 +2049,7 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
       if (cleaned !== null && cleaned.length > 0) {
         results.push(cleaned);
         lastSuccessfulSectionIndex = i;
-        this.logger.log(`[${platform}] Section ${i + 1}/${totalSections} DONE: ${cleaned.length} chars (target: ${sectionMinOutput})`);
+        this.logger.log(`[${platform}] Section ${i + 1}/${totalSections} DONE: ${cleaned.length} chars (target: ${sectionTargetOutput})`);
       } else {
         // Section failed - decide whether to continue or return partial content
         this.logger.error(`[${platform}] Section ${i + 1}/${totalSections} FAILED - no content generated`);
@@ -1931,32 +2071,78 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
     }
 
     const rawMerged = results.join('\n\n');
-    this.logger.log(`[${platform}] Total merged: ${rawMerged.length} chars (target: ${minExpectedLength})`);
+    this.logger.log(`[${platform}] Total merged: ${rawMerged.length} chars`);
 
-    // For Dev.to: strip any duplicate YAML frontmatter blocks introduced by iterative generation
-    const merged = platform === 'devto' ? this.sanitizeDevToFrontmatter(rawMerged) : rawMerged;
-    if (platform === 'devto' && merged !== rawMerged) {
-      this.logger.log(`[devto] Sanitized frontmatter — content reduced from ${rawMerged.length} to ${merged.length} chars`);
-    }
-
-    // Final check - if still too short, try one more continuation
-    if (merged.length < minExpectedLength * 0.7) {
-      this.logger.warn(`[${platform}] Final output too short (${merged.length} < ${minExpectedLength * 0.7}). Attempting final continuation...`);
-      try {
-        return await this.continueMarkdownGeneration(
-          systemPrompt,
-          merged,
-          originalBody,
-          minExpectedLength,
-          maxTokens,
-        );
-      } catch (contError) {
-        this.logger.warn(`[${platform}] Final continuation failed: ${(contError as Error).message}. Returning current content.`);
-        return merged;
+    // Apply platform-specific sanitization
+    let merged = rawMerged;
+    
+    // For Dev.to: strip any duplicate YAML frontmatter blocks
+    if (platform === 'devto') {
+      merged = this.sanitizeDevToFrontmatter(merged);
+      if (merged !== rawMerged) {
+        this.logger.log(`[devto] Sanitized frontmatter — content reduced from ${rawMerged.length} to ${merged.length} chars`);
       }
     }
     
+    // Apply universal deduplication for all platforms
+    merged = this.deduplicateContent(merged, platform);
+    
     return merged;
+  }
+
+  /**
+   * Universal content deduplication that works for all platforms.
+   * Removes duplicate sections based on heading similarity.
+   */
+  private deduplicateContent(content: string, platform: string): string {
+    // Extract all headings (markdown ## or ALL-CAPS for LinkedIn)
+    const isLinkedIn = platform.startsWith('linkedin');
+    const headingRegex = isLinkedIn 
+      ? /^([A-Z][A-Z\s\d\-:,!?']{10,})$/gm  // ALL-CAPS headings
+      : /^#{1,3}\s+(.+)$/gm;  // Markdown headings
+    
+    const seenHeadings = new Set<string>();
+    const lines = content.split('\n');
+    const resultLines: string[] = [];
+    let skipUntilNextHeading = false;
+    let duplicatesRemoved = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const headingMatch = isLinkedIn 
+        ? line.match(/^([A-Z][A-Z\s\d\-:,!?']{10,})$/)
+        : line.match(/^#{1,3}\s+(.+)$/);
+      
+      if (headingMatch) {
+        const heading = headingMatch[1].trim();
+        const normalizedHeading = heading.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+        
+        if (seenHeadings.has(normalizedHeading)) {
+          // Skip this duplicate section
+          skipUntilNextHeading = true;
+          duplicatesRemoved++;
+          this.logger.log(`[${platform}] Removing duplicate section: "${heading}"`);
+          continue;
+        }
+        
+        seenHeadings.add(normalizedHeading);
+        skipUntilNextHeading = false;
+      }
+      
+      if (!skipUntilNextHeading) {
+        resultLines.push(line);
+      }
+    }
+    
+    if (duplicatesRemoved > 0) {
+      this.logger.log(`[${platform}] Removed ${duplicatesRemoved} duplicate sections`);
+    }
+    
+    // Clean up excessive blank lines
+    let result = resultLines.join('\n');
+    result = result.replace(/\n{4,}/g, '\n\n\n');
+    
+    return result;
   }
 
   /**
@@ -2028,40 +2214,32 @@ Continue seamlessly and COMPLETELY adapt this section. ${isLast ? 'This is the F
   }
 
   /**
-   * Continue markdown generation if initial output was truncated or too short
+   * Continue markdown generation if initial output was truncated.
+   * Only continues if content appears cut off mid-sentence.
    */
   private async continueMarkdownGeneration(
     systemPrompt: string,
     currentContent: string,
-    originalBody: string,
-    minExpectedLength: number,
+    _originalBody: string,
+    _minExpectedLength: number,
     maxTokens: number,
   ): Promise<string> {
+    // Only continue if actually truncated (cut off mid-sentence)
+    if (!this.isContentTruncated(currentContent)) {
+      return currentContent;
+    }
+    
     let content = currentContent;
-    let attempts = 0;
-    const maxAttempts = 5; // Increased from 3
+    const maxAttempts = 2; // Reduced from 5 - don't over-continue
+    
+    for (let attempt = 0; attempt < maxAttempts && this.isContentTruncated(content); attempt++) {
+      this.logger.log(`[continuation] Attempt ${attempt + 1}/${maxAttempts}: completing truncated content`);
 
-    while ((this.isContentTruncated(content) || content.length < minExpectedLength * 0.7) && attempts < maxAttempts) {
-      attempts++;
-      const remaining = minExpectedLength - content.length;
-      this.logger.log(`[continuation] Attempt ${attempts}/${maxAttempts}: ${content.length} chars, target ${minExpectedLength}, need ~${remaining} more`);
+      const continuationPrompt = `Your previous output was cut off mid-sentence. Continue from exactly where you stopped:
+...${content.slice(-200)}
 
-      const headings = this.extractHeadings(originalBody);
-      const coveredHeadings = this.extractHeadings(content);
-      const missingHeadings = headings.filter(h => !coveredHeadings.some(c => c.toLowerCase().includes(h.toLowerCase().slice(0, 20))));
-      
-      this.logger.log(`[continuation] Missing headings: ${missingHeadings.length} of ${headings.length}`);
-
-      const continuationPrompt = `Your previous output was ${content.length} characters - need at least ${minExpectedLength} (${remaining} more chars needed).
-
-MISSING SECTIONS from original article:
-${missingHeadings.length > 0 ? missingHeadings.join('\n') : 'Check if all sections are complete'}
-
-Continue from where you left off:
-...${content.slice(-300)}
-
-CRITICAL: Output at least ${Math.min(remaining + 500, 4000)} more characters of content.
-OUTPUT: Raw markdown continuation (NO JSON). Complete all remaining sections fully.`;
+Complete the current thought and finish the article naturally. Do NOT repeat any content.
+OUTPUT: Raw markdown continuation only.`;
 
       try {
         const { content: cont, model } = await this.aiGateway.chatCompletionRaw({
@@ -2072,26 +2250,26 @@ OUTPUT: Raw markdown continuation (NO JSON). Complete all remaining sections ful
           ],
           category: 'seo_generation',
           temperature: 0.7,
-          maxTokens: Math.min(maxTokens, 8000),
-          timeoutMs: 120_000,
+          maxTokens: Math.min(maxTokens, 4000),
+          timeoutMs: 60_000,
         });
 
         const contCleaned = this.cleanMarkdownOutput(cont);
-        this.logger.log(`[continuation] Attempt ${attempts} got ${contCleaned.length} chars from ${model}`);
+        this.logger.log(`[continuation] Attempt ${attempt + 1} got ${contCleaned.length} chars from ${model}`);
         
-        if (contCleaned.length < 100) {
-          this.logger.warn(`[continuation] Attempt ${attempts} returned very short content, may be done`);
+        if (contCleaned.length < 50) {
+          this.logger.warn(`[continuation] Very short response, stopping`);
           break;
         }
         
         content = content + '\n\n' + contCleaned;
       } catch (err) {
-        this.logger.warn(`Continuation ${attempts} failed: ${(err as Error).message}`);
+        this.logger.warn(`Continuation ${attempt + 1} failed: ${(err as Error).message}`);
         break;
       }
     }
 
-    this.logger.log(`[continuation] Final: ${content.length} chars after ${attempts} attempts (target: ${minExpectedLength})`);
+    this.logger.log(`[continuation] Final: ${content.length} chars`);
     return content;
   }
 
@@ -2188,255 +2366,334 @@ Output JSON:
   private getEnhancedPlatformRules(platform: string): string {
     const rules: Record<string, string> = {
       // ===== TIER 1: AUTO-PUBLISH PLATFORMS =====
-      linkedin_article: `Adapt the blog content into a LinkedIn Article with RICH STRUCTURE.
+      linkedin_article: `LinkedIn Article (MAX 8000 characters / ~1500 words)
 
-CRITICAL CONSTRAINTS — MUST FOLLOW:
-• TOTAL LENGTH: 1500-2000 words MAXIMUM. Do NOT exceed this limit.
-• NO REPETITION: Each section heading appears EXACTLY ONCE. Do NOT repeat any section.
-• HASHTAGS: Place hashtags ONLY at the very end after the final ——— divider. NO hashtags anywhere else in the article.
-• IMAGES: Include exactly 2-3 [IMAGE: ...] placeholders total, no more.
+FORMAT (LinkedIn editor is WYSIWYG - NO markdown rendering):
+• Headings: ALL-CAPS on own line (e.g., "WHY THIS MATTERS")
+• Dividers: ——— between sections
+• Lists: • for bullets, 1. 2. 3. for numbered
+• Links: plain text with URL in parentheses
+• NO markdown: NO #, **, *, [text](url)
 
-CRITICAL: LinkedIn does NOT render markdown. Write in PLAIN TEXT with visual structure.
+STRUCTURE (4-6 sections, each appears ONCE):
+1. Hook paragraph (2-3 sentences)
+2. ——— + SECTION HEADING + content + [IMAGE: description]
+3. Repeat for 3-5 more sections
+4. ——— + THE BOTTOM LINE + closing
+5. ——— + 3-5 hashtags at very end
 
-FORMAT RULES:
-• Section headings: Write in ALL-CAPS on their own line (e.g., "WHY TEAMS ARE LEAVING HOOTSUITE")
-• Dividers: Use ——— (three em-dashes) between major sections
-• Bullet points: Use • character for lists
-• Numbered lists: Use 1. 2. 3.
-• Links: Write as plain text with URL in parentheses: text (https://url)
-• NO markdown syntax: NO #, NO **, NO *, NO [text](url), NO ![image](url)
+IMAGES: Include exactly 2-3 [IMAGE: description] placeholders
 
-INLINE IMAGES (exactly 2-3 total):
-• Format: [IMAGE: descriptive alt text for the image]
-• Place images after key sections to illustrate points
-• Examples:
-  - [IMAGE: Comparison chart showing pricing vs alternatives]
-  - [IMAGE: Dashboard screenshot showing key feature]
+CRITICAL: Never repeat a section. Each point appears once only. STAY UNDER 8000 CHARACTERS.`,
 
-STRUCTURE (each section appears ONCE):
-• Opening paragraph (2-3 sentences) — hook the reader
-• ——— divider
-• FIRST SECTION HEADING (ALL-CAPS)
-• Content with bullet points
-• [IMAGE: relevant visual]
-• ——— divider
-• SECOND SECTION HEADING (ALL-CAPS)
-• Continue pattern (4-6 sections total)...
-• ——— divider
-• CLOSING SECTION (e.g., "THE BOTTOM LINE")
-• ——— divider
-• #Hashtag1 #Hashtag2 #Hashtag3 (3-5 hashtags, ONLY here at the end)
+      linkedin_post: `LinkedIn Post (MAX 3000 characters - HARD LIMIT)
 
-CONTENT:
-• Condense the original blog to fit 1500-2000 words — prioritize key insights
-• Include comparison data if comparing products
-• Write for SEO: keywords in headings and text
-• Do NOT repeat content across sections — each point appears once
-• End with a question before the hashtags`,
+FORMAT:
+• Hook first line (bold statement or question)
+• Personal tone, short paragraphs (2-3 sentences each)
+• 1-2 data points or examples
+• End with question for comments
+• 3-5 hashtags at end
+• NO emojis overload
 
-      linkedin_post: `LinkedIn Post (Short-form):
-- MAX 1300 characters total
-- Hook in first line (bold statement, surprising stat, or question)
-- Personal/professional tone — share YOUR perspective
-- Use line breaks for readability (short paragraphs)
-- Include 1-2 specific examples or data points
-- End with a question to drive comments
-- 3-5 hashtags (mix of broad and niche)
-- NO emojis overload — keep it professional`,
+STRUCTURE:
+1. Hook (1-2 lines)
+2. Context (2-3 short paragraphs)
+3. Key insight or takeaway
+4. Question for engagement
+5. Hashtags
 
-      medium: `Medium Article:
-- Editorial, storytelling approach
-- Different intro than original — hook the reader immediately
-- Use Medium-style formatting: pull quotes, section breaks (---)
-- Add a "TL;DR" or "Key Takeaways" at the top
-- Conversational but authoritative tone
-- 5-8 minute read optimal (1500-2500 words)
-- Include personal anecdotes or observations
-- End with a reflection or call to action
-- MINIMUM LENGTH: 2000+ words — comprehensive and detailed`,
+CRITICAL: MUST be under 3000 characters total. Be concise.`,
 
-      devto: `Dev.to Article:
-- Start with EXACTLY ONE YAML front matter block at the very top: title, published: false, tags (max 4, alphanumeric only)
-- Tags MUST be alphanumeric only — NO hyphens, NO underscores, NO spaces (e.g. "socialmedia" not "social-media", "smallbusiness" not "small-business")
-- Do NOT add any YAML frontmatter (--- blocks) anywhere else in the article — only ONE at the very beginning
-- Developer-community focused — practical and helpful
-- Include code examples with syntax highlighting
-- Add a "Prerequisites" section if technical
-- Conversational, peer-to-peer tone
-- Include "What I learned" or "Gotchas" sections
-- End with next steps or resources
-- MINIMUM LENGTH: 2000+ words for comprehensive articles — DO NOT summarize
+      medium: `Medium Article (MAX 15000 characters / ~2500 words)
 
-CRITICAL URL RESTRICTIONS (Dev.to will reject posts with these):
-- DO NOT include YouTube URLs or embeds (youtube.com, youtu.be)
-- DO NOT use Dev.to liquid tags like {% youtube %}, {% embed %}, {% codepen %}, {% codesandbox %}
-- DO NOT use placeholder/dummy URLs (example.com, yoursite.com, placeholder.com, test.com)
-- DO NOT invent fake URLs — only include real, verifiable links to the actual product/service being discussed
-- If you need to reference external content, describe it in text instead of embedding
-- All URLs must be real and functional — no made-up domains
-- INTERNAL LINKS MUST USE FULL URLs: Use https://trndinn.com/features NOT /features, https://trndinn.com/pricing NOT /pricing, https://trndinn.com/auth NOT /auth — relative paths do NOT work on Dev.to
+Medium uses a rich text editor. Content should paste cleanly.
 
-CRITICAL FRONTMATTER RULES:
-- ONE frontmatter block only — at the very top, nowhere else
-- Tags: alphanumeric only, lowercase, no hyphens (socialmedia not social-media)
-- Maximum 4 tags
-- Example of CORRECT output format:
+FORMAT:
+• Use ## for H2 headings, ### for H3
+• Short paragraphs (2-3 sentences)
+• Bullet lists for key points
+• Bold for emphasis sparingly
+
+STRUCTURE:
+1. TL;DR or Key Takeaways (3-5 bullets)
+2. Engaging intro (different angle than original)
+3. 4-6 main sections with clear headings
+4. Conclusion with reflection or CTA
+
+TONE: Conversational, editorial, storytelling approach.
+
+CRITICAL: Never repeat sections. Each idea appears once.`,
+
+      devto: `Dev.to Article (MAX 20000 characters)
+
+FRONTMATTER (exactly once, at top):
 ---
-title: Your Article Title Here
+title: Your Title Here
 published: false
-tags: hootsuitealternative, socialmedia, tools, smallbusiness
+tags: tag1, tag2, tag3, tag4
 ---
 
-[rest of article content with NO more --- blocks]`,
+TAGS: alphanumeric only, lowercase, max 4 (e.g., "socialmedia" not "social-media")
 
-      hashnode: `Hashnode Technical Blog:
-- Deep technical depth with clear explanations
-- Include working code examples
-- Add a "Prerequisites" section
-- Use clear subheadings for scannability
-- Developer-friendly, tutorial-like structure
-- Include diagrams or architecture descriptions
-- End with "Further Reading" or related topics
-- MINIMUM LENGTH: 2000+ words — include all technical details`,
+FORMAT: Standard markdown
+• ## for H2, ### for H3
+• Code blocks with syntax highlighting
+• Bullet lists for key points
 
-      ghost: `Ghost Blog:
-- Clean, professional writing
-- Proper heading hierarchy (H2, H3)
-- Compelling introduction that sets up the value
-- Short paragraphs for readability
-- Include a clear call-to-action at the end
-- SEO-optimized with keywords in headings
-- Add internal linking suggestions
-- MINIMUM LENGTH: 1500+ words — comprehensive coverage`,
+STRUCTURE:
+1. Brief intro
+2. Prerequisites (if technical)
+3. Main content sections
+4. Key takeaways or "What I learned"
+5. Next steps or resources
 
-      beehiiv: `Beehiiv Newsletter:
-- Personal, direct tone — like writing to a friend
-- Start with a hook that creates curiosity
-- Use bullet points for key takeaways
-- Keep paragraphs short (2-3 sentences)
-- Include a clear CTA (reply, click, share)
-- Add a P.S. line with bonus insight
-- Make it scannable but valuable
-- MINIMUM LENGTH: 1000+ words for substantial newsletters`,
+URL RULES:
+• NO YouTube embeds or liquid tags
+• NO placeholder URLs (example.com, test.com)
+• Use full URLs: https://trndinn.com/features (not /features)
 
-      telegraph: `Telegraph Article:
-- Clean, minimal formatting
-- Focus on readability
-- Short paragraphs
-- Strong opening that delivers value immediately
-- Basic formatting only (bold, italic, links)
-- No images or complex media`,
+CRITICAL: Only ONE frontmatter block. Never repeat sections.`,
 
-      blogger: `Blogger/Blogspot:
-- SEO-optimized with keywords in headings
-- Include meta description at top as comment
-- Proper heading structure (H2, H3)
-- Add internal linking suggestions
-- Conversational but informative tone`,
+      hashnode: `Hashnode Article (MAX 20000 characters)
+
+FORMAT: Standard markdown
+• ## for H2, ### for H3
+• Code blocks with language tags
+• Tables where helpful
+
+STRUCTURE:
+1. Brief intro with value proposition
+2. Prerequisites section (if technical)
+3. Main tutorial/explanation sections
+4. Code examples with explanations
+5. Further Reading section
+
+TONE: Developer-friendly, tutorial-like, clear explanations.
+
+CRITICAL: Never repeat sections. Each concept explained once.`,
+
+      ghost: `Ghost Blog (MAX 15000 characters)
+
+FORMAT: Standard markdown
+• ## for H2, ### for H3
+• Short paragraphs
+• Bullet lists for scanability
+
+STRUCTURE:
+1. Compelling intro
+2. 4-6 main sections
+3. Clear CTA at end
+
+TONE: Clean, professional, SEO-optimized.
+
+CRITICAL: Never repeat sections.`,
+
+      beehiiv: `Beehiiv Newsletter (MAX 10000 characters / ~1500 words)
+
+FORMAT: Simple, scannable
+• Bold headers for sections
+• Short paragraphs (2-3 sentences)
+• Bullet points for takeaways
+
+STRUCTURE:
+1. Hook that creates curiosity
+2. Main content (3-4 sections)
+3. Clear CTA
+4. P.S. line with bonus insight
+
+TONE: Personal, direct, like writing to a friend.`,
+
+      telegraph: `Telegraph Article (MAX 10000 characters)
+• Clean, minimal formatting
+• Short paragraphs
+• Basic formatting only (bold, italic, links)
+• No images or complex media
+• Strong opening that delivers value immediately`,
+
+      blogger: `Blogger Post (MAX 15000 characters)
+• SEO-optimized headings
+• Proper H2/H3 structure
+• Conversational but informative
+• Internal linking suggestions`,
 
       // ===== TIER 2: SUBMIT FOR REVIEW PLATFORMS =====
-      hackernoon: `HackerNoon Submission:
-- 1500+ words, tech editorial style
-- Compelling narrative hook in first paragraph
-- Technical depth with practical insights
-- Include TL;DR section at top
-- Add specific data points and statistics
-- End with actionable takeaways
-- Include brief author bio suggestion
-- Add 3-5 relevant tags
-- Generate: submission pitch, key points for editors, 2 alt titles`,
+      hackernoon: `HackerNoon (MAX 15000 characters)
+• Tech editorial style
+• TL;DR at top
+• Narrative hook in first paragraph
+• Data points and statistics
+• Actionable takeaways
+• 3-5 relevant tags`,
 
-      towards_ai: `Towards AI Submission:
-- AI/ML focused with technical accuracy
-- Explain concepts clearly for practitioners
-- Include Python code snippets if relevant
-- Add practical applications and use cases
-- Reference recent AI research
-- Include visualization descriptions`,
+      towards_ai: `Towards AI (MAX 15000 characters)
+• AI/ML focused, technical accuracy
+• Clear explanations for practitioners
+• Python code snippets if relevant
+• Practical applications
+• Research references`,
 
-      freecodecamp: `freeCodeCamp Tutorial:
-- Educational, step-by-step format
-- Beginner-friendly explanations
-- Include "What You'll Learn" section
-- Add "Prerequisites" section
-- Working code examples throughout
-- End with "Next Steps" or further learning`,
+      analytics_vidhya: `Analytics Vidhya (MAX 15000 characters)
+• Data science/ML focused
+• Step-by-step tutorials preferred
+• Code examples with explanations
+• Visualizations described
+• Practical use cases
+• Clear prerequisites section`,
+
+      freecodecamp: `freeCodeCamp Tutorial (MAX 15000 characters)
+• Educational, step-by-step
+• "What You'll Learn" section
+• Prerequisites section
+• Working code examples
+• "Next Steps" at end`,
+
+      smashing_magazine: `Smashing Magazine (MAX 15000 characters)
+• Web development/design focus
+• In-depth technical content
+• Code examples with explanations
+• Best practices highlighted
+• Accessibility considerations
+• Performance tips where relevant`,
+
+      sitepoint: `SitePoint (MAX 15000 characters)
+• Web development tutorials
+• Clear, structured format
+• Code examples with syntax highlighting
+• Step-by-step instructions
+• Browser compatibility notes
+• Links to documentation`,
+
+      readwrite: `ReadWrite (MAX 12000 characters)
+• Tech industry analysis
+• News-style opening
+• Expert quotes or data
+• Industry trends
+• Future implications
+• Balanced perspective`,
+
+      yourstory: `YourStory (MAX 12000 characters)
+• Startup/entrepreneur focus
+• Founder journey narrative
+• Problem-solution format
+• Metrics and traction
+• Lessons learned
+• Indian market context if relevant`,
+
+      startuptalky: `StartupTalky (MAX 12000 characters)
+• Startup ecosystem focus
+• Business model analysis
+• Growth strategies
+• Funding/investment angle
+• Market opportunity
+• Competitive landscape`,
+
+      inc42: `Inc42 (MAX 12000 characters)
+• Indian startup ecosystem
+• Data-driven insights
+• Funding news angle
+• Market analysis
+• Founder perspectives
+• Policy/regulatory context`,
+
+      techstory: `TechStory (MAX 12000 characters)
+• Tech news format
+• Startup coverage
+• Product launches
+• Industry trends
+• Expert commentary
+• Future outlook`,
 
       // ===== TIER 3: DISCUSSION PLATFORMS =====
-      reddit: `Reddit Discussion Post:
+      reddit: `Reddit Post (MAX 10000 characters)
 CRITICAL: Value-first, NO self-promotion
-- Lead with insights/findings, NOT "I wrote an article..."
-- Sound like a knowledgeable community member
-- Ask genuine questions to spark discussion
-- Use markdown formatting
-- Be humble and open to feedback
-Format:
-1. Hook (interesting finding or question)
-2. Context (brief background)
-3. Key insights (bullet points)
-4. Discussion questions (2-3 genuine questions)
-Also suggest: 3 relevant subreddits, best posting times`,
+1. Hook (finding or question)
+2. Brief context
+3. Key insights (bullets)
+4. 2-3 discussion questions
+Suggest: 3 relevant subreddits
 
-      indiehackers: `Indie Hackers Post:
-- Founder journey format
-- Focus on lessons learned and challenges
-- Include specific metrics if available
-- Be transparent about failures and pivots
-- End with discussion questions
-- Builder/maker community tone
-Format: Problem → What I Built → Key Learnings → What's Next → Questions`,
+TONE: Authentic, community-focused, no marketing speak.`,
 
-      hackernews: `Hacker News Submission:
-CRITICAL: Technical and objective tone
-- NO marketing language whatsoever
-- Factual, concise title
-- Lead with most interesting technical aspect
-- Be prepared for critical feedback
-Format: Submission title (factual) + brief context comment`,
+      indiehackers: `Indie Hackers Post (MAX 10000 characters)
+Format: Problem → What I Built → Key Learnings → What's Next → Questions
+• Founder journey style
+• Specific metrics if available
+• Transparent about challenges
+• Revenue/growth numbers
+• Tech stack mentioned`,
 
-      // ===== LEGACY/SOCIAL PLATFORMS =====
-      twitter_thread: `Twitter/X Thread:
-- 5-10 tweets, each UNDER 280 characters
-- Number each tweet (1/, 2/, etc)
-- First tweet is a hook (bold claim or question)
-- Each tweet should be standalone-valuable
-- Last tweet is a CTA
-- Separate tweets with "---"
-- Use emojis sparingly for emphasis`,
+      producthunt_discussions: `Product Hunt Discussion (MAX 5000 characters)
+• Product-focused insights
+• Maker perspective
+• Community value
+• Ask for feedback
+• Share learnings
+• Engage authentically`,
 
-      newsletter: `Email Newsletter:
-- Personal, direct tone
-- Short paragraphs (2-3 sentences max)
-- Clear sections with bold headers
-- Single, clear CTA
-- Add a P.S. line
-- Make it scannable
-- "Letter to a friend" feel`,
+      growthhackers: `GrowthHackers (MAX 8000 characters)
+• Growth marketing focus
+• Experiment results
+• Metrics and data
+• Actionable tactics
+• A/B test insights
+• Scalable strategies`,
 
-      substack: `Substack Newsletter:
-- Personal, opinionated voice
-- Start with personal opener
-- Include personal anecdotes
-- End with invitation to subscribe/share
-- Conversational, intimate tone`,
+      hackernews: `Hacker News (MAX 2000 characters)
+• Factual, concise title
+• NO marketing language
+• Technical focus
+• Brief context comment
+• Link to full article
+• Invite technical discussion`,
 
-      facebook: `Facebook Post:
-- Conversational, accessible
-- Ask a question to drive comments
-- Keep under 500 words
-- Use emoji sparingly
-- End with engagement prompt`,
+      huggingface_community: `Hugging Face Community (MAX 8000 characters)
+• ML/AI model focus
+• Technical implementation
+• Code snippets
+• Model performance
+• Use cases
+• Community collaboration`,
 
-      instagram: `Instagram Carousel:
-- 7-10 slides format
-- Each slide: [Slide N - Topic]
-- First slide is hook/title
-- Last slide is CTA
-- Keep text per slide under 50 words
-- Visual-first thinking`,
+      // ===== SOCIAL PLATFORMS =====
+      twitter_thread: `Twitter/X Thread (MAX 4000 characters total / 10-15 tweets)
+• Each tweet UNDER 280 chars
+• Number: 1/, 2/, etc.
+• First tweet = hook
+• Last tweet = CTA
+• Separate tweets with ---
+• 2-3 hashtags on last tweet only`,
+
+      newsletter: `Email Newsletter (MAX 10000 characters)
+• Personal, direct tone
+• Short paragraphs
+• Clear sections
+• Single CTA
+• P.S. line`,
+
+      substack: `Substack (MAX 12000 characters)
+• Personal, opinionated voice
+• Personal anecdotes
+• Conversational tone
+• Subscribe/share CTA`,
+
+      facebook: `Facebook Post (MAX 3000 characters)
+• Conversational
+• Question to drive comments
+• Emoji sparingly
+• Engagement prompt at end
+• Tag relevant pages if applicable`,
+
+      instagram: `Instagram Carousel (MAX 2200 characters for caption)
+• [Slide N - Topic] format
+• First slide = hook
+• Last slide = CTA
+• Under 50 words per slide
+• 5-10 slides total
+• Hashtags in first comment (not caption)`,
     };
 
-    return rules[platform] || `Adapt for ${platform}. Keep the core message but match the platform's conventions and audience expectations.`;
+    return rules[platform] || `Adapt for ${platform}. Keep core message, match platform conventions. Max 10000 characters.`;
   }
 
   private fallbackAdaptContent(
