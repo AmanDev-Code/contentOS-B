@@ -1345,6 +1345,11 @@ ${body}
       // Post-process: convert any relative URLs to absolute
       generatedContent = this.convertRelativeUrlsToAbsolute(generatedContent);
 
+      // Post-process: strip markdown syntax for LinkedIn (their editor doesn't render it)
+      if (platform === 'linkedin_article' || platform === 'linkedin_post') {
+        generatedContent = this.stripMarkdownForLinkedIn(generatedContent);
+      }
+
       return { content: generatedContent, platformTitle, hashtags, seoScore };
     } catch (error) {
       this.logger.error(`[${platform}] Adaptation failed: ${(error as Error).message}`);
@@ -1415,6 +1420,42 @@ ${body}
     );
 
     return content;
+  }
+
+  /**
+   * Strip markdown syntax for LinkedIn content.
+   * LinkedIn's editor doesn't render markdown — it shows raw symbols.
+   */
+  private stripMarkdownForLinkedIn(content: string): string {
+    // Remove heading markers: ## Heading → Heading
+    content = content.replace(/^#{1,6}\s+/gm, '');
+
+    // Convert bold **text** or __text__ → text
+    content = content.replace(/\*\*(.*?)\*\*/g, '$1');
+    content = content.replace(/__(.*?)__/g, '$1');
+
+    // Convert italic *text* or _text_ → text (but not bullet points)
+    content = content.replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, '$1');
+
+    // Convert markdown links [text](url) → text (url)
+    content = content.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 → $2');
+
+    // Convert markdown bullet points to clean bullets
+    content = content.replace(/^[-*]\s+/gm, '• ');
+
+    // Remove code backticks
+    content = content.replace(/`([^`]+)`/g, '$1');
+
+    // Remove code blocks
+    content = content.replace(/```[\s\S]*?```/g, '');
+
+    // Remove horizontal rules
+    content = content.replace(/^[-*_]{3,}\s*$/gm, '—');
+
+    // Collapse excessive blank lines (more than 2) to max 2
+    content = content.replace(/\n{4,}/g, '\n\n\n');
+
+    return content.trim();
   }
 
   /**
@@ -1846,22 +1887,21 @@ Output JSON:
   private getEnhancedPlatformRules(platform: string): string {
     const rules: Record<string, string> = {
       // ===== TIER 1: AUTO-PUBLISH PLATFORMS =====
-      linkedin_article: `LinkedIn Article (Long-form):
+      linkedin_article: `LinkedIn Article/Newsletter (Long-form):
 - Professional thought leadership tone
-- 1500-2000 words optimal
-- Strong hook in first 2 lines (appears before "see more")
+- 1500-3000 words, comprehensive and well-structured
+- Strong hook in first 2 lines
 - Use data points, statistics, and industry insights
 - Include personal experience or case study angle
+- End with a thought-provoking question to drive comments
 - Add 3-5 relevant hashtags at the end
-- End with a thought-provoking question
-- Structure: Hook → Context → Insights → Takeaways → CTA
-- FORMATTING: LinkedIn articles do NOT support Markdown. Use PLAIN TEXT formatting:
-  • Use ALL CAPS or line breaks for emphasis instead of ** or #
-  • Write headings as standalone lines in UPPERCASE or Title Case (no # prefix)
-  • Use • or — for bullet points (not - or *)
-  • Write links as plain URLs or "Link text: https://url" (not [text](url))
-  • Use blank lines between paragraphs for readability
-  • No code blocks, no markdown tables — use plain text tables with spacing if needed`,
+- Structure: Hook → Context → Main Points → Comparison/Data → Takeaways → CTA
+- Write naturally as clean text — NO markdown syntax (no #, no **, no [], no backticks)
+- Use short paragraphs, clear section headings on their own line, and bullet points where appropriate
+- DO NOT repeat sections or content — each section should cover NEW information only
+- DO NOT pad with filler text — be concise and valuable
+- Keep headings short and natural (Title Case, not ALL CAPS)
+- Write as if you are directly publishing to LinkedIn's article editor`,
 
       linkedin_post: `LinkedIn Post (Short-form):
 - MAX 1300 characters total
