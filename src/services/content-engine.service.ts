@@ -1887,21 +1887,15 @@ Output JSON:
   private getEnhancedPlatformRules(platform: string): string {
     const rules: Record<string, string> = {
       // ===== TIER 1: AUTO-PUBLISH PLATFORMS =====
-      linkedin_article: `LinkedIn Article/Newsletter (Long-form):
-- Professional thought leadership tone
-- 1500-3000 words, comprehensive and well-structured
-- Strong hook in first 2 lines
-- Use data points, statistics, and industry insights
-- Include personal experience or case study angle
-- End with a thought-provoking question to drive comments
-- Add 3-5 relevant hashtags at the end
-- Structure: Hook → Context → Main Points → Comparison/Data → Takeaways → CTA
-- Write naturally as clean text — NO markdown syntax (no #, no **, no [], no backticks)
-- Use short paragraphs, clear section headings on their own line, and bullet points where appropriate
-- DO NOT repeat sections or content — each section should cover NEW information only
-- DO NOT pad with filler text — be concise and valuable
-- Keep headings short and natural (Title Case, not ALL CAPS)
-- Write as if you are directly publishing to LinkedIn's article editor`,
+      linkedin_article: `Adapt the blog content into a LinkedIn Article. Write it exactly as you would if publishing directly to LinkedIn's article editor.
+- Include proper headings, subheadings, comparison tables, bullet points, and structured sections
+- Keep the full depth and detail of the original blog — do not summarize or shorten
+- Write for SEO: use the target keyword naturally in headings and throughout the text
+- Write for GEO (Generative Engine Optimization): include factual claims, statistics, named entities, and structured data that AI engines can extract and cite
+- Write for AEO (Answer Engine Optimization): include clear question-answer pairs, concise definitions, and direct answers to common queries
+- NO markdown syntax — write in plain text that LinkedIn renders correctly
+- Do NOT repeat content across sections — every section must add new value
+- Include a comparison table using plain text alignment if the article is comparing tools/products`,
 
       linkedin_post: `LinkedIn Post (Short-form):
 - MAX 1300 characters total
