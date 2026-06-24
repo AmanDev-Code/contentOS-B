@@ -1423,25 +1423,29 @@ ${body}
   }
 
   /**
-   * Clean content for LinkedIn — keep bold markers but remove other markdown.
-   * LinkedIn's article editor supports bold (**text**) and bullet points natively.
+   * Clean content for LinkedIn — remove ALL markdown syntax.
+   * LinkedIn's article editor does NOT render markdown — it shows raw symbols.
+   * The editor has its own toolbar for formatting (B, I, lists, headings).
    */
   private stripMarkdownForLinkedIn(content: string): string {
-    // Remove heading markers: ## Heading → Heading (LinkedIn has H1/H2/H3 buttons)
+    // Remove markdown image syntax: ![alt](url) → just remove entirely (images are added separately)
+    content = content.replace(/!\[[^\]]*\]\([^)]+\)/g, '');
+
+    // Remove heading markers: # Heading → Heading
     content = content.replace(/^#{1,6}\s+/gm, '');
 
-    // Keep **bold** markers — LinkedIn editor supports these
-    // But remove __ style bold
-    content = content.replace(/__(.*?)__/g, '**$1**');
+    // Remove bold markers: **text** → text
+    content = content.replace(/\*\*([^*]+)\*\*/g, '$1');
+    content = content.replace(/__([^_]+)__/g, '$1');
 
-    // Convert italic *text* to plain (LinkedIn doesn't render single asterisks well)
+    // Remove italic markers: *text* → text (but not bullet points)
     content = content.replace(/(?<![*\w])\*([^*\n]+)\*(?![*\w])/g, '$1');
+    content = content.replace(/(?<![_\w])_([^_\n]+)_(?![_\w])/g, '$1');
 
     // Convert markdown links [text](url) → text (url)
     content = content.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
 
-    // Keep bullet points - and * as they are (LinkedIn editor handles them)
-    // Convert markdown bullet points to • for cleaner look
+    // Convert markdown bullet points to clean bullets
     content = content.replace(/^[-*]\s+/gm, '• ');
 
     // Remove code backticks
@@ -1450,11 +1454,17 @@ ${body}
     // Remove code blocks
     content = content.replace(/```[\s\S]*?```/g, '');
 
-    // Remove horizontal rules
+    // Remove horizontal rules (---, ***, ___)
     content = content.replace(/^[-*_]{3,}\s*$/gm, '');
 
+    // Remove any remaining raw markdown-style separators
+    content = content.replace(/^---+\s*$/gm, '');
+
     // Collapse excessive blank lines (more than 2) to max 2
-    content = content.replace(/\n{4,}/g, '\n\n');
+    content = content.replace(/\n{3,}/g, '\n\n');
+
+    // Clean up any double spaces
+    content = content.replace(/  +/g, ' ');
 
     return content.trim();
   }
@@ -1888,26 +1898,30 @@ Output JSON:
   private getEnhancedPlatformRules(platform: string): string {
     const rules: Record<string, string> = {
       // ===== TIER 1: AUTO-PUBLISH PLATFORMS =====
-      linkedin_article: `Adapt the blog content into a LinkedIn Article ready for LinkedIn's native article editor.
+      linkedin_article: `Adapt the blog content into a LinkedIn Article.
 
-FORMATTING (LinkedIn article editor supports these natively):
-- Use clear section headings (the editor has H1, H2, H3 buttons)
-- Use **bold** for emphasis on key terms and important points
-- Use bullet points (•) for lists — the editor converts these
-- Use numbered lists (1. 2. 3.) for step-by-step content
-- Include a comparison table if comparing products/tools
-- Keep paragraphs short (2-3 sentences max)
-- Add line breaks between sections for readability
+CRITICAL: LinkedIn does NOT render markdown. Write in PLAIN TEXT only.
+• NO # or ## for headings — just write the heading text on its own line
+• NO **bold** or *italic* markers — just write plain text
+• NO [text](url) links — write as: text (https://url)
+• NO ![image](url) — images are added separately via the editor
+• NO --- horizontal rules
+• NO markdown tables — use plain text with line breaks
 
-CONTENT REQUIREMENTS:
-- Keep the full depth and detail of the original blog — do not summarize
-- Write for SEO: use target keywords naturally in headings and text
-- Write for GEO: include facts, statistics, named entities that AI can cite
-- Write for AEO: include clear Q&A pairs and direct answers to queries
-- Do NOT repeat content — every section must add new value
-- End with a thought-provoking question and relevant hashtags
+STRUCTURE:
+• Clear section headings on their own line (the editor has H1/H2 buttons to format these)
+• Short paragraphs (2-3 sentences)
+• Bullet points using • character for lists
+• Numbered lists using 1. 2. 3.
 
-OUTPUT: Clean, well-structured text with **bold** markers and bullet points that paste directly into LinkedIn's article editor.`,
+CONTENT:
+• Keep full depth of original blog — do not summarize
+• Include comparison data if comparing products
+• Write for SEO: keywords in headings and text
+• Write for GEO: facts, statistics, named entities
+• Write for AEO: Q&A pairs, direct answers
+• Do NOT repeat content across sections
+• End with a question and hashtags`,
 
       linkedin_post: `LinkedIn Post (Short-form):
 - MAX 1300 characters total
