@@ -6,6 +6,7 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { SupabaseService } from './supabase.service';
 import { AiGatewayService, AiGatewayError } from './ai-gateway.service';
 import { PlatformPublishersService } from './platform-publishers.service';
@@ -614,7 +615,11 @@ Requirements:
 
     // Insert inline images into the adapted content
     let finalContent = adaptedResult.content;
-    if (inlineImages.length > 0) {
+    
+    // Special processing for LinkedIn articles: process image placeholders and strip markdown
+    if (platform === 'linkedin_article') {
+      finalContent = await this.processLinkedInArticleContent(finalContent, postId);
+    } else if (inlineImages.length > 0) {
       finalContent = this.insertInlineImagesIntoContent(adaptedResult.content, inlineImages);
     }
 
@@ -1423,15 +1428,27 @@ ${body}
   }
 
   /**
-   * Clean content for LinkedIn — remove ALL markdown syntax.
+   * Clean content for LinkedIn — remove markdown syntax but PRESERVE structure.
    * LinkedIn's article editor does NOT render markdown — it shows raw symbols.
    * The editor has its own toolbar for formatting (B, I, lists, headings).
+   * 
+   * PRESERVES:
+   * - ALL-CAPS section headings
+   * - Em-dash dividers (———)
+   * - Bullet points (•)
+   * - [IMAGE: ...] placeholders (converted to clear format)
+   * 
+   * REMOVES:
+   * - Markdown heading markers (#, ##, etc.)
+   * - Bold/italic markers (**, *, __, _)
+   * - Markdown image syntax ![](...)
+   * - Code blocks and backticks
    */
   private stripMarkdownForLinkedIn(content: string): string {
     // Remove markdown image syntax: ![alt](url) → just remove entirely (images are added separately)
     content = content.replace(/!\[[^\]]*\]\([^)]+\)/g, '');
 
-    // Remove heading markers: # Heading → Heading
+    // Remove heading markers: # Heading → Heading (but preserve the text)
     content = content.replace(/^#{1,6}\s+/gm, '');
 
     // Remove bold markers: **text** → text
@@ -1445,7 +1462,7 @@ ${body}
     // Convert markdown links [text](url) → text (url)
     content = content.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
 
-    // Convert markdown bullet points to clean bullets
+    // Convert markdown bullet points to clean bullets (preserve existing • bullets)
     content = content.replace(/^[-*]\s+/gm, '• ');
 
     // Remove code backticks
@@ -1454,11 +1471,9 @@ ${body}
     // Remove code blocks
     content = content.replace(/```[\s\S]*?```/g, '');
 
-    // Remove horizontal rules (---, ***, ___)
-    content = content.replace(/^[-*_]{3,}\s*$/gm, '');
-
-    // Remove any remaining raw markdown-style separators
-    content = content.replace(/^---+\s*$/gm, '');
+    // PRESERVE em-dash dividers (———) - don't remove them
+    // Convert markdown horizontal rules (---, ***, ___) to em-dash dividers
+    content = content.replace(/^[-*_]{3,}\s*$/gm, '———');
 
     // Collapse excessive blank lines (more than 2) to max 2
     content = content.replace(/\n{3,}/g, '\n\n');
@@ -1467,6 +1482,136 @@ ${body}
     content = content.replace(/  +/g, ' ');
 
     return content.trim();
+  }
+
+  /**
+   * Process LinkedIn article content: strip markdown and generate inline images.
+   * This is called specifically for linkedin_article platform after content generation.
+   */
+  private async processLinkedInArticleContent(
+    content: string,
+    postId: string,
+  ): Promise<string> {
+    // First, strip markdown while preserving structure
+    let processedContent = this.stripMarkdownForLinkedIn(content);
+
+    // Find all [IMAGE: ...] placeholders
+    const imagePlaceholderRegex = /\[IMAGE:\s*([^\]]+)\]/g;
+    const placeholders: { match: string; description: string }[] = [];
+    let match;
+
+    while ((match = imagePlaceholderRegex.exec(processedContent)) !== null) {
+      placeholders.push({
+        match: match[0],
+        description: match[1].trim(),
+      });
+    }
+
+    if (placeholders.length === 0) {
+      return processedContent;
+    }
+
+    this.logger.log(`[linkedin_article] Found ${placeholders.length} image placeholders to generate`);
+
+    // Generate images for each placeholder
+    for (const placeholder of placeholders) {
+      try {
+        // Create an optimized prompt for the image
+        const imagePrompt = this.createLinkedInImagePrompt(placeholder.description);
+        
+        this.logger.log(`[linkedin_article] Generating image: "${placeholder.description}"`);
+
+        // Generate the image using existing infrastructure
+        const { b64 } = await this.aiGateway.generateImageB64({
+          prompt: imagePrompt,
+          size: '1792x1024', // Landscape format for LinkedIn articles
+          quality: 'standard',
+          timeoutMs: 120_000,
+        });
+
+        // Upload to storage
+        const client = this.supabase.getServiceClient();
+        await this.ensureBlogImagesBucket();
+
+        const imageId = crypto.randomUUID();
+        const filename = `linkedin-article-images/${postId}/${imageId}.png`;
+        const buffer = Buffer.from(b64, 'base64');
+
+        const { error: uploadErr } = await client.storage
+          .from('blog-images')
+          .upload(filename, buffer, {
+            contentType: 'image/png',
+            upsert: true,
+          });
+
+        if (uploadErr) {
+          this.logger.warn(`[linkedin_article] Image upload failed: ${uploadErr.message}`);
+          // Replace with instruction to add image manually
+          processedContent = processedContent.replace(
+            placeholder.match,
+            `\n[INSERT IMAGE HERE]\nImage: "${placeholder.description}"\n(Image generation failed - please add manually)\n`,
+          );
+          continue;
+        }
+
+        // Get public URL
+        const { data: urlData } = client.storage
+          .from('blog-images')
+          .getPublicUrl(filename);
+
+        const imageUrl = urlData?.publicUrl || '';
+
+        // Replace placeholder with formatted image block
+        const imageBlock = `
+[INSERT IMAGE HERE]
+Image: "${placeholder.description}"
+URL: ${imageUrl}
+`;
+        processedContent = processedContent.replace(placeholder.match, imageBlock);
+
+        this.logger.log(`[linkedin_article] Image generated and uploaded: ${imageUrl}`);
+      } catch (error) {
+        this.logger.error(`[linkedin_article] Image generation failed for "${placeholder.description}": ${(error as Error).message}`);
+        // Replace with instruction to add image manually
+        processedContent = processedContent.replace(
+          placeholder.match,
+          `\n[INSERT IMAGE HERE]\nImage: "${placeholder.description}"\n(Image generation failed - please add manually)\n`,
+        );
+      }
+    }
+
+    return processedContent;
+  }
+
+  /**
+   * Create an optimized image prompt for LinkedIn article images.
+   * Transforms descriptive alt text into a detailed image generation prompt.
+   */
+  private createLinkedInImagePrompt(description: string): string {
+    // Base style for professional LinkedIn images
+    const baseStyle = 'Professional, clean, modern business illustration style. High quality, suitable for LinkedIn article. No text overlays.';
+    
+    // Detect image type and enhance prompt accordingly
+    const lowerDesc = description.toLowerCase();
+    
+    if (lowerDesc.includes('chart') || lowerDesc.includes('comparison') || lowerDesc.includes('graph')) {
+      return `${baseStyle} Create a clean, professional infographic or data visualization showing: ${description}. Use a modern color palette with blues and greens. Abstract representation, not actual data.`;
+    }
+    
+    if (lowerDesc.includes('dashboard') || lowerDesc.includes('interface') || lowerDesc.includes('screenshot')) {
+      return `${baseStyle} Create a stylized, abstract representation of a modern software dashboard or interface showing: ${description}. Clean UI design, minimal, professional.`;
+    }
+    
+    if (lowerDesc.includes('infographic') || lowerDesc.includes('workflow') || lowerDesc.includes('process')) {
+      return `${baseStyle} Create a professional infographic or workflow diagram illustrating: ${description}. Use icons and visual elements, modern flat design style.`;
+    }
+    
+    if (lowerDesc.includes('team') || lowerDesc.includes('people') || lowerDesc.includes('collaboration')) {
+      return `${baseStyle} Create an illustration of professional business people or team collaboration showing: ${description}. Diverse, modern, corporate setting.`;
+    }
+    
+    // Default: general professional illustration
+    return `${baseStyle} Create a professional illustration for a LinkedIn article about: ${description}. Modern, clean, business-appropriate visual.`;
   }
 
   /**
@@ -1898,21 +2043,40 @@ Output JSON:
   private getEnhancedPlatformRules(platform: string): string {
     const rules: Record<string, string> = {
       // ===== TIER 1: AUTO-PUBLISH PLATFORMS =====
-      linkedin_article: `Adapt the blog content into a LinkedIn Article.
+      linkedin_article: `Adapt the blog content into a LinkedIn Article with RICH STRUCTURE.
 
-CRITICAL: LinkedIn does NOT render markdown. Write in PLAIN TEXT only.
-• NO # or ## for headings — just write the heading text on its own line
-• NO **bold** or *italic* markers — just write plain text
-• NO [text](url) links — write as: text (https://url)
-• NO ![image](url) — images are added separately via the editor
-• NO --- horizontal rules
-• NO markdown tables — use plain text with line breaks
+CRITICAL: LinkedIn does NOT render markdown. Write in PLAIN TEXT with visual structure.
+
+FORMAT RULES:
+• Section headings: Write in ALL-CAPS on their own line (e.g., "WHY TEAMS ARE LEAVING HOOTSUITE")
+• Dividers: Use ——— (three em-dashes) between major sections
+• Bullet points: Use • character for lists
+• Numbered lists: Use 1. 2. 3.
+• Links: Write as plain text with URL in parentheses: text (https://url)
+• NO markdown syntax: NO #, NO **, NO *, NO [text](url), NO ![image](url)
+
+INLINE IMAGES (REQUIRED):
+• Include 2-3 image placeholders throughout the article
+• Format: [IMAGE: descriptive alt text for the image]
+• Place images after key sections to illustrate points
+• Examples:
+  - [IMAGE: Comparison chart showing Hootsuite pricing vs alternatives]
+  - [IMAGE: Dashboard screenshot showing AI content generation interface]
+  - [IMAGE: Infographic of social media scheduling workflow]
 
 STRUCTURE:
-• Clear section headings on their own line (the editor has H1/H2 buttons to format these)
-• Short paragraphs (2-3 sentences)
-• Bullet points using • character for lists
-• Numbered lists using 1. 2. 3.
+• Opening paragraph (2-3 sentences) — hook the reader
+• ——— divider
+• FIRST SECTION HEADING (ALL-CAPS)
+• Content with bullet points
+• [IMAGE: relevant visual]
+• ——— divider
+• SECOND SECTION HEADING (ALL-CAPS)
+• Continue pattern...
+• ——— divider
+• CLOSING SECTION
+• ——— divider
+• Hashtags at the very end (3-5 relevant hashtags)
 
 CONTENT:
 • Keep full depth of original blog — do not summarize
@@ -1921,7 +2085,7 @@ CONTENT:
 • Write for GEO: facts, statistics, named entities
 • Write for AEO: Q&A pairs, direct answers
 • Do NOT repeat content across sections
-• End with a question and hashtags`,
+• End with a question before the hashtags`,
 
       linkedin_post: `LinkedIn Post (Short-form):
 - MAX 1300 characters total
