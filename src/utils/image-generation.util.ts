@@ -552,13 +552,12 @@ export async function generateOGImage(options: OGImageOptions): Promise<Buffer> 
   <!-- Inner card area with subtle border -->
   <rect x="50" y="40" width="${width - 100}" height="${height - 80}" rx="16" ry="16" fill="none" stroke="${b.border}" stroke-width="1" opacity="0.5"/>
 
-  <!-- Brand name -->
-  <text x="80" y="90" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="${b.primary}" letter-spacing="3">TRNDINN</text>
+  <!-- Brand name - removed for clean design -->
 
   <!-- Category badge -->
   ${categoryBadge}
 
-  <!-- Decorative line below brand -->
+  <!-- Decorative line -->
   <line x1="80" y1="120" x2="200" y2="120" stroke="${b.primary}" stroke-width="2" opacity="0.4"/>
 
   <!-- Title -->
@@ -572,12 +571,10 @@ export async function generateOGImage(options: OGImageOptions): Promise<Buffer> 
   <!-- Bottom separator -->
   <line x1="80" y1="${height - 80}" x2="${width - 80}" y2="${height - 80}" stroke="${b.border}" stroke-width="1"/>
 
-  <!-- Footer: domain + read article -->
-  <text x="80" y="${height - 45}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="${b.textMuted}" letter-spacing="0.5">trndinn.com</text>
-  <circle cx="178" cy="${height - 49}" r="2" fill="${b.textMuted}" opacity="0.5"/>
-  <text x="196" y="${height - 45}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="${b.primary}" letter-spacing="0.5">Read Article</text>
+  <!-- Footer: Read article CTA only, no branding -->
+  <text x="80" y="${height - 45}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="${b.primary}" letter-spacing="0.5">Read Article</text>
 
-  <!-- Bottom-right brand accent dot cluster -->
+  <!-- Bottom-right accent dot cluster -->
   <circle cx="${width - 100}" cy="${height - 50}" r="4" fill="${b.primary}" opacity="0.6"/>
   <circle cx="${width - 115}" cy="${height - 56}" r="2.5" fill="${b.primaryLight}" opacity="0.4"/>
   <circle cx="${width - 88}" cy="${height - 60}" r="2" fill="${b.primary}" opacity="0.3"/>
@@ -697,8 +694,7 @@ export interface InlineImageOptions {
 
 /**
  * Generate a platform-specific cover image
- * Note: Platform branding (DEV.to, LinkedIn, etc.) is NOT shown on the image
- * to keep it clean and professional. Only Trndinn branding is shown.
+ * Note: Images are clean without any branding watermarks.
  */
 export async function generatePlatformCoverImage(
   options: PlatformCoverImageOptions,
@@ -771,8 +767,7 @@ export async function generatePlatformCoverImage(
   <!-- Inner card border -->
   <rect x="40" y="30" width="${width - 80}" height="${height - 60}" rx="12" ry="12" fill="none" stroke="${style.borderColor}" stroke-width="1" opacity="0.4"/>
 
-  <!-- Brand -->
-  <text x="80" y="75" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="${style.accentColor}" letter-spacing="2.5">TRNDINN</text>
+  <!-- Clean design - no branding watermark -->
 
   <!-- Category badge -->
   ${categoryBadge}
@@ -791,8 +786,7 @@ export async function generatePlatformCoverImage(
   <!-- Bottom separator -->
   <line x1="80" y1="${height - 65}" x2="${width - 80}" y2="${height - 65}" stroke="${style.borderColor}" stroke-width="1"/>
 
-  <!-- Footer - only trndinn.com, no platform name -->
-  <text x="80" y="${height - 40}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" fill="${style.textMuted}" letter-spacing="0.4">trndinn.com</text>
+  <!-- Footer - hashtags only, no branding -->
   ${hashtagsText ? `<text x="${width - 80}" y="${height - 40}" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="${style.accentColor}" text-anchor="end" letter-spacing="0.3">${escapeXml(hashtagsText)}</text>` : ''}
 
   <!-- Accent dots -->
@@ -1039,7 +1033,7 @@ async function generateInfographicImage(
     <text x="60" y="60" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="700" fill="${colors.text}">${escapeXml(title.substring(0, 45))}</text>
     <line x1="60" y1="80" x2="200" y2="80" stroke="${colors.accent}" stroke-width="2" opacity="0.6"/>
     ${bars}
-    <text x="${width - 40}" y="${height - 20}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+    <text x="${width - 40}" y="${height - 20}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end"></text>
   </svg>`;
 
   return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
@@ -1095,7 +1089,7 @@ async function generateComparisonImage(
     ${leftItemsSvg}
     ${rightItemsSvg}
     
-    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end"></text>
   </svg>`;
 
   return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
@@ -1136,7 +1130,7 @@ async function generateWorkflowImage(
     <rect width="${width}" height="${height}" fill="url(#bg)"/>
     <text x="${width / 2}" y="45" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="${colors.text}" text-anchor="middle">${escapeXml(title.substring(0, 45))}</text>
     ${stepsSvg}
-    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end"></text>
   </svg>`;
 
   return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
@@ -1176,7 +1170,7 @@ async function generateQuoteImage(
     
     ${author ? `<text x="${width / 2}" y="${height - 50}" font-family="system-ui, sans-serif" font-size="14" fill="${colors.textMuted}" text-anchor="middle">— ${escapeXml(author)}</text>` : ''}
     
-    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end"></text>
   </svg>`;
 
   return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
@@ -1217,7 +1211,7 @@ async function generateStatisticImage(
     <text x="${width / 2}" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="600" fill="${colors.text}" text-anchor="middle">${escapeXml(title.substring(0, 50))}</text>
     <line x1="${width / 2 - 60}" y1="70" x2="${width / 2 + 60}" y2="70" stroke="${colors.accent}" stroke-width="2" opacity="0.5"/>
     ${statsSvg}
-    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end"></text>
   </svg>`;
 
   return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
@@ -1257,7 +1251,7 @@ async function generateChecklistImage(
     <text x="50" y="55" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="${colors.text}">${escapeXml(title.substring(0, 40))}</text>
     <line x1="50" y1="72" x2="180" y2="72" stroke="${colors.accent}" stroke-width="2" opacity="0.6"/>
     ${itemsSvg}
-    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end"></text>
   </svg>`;
 
   return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
@@ -1306,7 +1300,7 @@ async function generateTimelineImage(
     
     ${eventsSvg}
     
-    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end">trndinn.com</text>
+    <text x="${width - 30}" y="${height - 15}" font-family="system-ui, sans-serif" font-size="10" fill="${colors.textMuted}" text-anchor="end"></text>
   </svg>`;
 
   return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();

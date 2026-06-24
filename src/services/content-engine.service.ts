@@ -7,6 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import sharp from 'sharp';
 import { SupabaseService } from './supabase.service';
 import { AiGatewayService, AiGatewayError } from './ai-gateway.service';
 import { PlatformPublishersService } from './platform-publishers.service';
@@ -94,6 +95,32 @@ export class ContentEngineService {
     @Inject(MinioService)
     private readonly minioService?: MinioService,
   ) {}
+
+  /**
+   * Strip C2PA Content Credentials and other AI-provider metadata from images.
+   * Re-encodes from decoded pixels so provider manifests (EXIF, XMP, IPTC, C2PA)
+   * are not carried through. This prevents LinkedIn's "cr" badge detection.
+   */
+  private async stripAiMetadata(imageBuffer: Buffer): Promise<Buffer> {
+    try {
+      const meta = await sharp(imageBuffer).metadata();
+      const format = meta.format;
+      if (format === 'jpeg' || format === 'jpg') {
+        return sharp(imageBuffer)
+          .rotate()
+          .jpeg({ quality: 92, mozjpeg: true, chromaSubsampling: '4:4:4' })
+          .toBuffer();
+      }
+      return sharp(imageBuffer)
+        .rotate()
+        .png({ compressionLevel: 6 })
+        .toBuffer();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`stripAiMetadata failed, using original buffer: ${msg}`);
+      return imageBuffer;
+    }
+  }
 
   /**
    * Extract JSON from AI response that may be wrapped in markdown code blocks.
@@ -1553,7 +1580,9 @@ ${body}
 
         const imageId = crypto.randomUUID();
         const filename = `linkedin-article-images/${postId}/${imageId}.png`;
-        const buffer = Buffer.from(b64, 'base64');
+        const rawBuffer = Buffer.from(b64, 'base64');
+        // Strip C2PA/EXIF metadata to prevent LinkedIn "cr" badge detection
+        const buffer = await this.stripAiMetadata(rawBuffer);
 
         const { error: uploadErr } = await client.storage
           .from('blog-images')
@@ -4071,7 +4100,9 @@ Rules:
         timeoutMs: 120_000,
       });
 
-      const buffer = Buffer.from(b64, 'base64');
+      const rawBuffer = Buffer.from(b64, 'base64');
+      // Strip C2PA/EXIF metadata to prevent LinkedIn "cr" badge detection
+      const buffer = await this.stripAiMetadata(rawBuffer);
       const filename = `post-images/${img.post_id}/${imageId}.png`;
 
       const { error: uploadErr } = await client.storage
