@@ -190,7 +190,7 @@ export class AdminMediaController {
   @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
   @ApiOperation({
     summary:
-      'Upload image into media/cms (same optimization + credits as /media/upload)',
+      'Upload any file into media/cms (images are optimized, other files stored as-is)',
   })
   async upload(
     @Req() req: AuthenticatedRequest,
@@ -200,6 +200,8 @@ export class AdminMediaController {
       filename?: string;
       path?: string;
       fullPath?: boolean;
+      skipOptimization?: boolean;
+      contentType?: string;
     },
   ) {
     const user = req.user;
@@ -216,36 +218,57 @@ export class AdminMediaController {
       );
     }
 
-    let imageBuffer: Buffer;
+    let fileBuffer: Buffer;
     if (body.image) {
       if (body.image.startsWith('data:')) {
         const base64Data = body.image.split(',')[1];
-        imageBuffer = Buffer.from(base64Data, 'base64');
+        fileBuffer = Buffer.from(base64Data, 'base64');
       } else {
-        imageBuffer = Buffer.from(body.image, 'base64');
+        fileBuffer = Buffer.from(body.image, 'base64');
       }
     } else {
-      throw new HttpException('No image data provided', HttpStatus.BAD_REQUEST);
+      throw new HttpException('No file data provided', HttpStatus.BAD_REQUEST);
     }
 
-    let filename = body.filename || `upload-${Date.now()}.jpg`;
-    filename = filename
+    let filename = body.filename || `upload-${Date.now()}`;
+    const originalExt = filename.includes('.')
+      ? filename.slice(filename.lastIndexOf('.'))
+      : '';
+    const baseName = filename.includes('.')
+      ? filename.slice(0, filename.lastIndexOf('.'))
+      : filename;
+    const sanitizedBase = baseName
       .replace(/[^\w\s.-]/g, '')
       .replace(/\s+/g, '-')
       .replace(/--+/g, '-')
       .toLowerCase();
-    const baseName = filename.includes('.')
-      ? filename.slice(0, filename.lastIndexOf('.'))
-      : filename;
-    filename = `${baseName}-${Date.now()}.jpg`;
 
-    const quotaInfo = await this.quotaService.getUserQuota(userId);
-    const isFreePlan = quotaInfo.planType === 'free';
-    const uploadBuffer = this.shouldApplyFreePlanWatermark(isFreePlan)
-      ? await this.mediaGenerationService.optimizeImageWithWatermark(
-          imageBuffer,
-        )
-      : await this.mediaGenerationService.optimizeImage(imageBuffer);
+    const isOptimizableImage =
+      !body.skipOptimization &&
+      /\.(jpe?g|png|gif|webp)$/i.test(originalExt);
+
+    let uploadBuffer: Buffer;
+    let finalExt: string;
+    let finalContentType: string;
+
+    if (isOptimizableImage) {
+      const quotaInfo = await this.quotaService.getUserQuota(userId);
+      const isFreePlan = quotaInfo.planType === 'free';
+      uploadBuffer = this.shouldApplyFreePlanWatermark(isFreePlan)
+        ? await this.mediaGenerationService.optimizeImageWithWatermark(
+            fileBuffer,
+          )
+        : await this.mediaGenerationService.optimizeImage(fileBuffer);
+      finalExt = '.jpg';
+      finalContentType = 'image/jpeg';
+    } else {
+      uploadBuffer = fileBuffer;
+      finalExt = originalExt || '';
+      finalContentType =
+        body.contentType || this.guessContentType(originalExt) || 'application/octet-stream';
+    }
+
+    filename = `${sanitizedBase}-${Date.now()}${finalExt}`;
 
     let minioPath: string;
     if (body.fullPath) {
@@ -261,9 +284,11 @@ export class AdminMediaController {
       bucket,
       minioPath,
       uploadBuffer,
-      'image/jpeg',
+      finalContentType,
     );
     const publicUrl = await this.minioService.getPublicUrl(bucket, minioPath);
+
+    const fileType = this.categorizeFileType(finalContentType, finalExt);
 
     const { data: mediaFile, error } = await this.supabaseService
       .getServiceClient()
@@ -271,7 +296,7 @@ export class AdminMediaController {
       .insert({
         user_id: userId,
         file_name: filename,
-        file_type: 'image',
+        file_type: fileType,
         file_size: uploadBuffer.length,
         minio_path: minioPath,
         public_url: publicUrl,
@@ -295,5 +320,83 @@ export class AdminMediaController {
       key: minioPath,
       mediaFile,
     };
+  }
+
+  private guessContentType(ext: string): string | null {
+    const map: Record<string, string> = {
+      '.mp4': 'video/mp4',
+      '.mov': 'video/quicktime',
+      '.avi': 'video/x-msvideo',
+      '.webm': 'video/webm',
+      '.mkv': 'video/x-matroska',
+      '.flv': 'video/x-flv',
+      '.wmv': 'video/x-ms-wmv',
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx':
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx':
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.txt': 'text/plain',
+      '.csv': 'text/csv',
+      '.zip': 'application/zip',
+      '.rar': 'application/vnd.rar',
+      '.7z': 'application/x-7z-compressed',
+      '.tar': 'application/x-tar',
+      '.gz': 'application/gzip',
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.ogg': 'audio/ogg',
+      '.flac': 'audio/flac',
+      '.aac': 'audio/aac',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.bmp': 'image/bmp',
+      '.ico': 'image/x-icon',
+      '.json': 'application/json',
+      '.xml': 'application/xml',
+      '.html': 'text/html',
+      '.css': 'text/css',
+      '.js': 'application/javascript',
+    };
+    return map[ext.toLowerCase()] || null;
+  }
+
+  private categorizeFileType(
+    contentType: string,
+    ext: string,
+  ): 'image' | 'video' | 'audio' | 'document' | 'archive' | 'other' {
+    if (contentType.startsWith('image/')) return 'image';
+    if (contentType.startsWith('video/')) return 'video';
+    if (contentType.startsWith('audio/')) return 'audio';
+    if (
+      contentType.startsWith('application/pdf') ||
+      contentType.includes('document') ||
+      contentType.includes('spreadsheet') ||
+      contentType.includes('presentation') ||
+      contentType.startsWith('text/') ||
+      /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|rtf|odt|ods|odp)$/i.test(ext)
+    ) {
+      return 'document';
+    }
+    if (
+      contentType.includes('zip') ||
+      contentType.includes('rar') ||
+      contentType.includes('7z') ||
+      contentType.includes('tar') ||
+      contentType.includes('gzip') ||
+      /\.(zip|rar|7z|tar|gz|bz2)$/i.test(ext)
+    ) {
+      return 'archive';
+    }
+    return 'other';
   }
 }
