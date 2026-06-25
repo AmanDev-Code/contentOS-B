@@ -141,12 +141,20 @@ export class AdminMediaController {
   @Post('folder')
   @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
   @ApiOperation({ summary: 'Create folder (prefix marker)' })
-  async createFolder(@Body() body: { path?: string; name: string }) {
+  async createFolder(
+    @Body() body: { path?: string; name: string; fullPath?: boolean },
+  ) {
     const seg = sanitizeSegment((body.name || '').trim());
     if (!seg) {
       throw new HttpException('Folder name required', HttpStatus.BAD_REQUEST);
     }
-    const parent = resolveAdminMediaListingPrefix(body.path || '');
+    let parent: string;
+    if (body.fullPath) {
+      const rawPath = (body.path || '').replace(/\/+$/, '');
+      parent = rawPath ? `${rawPath}/` : '';
+    } else {
+      parent = resolveAdminMediaListingPrefix(body.path || '');
+    }
     const folderKey = `${parent}${seg}/`;
     const bucket = this.minioService.getBucketName();
     await this.minioService.uploadFile(
@@ -191,6 +199,7 @@ export class AdminMediaController {
       image?: string;
       filename?: string;
       path?: string;
+      fullPath?: boolean;
     },
   ) {
     const user = req.user;
@@ -230,8 +239,6 @@ export class AdminMediaController {
       : filename;
     filename = `${baseName}-${Date.now()}.jpg`;
 
-    normalizeCmsRelativePath(body.path || '');
-
     const quotaInfo = await this.quotaService.getUserQuota(userId);
     const isFreePlan = quotaInfo.planType === 'free';
     const uploadBuffer = this.shouldApplyFreePlanWatermark(isFreePlan)
@@ -240,7 +247,14 @@ export class AdminMediaController {
         )
       : await this.mediaGenerationService.optimizeImage(imageBuffer);
 
-    const minioPath = buildAdminCmsObjectKey(body.path || '', filename);
+    let minioPath: string;
+    if (body.fullPath) {
+      const rawPath = (body.path || '').replace(/\/+$/, '');
+      minioPath = rawPath ? `${rawPath}/${filename}` : filename;
+    } else {
+      normalizeCmsRelativePath(body.path || '');
+      minioPath = buildAdminCmsObjectKey(body.path || '', filename);
+    }
     const bucket = this.minioService.getBucketName();
 
     await this.minioService.uploadFile(
