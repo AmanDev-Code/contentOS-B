@@ -13,7 +13,7 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({
       logger: true,
-      bodyLimit: 10485760, // 10MB limit for JSON/text bodies (multipart has its own limit)
+      bodyLimit: 104857600, // 100MB limit for JSON/text bodies (multipart has its own limit)
     }),
     { rawBody: true },
   );
@@ -25,8 +25,8 @@ async function bootstrap() {
   await app.register(multipart, {
     attachFieldsToBody: true,
     limits: {
-      // 26MB allows a 25MB PDF plus minor multipart envelope overhead.
-      fileSize: 26 * 1024 * 1024,
+      // 100MB allows large file uploads for admin media browser.
+      fileSize: 100 * 1024 * 1024,
       files: 1,
       fields: 10,
     },
