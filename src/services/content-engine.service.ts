@@ -6,6 +6,7 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
+import { BlogImageService } from './blog/image-service';
 import * as crypto from 'crypto';
 import sharp from 'sharp';
 import { SupabaseService } from './supabase.service';
@@ -137,6 +138,9 @@ export class ContentEngineService {
     @Optional()
     @Inject(MinioService)
     private readonly minioService?: MinioService,
+    @Optional()
+    @Inject(BlogImageService)
+    private readonly blogImageService?: BlogImageService,
   ) {}
 
   /**
@@ -516,7 +520,8 @@ REQUIREMENTS:
       const readingMinutes =
         parsed.reading_minutes || Math.ceil(wordCount / 250);
 
-      return {
+      // Prepare the base article data
+      const articleData = {
         title: parsed.title || plan.suggested_title,
         slug,
         subtitle: parsed.subtitle || '',
@@ -545,6 +550,28 @@ REQUIREMENTS:
           ? parsed.internal_link_suggestions
           : [],
       };
+
+      // Generate feature image if BlogImageService is available
+      if (this.blogImageService) {
+        try {
+          const imagePath = await this.blogImageService.regenerateFeatureImage({
+            id: articleData.slug,
+            title: articleData.title,
+            slug: articleData.slug,
+            keywords: articleData.seo_keywords.split(',').map(k => k.trim()),
+          });
+          
+          if (imagePath && this.minioService) {
+            const bucketName = this.minioService.getBucketName();
+            (articleData as any).featured_image_url = `https://storage.googleapis.com/${bucketName}/${imagePath}`;
+            this.logger.log(`Featured image generated for post ${articleData.slug}: ${(articleData as any).featured_image_url}`);
+          }
+        } catch (imageError) {
+          this.logger.error(`Failed to generate featured image for post ${articleData.slug}: ${(imageError as Error).message}`);
+        }
+      }
+
+      return articleData;
     } catch (error) {
       this.logger.error(
         `Article generation failed: ${(error as Error).message}`,
@@ -4581,6 +4608,98 @@ Rules:
     }
 
     return { inserted: insertedCount, total_approved: images.length };
+  }
+
+  /**
+   * Regenerate the feature image for an existing blog post.
+   */
+  async regenerateFeatureImage(slug: string): Promise<{ success: boolean; image_url?: string; error?: string }> {
+    if (!this.blogImageService || !this.minioService) {
+      return { success: false, error: 'Image service not available' };
+    }
+    
+    const client = this.supabase.getServiceClient();
+    
+    try {
+      const publicBucketName = this.minioService.getBucketName();
+      
+      // Get the post by slug
+      const { data: post, error: postErr } = await client
+        .from('blog_posts')
+        .select('id, title, slug, featured_image_url, seo_keywords')
+        .eq('slug', slug)
+        .single();
+      
+      if (postErr || !post) {
+        throw new NotFoundException('Post not found');
+      }
+      
+      // Extract the existing image path if it exists
+      let existingImagePath: string | undefined;
+      if (post.featured_image_url) {
+        try {
+          const url = new URL(post.featured_image_url);
+          // URL format: https://storage.googleapis.com/[bucket-name]/[object-path]
+          existingImagePath = url.pathname.substring(1); // Remove leading slash
+          // Remove bucket name if it's part of the path
+          if (existingImagePath.startsWith(publicBucketName + '/')) {
+            existingImagePath = existingImagePath.substring(publicBucketName.length + 1);
+          }
+        } catch (urlError) {
+          this.logger.warn(`Failed to parse featured image URL: ${post.featured_image_url}`);
+        }
+      }
+      
+      // Regenerate the image
+      const imagePath = await this.blogImageService.regenerateFeatureImage({
+        id: post.id,
+        title: post.title,
+        slug: post.slug,
+        keywords: post.seo_keywords?.split(',').map(k => k.trim()),
+        existingImageUrl: existingImagePath,
+      });
+      
+      // Construct the public URL
+      const publicUrl = `https://storage.googleapis.com/${publicBucketName}/${imagePath}`;
+      
+      // Validate the image meets SEO requirements
+      const validation = await this.blogImageService.validateImageSeo(imagePath, {
+        slug: post.slug,
+        title: post.title,
+        keywords: post.seo_keywords?.split(',').map(k => k.trim()),
+      });
+      
+      if (!validation.valid) {
+        this.logger.warn(`Generated image failed SEO validation: ${validation.errors.join(', ')}`);
+      }
+      
+      // Update the post with the new image URL
+      const { error: updateErr } = await client
+        .from('blog_posts')
+        .update({ 
+          featured_image_url: publicUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', post.id);
+      
+      if (updateErr) {
+        throw new Error(`Failed to update post with new image: ${updateErr.message}`);
+      }
+      
+      this.logger.log(`Successfully regenerated feature image for post ${post.id}`);
+      return { success: true, image_url: publicUrl };
+      
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to regenerate feature image for post ${slug}: ${errorMsg}`);
+      
+      // Fallback placeholder if image generation fails completely
+      return {
+        success: false,
+        error: errorMsg,
+        image_url: undefined
+      };
+    }
   }
 
   // ===== SCHEMA ENGINE =====

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -578,6 +579,24 @@ export class ContentEngineController {
       this.logger.error(e?.message);
       throw new HttpException(
         e.message || 'Failed',
+        e.status || HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Post('blog/:slug/regenerate-image')
+  @ApiOperation({ summary: 'Regenerate feature image for an existing blog post' })
+  async regenerateFeatureImage(@Param('slug') slug: string) {
+    try {
+      if (!slug?.trim()) {
+        throw new BadRequestException('Slug is required');
+      }
+      
+      return await this.contentEngine.regenerateFeatureImage(slug);
+    } catch (e: any) {
+      this.logger.error(`Failed to regenerate image for ${slug}: ${e?.message}`);
+      throw new HttpException(
+        e.message || 'Failed to regenerate image',
         e.status || HttpStatus.BAD_REQUEST,
       );
     }
