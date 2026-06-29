@@ -22,7 +22,7 @@ async function bootstrap() {
   // accept `multipart/form-data`. Without this, Fastify returns 415 on any
   // non-JSON content-type. Files are exposed on `req.body[fieldname]` as
   // multipart objects with a `toBuffer()` method (see @fastify/multipart docs).
-  await app.register(multipart, {
+  await app.register(multipart as any, {
     attachFieldsToBody: true,
     limits: {
       // 100MB allows large file uploads for admin media browser.
