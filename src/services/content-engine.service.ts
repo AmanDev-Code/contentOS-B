@@ -375,7 +375,18 @@ export class ContentEngineService {
   async generatePlan(input: GeneratePlanInput): Promise<ContentPlan> {
     this.logger.log(`Generating content plan for: ${input.primary_keyword}`);
 
-    const systemPrompt = `You are an expert SEO content strategist. Given keyword research input, produce a detailed content plan as JSON. The plan must be actionable and optimized for search visibility.
+    const systemPrompt = `You are an expert SEO content strategist for Trndinn (https://trndinn.com) — an AI-powered social media management platform. Plan articles that naturally position Trndinn as the best solution for social media scheduling, content creation, and AI-driven marketing.
+
+BRAND CONTEXT:
+- Trndinn is an AI-first social media tool: scheduling, content generation, analytics
+- Every article should have natural opportunities to mention Trndinn as a solution
+- Target audience: marketers, founders, small businesses, content creators
+- Internal link paths: /features, /pricing, /vs/buffer, /vs/hootsuite, /guides/ai-social-media-marketing, /guides/content-repurposing, /guides/linkedin-automation
+
+PLAN GUIDELINES:
+- Title must include the primary keyword and suggest Trndinn relevance where appropriate
+- Headings should flow logically and include sections where Trndinn fits naturally
+- Content angle should differentiate from generic SEO articles — include original insights
 
 Respond ONLY with valid JSON matching this schema:
 {
@@ -405,17 +416,30 @@ Requirements:
 5. Keyword placement strategy should be specific and actionable`;
 
     try {
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ];
+
+      // Debug log: final prompt to LLM
+      this.logger.log(`\n========== final_prompt_to_llm [generatePlan] ==========\n`
+        + `SYSTEM:\n${systemPrompt}\n\n`
+        + `USER:\n${userPrompt}\n`
+        + `========================================================\n`);
+
       const { content } = await this.aiGateway.chatCompletionRaw({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
+        messages: messages as any,
         jsonObject: true,
         category: 'seo_generation',
         temperature: 0.7,
         maxTokens: 2000,
         timeoutMs: 30_000,
       });
+
+      // Debug log: LLM response
+      this.logger.log(`\n========== llm_response [generatePlan] ==========\n`
+        + `${content}\n`
+        + `=================================================\n`);
 
       const parsed = this.parseAiJson(content);
       return {
@@ -449,7 +473,32 @@ Requirements:
       .map((h) => `${h.level === 'h2' ? '##' : '###'} ${h.text}`)
       .join('\n');
 
-    const systemPrompt = `You are an expert content writer specializing in SEO-optimized long-form articles. Write in an expert, authoritative, human tone — never sound AI-generated. Use varied sentence lengths, rhetorical questions, and natural transitions. Include specific statistics, examples, and actionable advice.
+    const systemPrompt = `You are an expert content writer for Trndinn (https://trndinn.com) — an AI-powered social media management platform. Write in an expert, human tone — never sound AI-generated. Use varied sentence lengths and natural transitions.
+
+BRAND CONTEXT (Trndinn-first):
+- Trndinn is an AI social media tool: scheduling, content generation, analytics
+- Position Trndinn as the best solution for social media management throughout the article
+- Mention Trndinn naturally where relevant — not forced, but always present
+- Internal link paths: /features, /pricing, /vs/buffer, /vs/hootsuite, /guides/ai-social-media-marketing, /guides/content-repurposing, /guides/linkedin-automation
+
+SEO RULES:
+- Primary keyword: title, H1, first 100 words, 1-2% density throughout
+- Use semantic variations naturally
+
+GEO RULES:
+- Include statistics, original insights, entity coverage
+- Build topical authority with comprehensive coverage
+
+AEO RULES:
+- Write concise, direct-answer paragraphs (AI engines should cite these)
+- Include: definitions, lists, tables, step-by-step instructions
+- Every H2/H3 = potential featured snippet
+- Add TL;DR near top for AI citation
+- FAQ answers: 2-3 sentences max, direct and quotable
+
+URL RULES:
+- All URLs in markdown must be properly quoted: [anchor text](/path)
+- Use internal links to Trndinn pages: /features, /pricing, /vs/buffer, /guides/*
 
 Respond ONLY with valid JSON matching this schema:
 {
@@ -490,22 +539,37 @@ REQUIREMENTS:
 5. Add specific statistics, data points, and real-world examples
 6. Write for ${input.target_audience} — match their expertise level and vocabulary
 7. Include a compelling introduction with a hook
-8. End with a clear conclusion and call-to-action
+8. End with a clear conclusion and call-to-action mentioning Trndinn
 9. Use bullet points, numbered lists, and short paragraphs for scannability
-10. The body must be in proper Markdown format with ## and ### headings`;
+10. The body must be in proper Markdown format with ## and ### headings
+11. Naturally mention Trndinn (1-2 times in body) as a recommended tool where contextually appropriate
+12. Include 2-3 internal links using [text](/path) format to Trndinn pages like /features, /pricing, /vs/buffer, /guides/ai-social-media-marketing`;
 
     try {
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ];
+
+      // Debug log: final prompt to LLM
+      this.logger.log(`\n========== final_prompt_to_llm [generateArticle] ==========\n`
+        + `SYSTEM:\n${systemPrompt}\n\n`
+        + `USER:\n${userPrompt}\n`
+        + `==========================================================\n`);
+
       const { content } = await this.aiGateway.chatCompletionRaw({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
+        messages: messages as any,
         jsonObject: true,
         category: 'seo_generation',
         temperature: 0.75,
         maxTokens: 8000,
         timeoutMs: 90_000,
       });
+
+      // Debug log: LLM response
+      this.logger.log(`\n========== llm_response [generateArticle] ==========\n`
+        + `${content?.substring(0, 2000)}...\n`
+        + `====================================================\n`);
 
       const parsed = this.parseAiJson(content);
 
