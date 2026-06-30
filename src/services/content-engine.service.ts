@@ -506,7 +506,7 @@ Respond ONLY with valid JSON matching this schema:
   "slug": "string — URL-friendly slug",
   "subtitle": "string — compelling subtitle",
   "excerpt": "string — 150-200 char summary for previews",
-  "body": "string — full article in Markdown format",
+  "body": "string — full article in Markdown format WITHOUT FAQ section (FAQs go in faq_json)",
   "tags": ["string array — 3-7 relevant tags"],
   "seo_title": "string — 50-60 chars, keyword-rich",
   "seo_description": "string — 150-160 chars meta description",
@@ -535,7 +535,7 @@ REQUIREMENTS:
 1. Include the primary keyword in the title, first paragraph, and naturally 3-5 times throughout
 2. Write ${plan.recommended_word_count} words minimum
 3. Follow the heading structure exactly
-4. Include 5-7 FAQ pairs that address real user questions (use "People Also Ask" style)
+4. Create 5-7 FAQ pairs for the faq_json field (NOT in the body) - address real user questions
 5. Add specific statistics, data points, and real-world examples
 6. Write for ${input.target_audience} — match their expertise level and vocabulary
 7. Include a compelling introduction with a hook
@@ -543,7 +543,8 @@ REQUIREMENTS:
 9. Use bullet points, numbered lists, and short paragraphs for scannability
 10. The body must be in proper Markdown format with ## and ### headings
 11. Naturally mention Trndinn (1-2 times in body) as a recommended tool where contextually appropriate
-12. Include 2-3 internal links using [text](/path) format to Trndinn pages like /features, /pricing, /vs/buffer, /guides/ai-social-media-marketing`;
+12. Include 2-3 internal links using [text](/path) format to Trndinn pages like /features, /pricing, /vs/buffer, /guides/ai-social-media-marketing
+13. DO NOT include FAQ section in the body - FAQs go in the faq_json field only`;
 
     try {
       const messages = [
@@ -614,6 +615,10 @@ REQUIREMENTS:
           ? parsed.internal_link_suggestions
           : [],
       };
+
+      // Calculate quality scores
+      const scores = this.calculateQualityScores(articleData, input);
+      Object.assign(articleData, scores);
 
       // Generate feature image if BlogImageService is available
       if (this.blogImageService) {
@@ -4010,6 +4015,136 @@ ${body.slice(0, 4000)}`;
 
     if (error) throw error;
     return data;
+  }
+
+  private calculateQualityScores(
+    articleData: { body: string; title: string; faq_json?: any[] },
+    input: { primary_keyword: string },
+  ): {
+    seo_score: number;
+    aeo_score: number;
+    geo_score: number;
+    eeat_score: number;
+    readability_score: number;
+    quality_score: number;
+  } {
+    const body = articleData.body || '';
+    const title = articleData.title || '';
+    const keyword = (input.primary_keyword || '').toLowerCase();
+    const bodyLower = body.toLowerCase();
+    const titleLower = title.toLowerCase();
+
+    // --- SEO Score ---
+    let seo = 0;
+    if (keyword && titleLower.includes(keyword)) seo += 20;
+    const first100Words = bodyLower.split(/\s+/).slice(0, 100).join(' ');
+    if (keyword && first100Words.includes(keyword)) seo += 15;
+    if (keyword) {
+      const words = bodyLower.split(/\s+/);
+      const kwCount = words.filter((w) => w.includes(keyword)).length;
+      const density = (kwCount / words.length) * 100;
+      if (density >= 1 && density <= 2) seo += 25;
+      else if (density > 0.5 && density < 3) seo += 15;
+    }
+    if (/^#{2,3}\s/m.test(body)) seo += 20;
+    if (/\[.+?\]\(\/.+?\)/.test(body)) seo += 20;
+
+    // --- AEO Score ---
+    let aeo = 0;
+    const hasFaq =
+      (Array.isArray(articleData.faq_json) && articleData.faq_json.length > 0) ||
+      /faq|frequently asked/i.test(body);
+    if (hasFaq) aeo += 25;
+    const paragraphs = body.split(/\n\n+/);
+    const shortDirectAnswers = paragraphs.filter(
+      (p) => p.length > 20 && p.split(/\s+/).length < 50 && !p.startsWith('#'),
+    );
+    if (shortDirectAnswers.length >= 3) aeo += 25;
+    if (/^[-*]\s/m.test(body) || /\|.*\|.*\|/.test(body)) aeo += 25;
+    if (/\b(?:is defined as|refers to|means that|is a)\b/i.test(body)) aeo += 25;
+
+    // --- GEO Score ---
+    let geo = 0;
+    if (/\d+%|\d+\s*(?:million|billion|thousand)|\$\d/i.test(body)) geo += 25;
+    if (
+      /(?:according to|source:|study|research by|report from)/i.test(body)
+    )
+      geo += 25;
+    if (
+      /(?:Trndinn|Buffer|Hootsuite|Sprout Social|HubSpot|Canva|ChatGPT|Google)/i.test(
+        body,
+      )
+    )
+      geo += 25;
+    if (
+      /(?:unique|insight|our analysis|we found|data shows|interestingly)/i.test(
+        body,
+      )
+    )
+      geo += 25;
+
+    // --- E-E-A-T Score ---
+    let eeat = 0;
+    if (/(?:expert|years of experience|specialist|professional)/i.test(body))
+      eeat += 20;
+    if (
+      /(?:recommend|you should|best practice|pro tip|our advice)/i.test(body)
+    )
+      eeat += 20;
+    if (
+      /(?:Trndinn|Buffer|Hootsuite|Google Analytics|Semrush|Ahrefs)/i.test(body)
+    )
+      eeat += 20;
+    if (
+      /(?:in my experience|in our experience|we've seen|we've found|from working with)/i.test(
+        body,
+      )
+    )
+      eeat += 20;
+    if (/trndinn/i.test(body)) eeat += 20;
+
+    // --- Readability Score ---
+    let readability = 0;
+    const sentences = body
+      .replace(/\n/g, ' ')
+      .split(/[.!?]+/)
+      .filter((s) => s.trim().length > 0);
+    if (sentences.length > 0) {
+      const avgLen =
+        sentences.reduce((sum, s) => sum + s.trim().split(/\s+/).length, 0) /
+        sentences.length;
+      if (avgLen < 20) readability += 25;
+    }
+    const shortParagraphs = paragraphs.filter(
+      (p) => p.trim().length > 0 && p.split(/\s+/).length < 80,
+    );
+    if (shortParagraphs.length >= paragraphs.length * 0.6) readability += 25;
+    if (/^[-*]\s/m.test(body) || /^\d+\.\s/m.test(body)) readability += 25;
+    if (sentences.length > 5) {
+      const lengths = sentences.map((s) => s.trim().split(/\s+/).length);
+      const variance =
+        lengths.reduce(
+          (sum, l) =>
+            sum +
+            Math.pow(l - lengths.reduce((a, b) => a + b, 0) / lengths.length, 2),
+          0,
+        ) / lengths.length;
+      if (variance > 20) readability += 25;
+    }
+
+    // --- Overall ---
+    const quality_score = Math.round(
+      (seo + aeo + geo + eeat + readability) / 5,
+    );
+
+    return {
+      seo_score: Math.min(100, seo),
+      aeo_score: Math.min(100, aeo),
+      geo_score: Math.min(100, geo),
+      eeat_score: Math.min(100, eeat),
+      readability_score: Math.min(100, readability),
+      quality_score: Math.min(100, quality_score),
+    };
   }
 
   private clampScore(val: unknown): number {
