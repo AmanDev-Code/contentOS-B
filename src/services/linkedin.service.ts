@@ -80,6 +80,8 @@ export class LinkedinService {
   private readonly redirectUri: string;
   private readonly linkedinApiVersion: string;
 
+  private readonly mockPublishEnabled: boolean;
+
   constructor(
     private configService: ConfigService,
     private profileRepository: ProfileRepository,
@@ -96,6 +98,14 @@ export class LinkedinService {
       this.configService.get<string>('linkedin.redirectUri') || '';
     this.linkedinApiVersion =
       this.configService.get<string>('LINKEDIN_API_VERSION') || '202604';
+    this.mockPublishEnabled =
+      this.configService.get<string>('MOCK_LINKEDIN_PUBLISH') === 'true';
+    
+    if (this.mockPublishEnabled) {
+      this.logger.warn(
+        '⚠️  MOCK_LINKEDIN_PUBLISH is enabled globally — ALL users will use mock publishing (dev mode only)!',
+      );
+    }
   }
 
   private toLinkedinText(value: unknown, fallback: string): string {
@@ -1927,6 +1937,15 @@ export class LinkedinService {
       throw new BadRequestException('User profile not found');
     }
 
+    // Mock mode: check user-level flag first, then global env var
+    const shouldMock = profile.is_test_user || this.mockPublishEnabled;
+    if (shouldMock) {
+      this.logger.log(
+        `Using mock publish for user ${request.userId} (is_test_user=${profile.is_test_user}, global_mock=${this.mockPublishEnabled})`,
+      );
+      return this.publishPostMock(request);
+    }
+
     if (!profile.linkedin_access_token) {
       throw new BadRequestException(ERROR_MESSAGES.LINKEDIN_NOT_CONNECTED);
     }
@@ -2328,5 +2347,47 @@ export class LinkedinService {
 
     const data = await response.json();
     return data.sub;
+  }
+
+  /**
+   * Mock LinkedIn publishing for soak testing (Sprint 1.10).
+   * Simulates realistic delays, random failures, and generates fake URNs.
+   */
+  private async publishPostMock(request: {
+    userId: string;
+    text: string;
+    mediaType: 'text' | 'image' | 'document';
+    mediaUrl?: string;
+    actorType?: 'member' | 'organization';
+    organizationUrn?: string;
+  }): Promise<{ postId: string }> {
+    // Simulate realistic API latency (200-800ms)
+    const delay = Math.random() * 600 + 200;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+
+    // Inject random failures (2-3% rate) to test retry logic
+    if (Math.random() < 0.025) {
+      this.logger.warn(
+        `[MOCK PUBLISH FAILURE] Injected test failure for user ${request.userId}`,
+      );
+      throw new Error(
+        'Mock LinkedIn API failure (injected for soak test verification)',
+      );
+    }
+
+    // Generate fake LinkedIn URN
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(2, 15);
+    const mockUrn = `urn:li:share:mock_${timestamp}_${randomId}`;
+
+    const contentPreview =
+      request.text.length > 50
+        ? `${request.text.substring(0, 50)}...`
+        : request.text;
+    this.logger.log(
+      `[MOCK PUBLISH] ✅ ${mockUrn} | user=${request.userId} | type=${request.mediaType} | actor=${request.actorType || 'member'} | delay=${Math.round(delay)}ms | content="${contentPreview}"`,
+    );
+
+    return { postId: mockUrn };
   }
 }

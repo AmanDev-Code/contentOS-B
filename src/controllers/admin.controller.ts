@@ -13,6 +13,8 @@ import {
   HttpStatus,
   Headers,
   Query,
+  Logger,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationService } from '../services/notification.service';
@@ -34,6 +36,9 @@ import { CacheService } from '../services/cache.service';
 import { TrendingHashtagEngineService } from '../services/trending-hashtag-engine.service';
 import { AppSettingsService } from '../services/app-settings.service';
 import { GenerationService } from '../services/generation.service';
+import { exec, ChildProcess } from 'child_process';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -74,6 +79,11 @@ interface UpdateTagDto {
 @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
 @ApiBearerAuth()
 export class AdminController {
+  private readonly logger = new Logger(AdminController.name);
+  private soakTestProcess: ChildProcess | null = null;
+  private soakTestStatus: 'idle' | 'running' | 'completed' | 'failed' = 'idle';
+  private soakTestStartTime: Date | null = null;
+
   constructor(
     private readonly notificationService: NotificationService,
     private readonly onboardingService: OnboardingService,
@@ -940,6 +950,169 @@ export class AdminController {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
         error.message || 'Failed to clean up stale jobs',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SOAK TEST CONTROL ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  @Post('soak-test/start')
+  @ApiOperation({ summary: 'Start 7-hour soak test in background' })
+  async startSoakTest() {
+    if (this.soakTestStatus === 'running') {
+      throw new BadRequestException('Soak test already running');
+    }
+
+    this.soakTestStatus = 'running';
+    this.soakTestStartTime = new Date();
+
+    const backendDir = path.join(process.cwd());
+
+    this.soakTestProcess = exec(
+      'npm run soak-test:run:fast',
+      { cwd: backendDir },
+      (error) => {
+        if (error) {
+          this.soakTestStatus = 'failed';
+          this.logger.error('Soak test failed', error);
+        } else {
+          this.soakTestStatus = 'completed';
+          this.logger.log('Soak test completed');
+        }
+        this.soakTestProcess = null;
+      },
+    );
+
+    const estimatedCompletionMs = 7 * 60 * 60 * 1000; // 7 hours
+
+    return {
+      success: true,
+      message: 'Soak test started',
+      data: {
+        startedAt: this.soakTestStartTime,
+        estimatedCompletionAt: new Date(
+          Date.now() + estimatedCompletionMs,
+        ).toISOString(),
+        durationHours: 7,
+      },
+    };
+  }
+
+  @Get('soak-test/status')
+  @ApiOperation({ summary: 'Get current soak test status and progress' })
+  async getSoakTestStatus() {
+    const elapsed = this.soakTestStartTime
+      ? Date.now() - this.soakTestStartTime.getTime()
+      : 0;
+
+    const totalDurationMs = 7 * 60 * 60 * 1000; // 7 hours
+    const progress =
+      this.soakTestStatus === 'running'
+        ? Math.min((elapsed / totalDurationMs) * 100, 100)
+        : this.soakTestStatus === 'completed'
+          ? 100
+          : 0;
+
+    const estimatedRemainingMs =
+      this.soakTestStatus === 'running'
+        ? Math.max(totalDurationMs - elapsed, 0)
+        : 0;
+
+    return {
+      success: true,
+      data: {
+        status: this.soakTestStatus,
+        startedAt: this.soakTestStartTime?.toISOString() || null,
+        elapsedMs: elapsed,
+        elapsedHours: parseFloat((elapsed / (60 * 60 * 1000)).toFixed(2)),
+        progressPercent: parseFloat(progress.toFixed(2)),
+        estimatedRemainingMs,
+        estimatedRemainingHours: parseFloat(
+          (estimatedRemainingMs / (60 * 60 * 1000)).toFixed(2),
+        ),
+      },
+    };
+  }
+
+  @Post('soak-test/stop')
+  @ApiOperation({ summary: 'Stop running soak test gracefully' })
+  async stopSoakTest() {
+    if (this.soakTestStatus !== 'running') {
+      throw new BadRequestException('No soak test running');
+    }
+
+    if (this.soakTestProcess) {
+      try {
+        this.soakTestProcess.kill('SIGTERM');
+        this.logger.log('Sent SIGTERM to soak test process');
+      } catch (error) {
+        this.logger.error('Failed to kill soak test process', error);
+      }
+    }
+
+    this.soakTestStatus = 'idle';
+    this.soakTestStartTime = null;
+
+    return {
+      success: true,
+      message: 'Soak test stop signal sent',
+    };
+  }
+
+  @Get('soak-test/reports')
+  @ApiOperation({ summary: 'List all past soak test reports' })
+  async getSoakTestReports() {
+    const reportsDir = path.join(process.cwd(), 'soak-test-reports');
+
+    try {
+      const files = await fs.readdir(reportsDir);
+      const jsonFiles = files.filter((f) => f.endsWith('.json'));
+
+      const reports = await Promise.all(
+        jsonFiles.map(async (file) => {
+          const filePath = path.join(reportsDir, file);
+          const content = await fs.readFile(filePath, 'utf-8');
+          const data = JSON.parse(content);
+
+          const stats = await fs.stat(filePath);
+
+          return {
+            filename: file,
+            timestamp: file.replace('.json', ''),
+            createdAt: stats.birthtime.toISOString(),
+            size: stats.size,
+            passed: data.passed,
+            successRate: data.stats?.successRate || 0,
+            totalScheduled: data.stats?.totalScheduled || 0,
+            data,
+          };
+        }),
+      );
+
+      reports.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+      return {
+        success: true,
+        data: {
+          count: reports.length,
+          reports,
+        },
+      };
+    } catch (error) {
+      if ((error as any).code === 'ENOENT') {
+        return {
+          success: true,
+          data: {
+            count: 0,
+            reports: [],
+          },
+        };
+      }
+      throw new HttpException(
+        error.message || 'Failed to read soak test reports',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

@@ -96,6 +96,7 @@ export interface Profile {
   linkedin_access_token?: string;
   linkedin_refresh_token?: string;
   linkedin_expires_at?: Date;
+  is_test_user?: boolean;
   created_at: Date;
   updated_at: Date;
 }

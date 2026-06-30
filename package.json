@@ -19,7 +19,13 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "clear:db": "ts-node scripts/clear-database.ts",
-    "sync:legal": "ts-node scripts/sync-legal-pages.ts --force"
+    "sync:legal": "ts-node scripts/sync-legal-pages.ts --force",
+    "soak-test:seed": "ts-node src/scripts/soak-test-seeder.ts",
+    "soak-test:seed:fast": "ts-node src/scripts/soak-test-seeder.ts --fast-forward",
+    "soak-test:chaos": "ts-node src/scripts/chaos-inject.ts",
+    "soak-test:run": "ts-node src/scripts/run-soak-test.ts --duration 7d --chaos true",
+    "soak-test:run:fast": "ts-node src/scripts/run-soak-test.ts --duration 7h --chaos true",
+    "soak-test:report": "ts-node src/scripts/soak-test-report-generator.ts"
   },
   "dependencies": {
     "@fastify/multipart": "^10.0.0",
