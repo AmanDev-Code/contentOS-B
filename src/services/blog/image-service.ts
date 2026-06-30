@@ -1,6 +1,6 @@
 "use strict";
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { AiGatewayService } from '../ai-gateway.service';
 import { MinioService } from '../minio.service';
 import { ConfigService } from '@nestjs/config';
@@ -37,7 +37,7 @@ function testGenerateFeatureImage() {
  * and handles SEO requirements like file naming/alt text.
  */
 @Injectable()
-export class BlogImageService {
+export class BlogImageService implements OnModuleInit {
   private readonly logger = new Logger(BlogImageService.name);
   private readonly BUCKET_NAME = 'blog-images';
   private readonly MAX_IMAGE_SIZE_KB = 100;
@@ -49,8 +49,14 @@ export class BlogImageService {
     private readonly aiGateway: AiGatewayService,
     private readonly minio: MinioService,
     private readonly config: ConfigService,
-  ) {
-    void this.ensureBucketExists();
+  ) {}
+
+  async onModuleInit() {
+    try {
+      await this.ensureBucketExists();
+    } catch (err) {
+      this.logger.warn(`Could not ensure blog-images bucket on startup: ${err.message}`);
+    }
   }
 
   /**
