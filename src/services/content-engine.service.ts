@@ -631,8 +631,8 @@ REQUIREMENTS:
           });
           
           if (imagePath && this.minioService) {
-            const bucketName = this.minioService.getBucketName();
-            (articleData as any).featured_image_url = `https://storage.googleapis.com/${bucketName}/${imagePath}`;
+            const imageUrl = await this.minioService.getPublicUrl(this.minioService.getBucketName(), imagePath);
+            (articleData as any).featured_image_url = imageUrl;
             this.logger.log(`Featured image generated for post ${articleData.slug}: ${(articleData as any).featured_image_url}`);
           }
         } catch (imageError) {
@@ -4838,7 +4838,7 @@ Rules:
       if (post.featured_image_url) {
         try {
           const url = new URL(post.featured_image_url);
-          // URL format: https://storage.googleapis.com/[bucket-name]/[object-path]
+          // Extract object path from URL
           existingImagePath = url.pathname.substring(1); // Remove leading slash
           // Remove bucket name if it's part of the path
           if (existingImagePath.startsWith(publicBucketName + '/')) {
@@ -4859,7 +4859,7 @@ Rules:
       });
       
       // Construct the public URL
-      const publicUrl = `https://storage.googleapis.com/${publicBucketName}/${imagePath}`;
+      const publicUrl = await this.minioService.getPublicUrl(publicBucketName, imagePath);
       
       // Validate the image meets SEO requirements
       const validation = await this.blogImageService.validateImageSeo(imagePath, {
