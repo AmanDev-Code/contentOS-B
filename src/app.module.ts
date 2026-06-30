@@ -110,6 +110,7 @@ import { CreditBucketService } from './services/credit-bucket.service';
 import { SubscriptionService } from './services/subscription.service';
 import { MediaGenerationService } from './services/media-generation.service';
 import { MinioService } from './services/minio.service';
+import { BlogImageService } from './services/blog/image-service';
 import { PostSchedulingService } from './services/post-scheduling.service';
 import { ImmediatePostPublishService } from './services/immediate-post-publish.service';
 import { LinkedinOAuthStateService } from './services/linkedin-oauth-state.service';
@@ -323,6 +324,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     UsageTrackingService,
     MediaGenerationService,
     MinioService,
+    BlogImageService,
     PostSchedulingService,
     ImmediatePostPublishService,
     LinkedinOAuthStateService,
