@@ -631,7 +631,7 @@ REQUIREMENTS:
           });
           
           if (imagePath && this.minioService) {
-            const imageUrl = await this.minioService.getPublicUrl(this.minioService.getBucketName(), imagePath);
+            const imageUrl = await this.minioService.getPublicUrl('blog-images', imagePath);
             (articleData as any).featured_image_url = imageUrl;
             this.logger.log(`Featured image generated for post ${articleData.slug}: ${(articleData as any).featured_image_url}`);
           }
@@ -4840,8 +4840,14 @@ Rules:
           const url = new URL(post.featured_image_url);
           // Extract object path from URL
           existingImagePath = url.pathname.substring(1); // Remove leading slash
+          // Remove 'minio/' prefix if proxied through our backend
+          if (existingImagePath.startsWith('minio/')) {
+            existingImagePath = existingImagePath.substring('minio/'.length);
+          }
           // Remove bucket name if it's part of the path
-          if (existingImagePath.startsWith(publicBucketName + '/')) {
+          if (existingImagePath.startsWith('blog-images/')) {
+            existingImagePath = existingImagePath.substring('blog-images/'.length);
+          } else if (existingImagePath.startsWith(publicBucketName + '/')) {
             existingImagePath = existingImagePath.substring(publicBucketName.length + 1);
           }
         } catch (urlError) {
@@ -4859,7 +4865,7 @@ Rules:
       });
       
       // Construct the public URL
-      const publicUrl = await this.minioService.getPublicUrl(publicBucketName, imagePath);
+      const publicUrl = await this.minioService.getPublicUrl('blog-images', imagePath);
       
       // Validate the image meets SEO requirements
       const validation = await this.blogImageService.validateImageSeo(imagePath, {
