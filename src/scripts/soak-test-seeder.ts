@@ -22,6 +22,7 @@ import { Logger } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { QUEUE_NAMES } from '../common/constants';
+import { randomUUID } from 'crypto';
 
 interface TestUser {
   id: string;
@@ -118,13 +119,13 @@ async function createTestUsers(
   const timestamp = Date.now();
   const users: TestUser[] = [
     {
-      id: `soak-test-solo-${timestamp}`,
+      id: randomUUID(),
       email: `soak-solo-${timestamp}@trndinn-test.internal`,
       tier: 'solo',
       credits: 1000,
     },
     {
-      id: `soak-test-growth-${timestamp}`,
+      id: randomUUID(),
       email: `soak-growth-${timestamp}@trndinn-test.internal`,
       tier: 'growth',
       credits: 5000,
@@ -139,24 +140,44 @@ async function createTestUsers(
   const client = supabase.getServiceClient();
 
   for (const user of users) {
-    // Create profile
-    const { error: profileError } = await client.from('profiles').insert({
-      id: user.id,
+    // Create auth user first using admin API
+    const { data: authUser, error: authError } = await client.auth.admin.createUser({
       email: user.email,
-      full_name: `Soak Test ${user.tier.toUpperCase()}`,
-      credits_remaining: user.credits,
-      subscription_tier: user.tier,
-      // Mock LinkedIn credentials for testing
-      linkedin_access_token: `mock_token_${user.id}`,
-      linkedin_refresh_token: `mock_refresh_${user.id}`,
-      linkedin_expires_at: new Date(Date.now() + 365 * 86400000).toISOString(), // 1 year
-      is_test_user: true, // FLAG: This user gets mock publishing
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      email_confirm: true,
+      user_metadata: {
+        full_name: `Soak Test ${user.tier.toUpperCase()}`,
+        is_test_user: true,
+      },
     });
 
+    if (authError) {
+      logger.error(`Failed to create auth user for ${user.email}:`, authError);
+      throw authError;
+    }
+
+    // Use the auth user ID
+    user.id = authUser.user.id;
+
+    // Update the auto-created profile (Supabase trigger creates it automatically)
+    const { error: profileError } = await client
+      .from('profiles')
+      .update({
+        username: user.email.split('@')[0],
+        full_name: `Soak Test ${user.tier.toUpperCase()}`,
+        credits_remaining: user.credits,
+        monthly_credits: user.credits,
+        plan: user.tier,
+        // Mock LinkedIn credentials for testing
+        linkedin_access_token: `mock_token_${user.id}`,
+        linkedin_refresh_token: `mock_refresh_${user.id}`,
+        linkedin_expires_at: new Date(Date.now() + 365 * 86400000).toISOString(), // 1 year
+        is_test_user: true, // FLAG: This user gets mock publishing
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id);
+
     if (profileError) {
-      logger.error(`Failed to create profile for ${user.email}:`, profileError);
+      logger.error(`Failed to update profile for ${user.email}:`, profileError);
       throw profileError;
     }
 

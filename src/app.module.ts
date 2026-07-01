@@ -57,7 +57,6 @@ import {
   AdminSeoKeywordsController,
   AdminSeoAssignmentsController,
 } from './controllers/admin-seo-keywords.controller';
-import { SoakTestController } from './controllers/soak-test.controller';
 import { ContentEngineService } from './services/content-engine.service';
 import { ListmonkService } from './services/listmonk.service';
 import { NewsletterService } from './services/newsletter.service';
@@ -281,7 +280,6 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     AdminAiModelsController,
     AdminSeoKeywordsController,
     AdminSeoAssignmentsController,
-    SoakTestController,
     FeedbackController,
     BrandProfilesController,
     UserFeedbackController,

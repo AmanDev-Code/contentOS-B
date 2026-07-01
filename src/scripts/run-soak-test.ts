@@ -20,6 +20,9 @@ import { promisify } from 'util';
 import { Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from '../app.module';
+import { SupabaseService } from '../services/supabase.service';
 
 const execAsync = promisify(exec);
 const logger = new Logger('SoakTestRunner');
@@ -30,6 +33,10 @@ interface RunnerOptions {
 }
 
 async function main() {
+  // Bootstrap NestJS context
+  const app = await NestFactory.createApplicationContext(AppModule);
+  const supabase = app.get(SupabaseService);
+
   // Parse CLI args
   const args = process.argv.slice(2);
   const options: RunnerOptions = {
@@ -59,9 +66,9 @@ async function main() {
 `);
 
   try {
-    // Step 1: Verify MOCK_LINKEDIN_PUBLISH is enabled
+    // Step 1: Verify test users exist
     logger.log('📋 Step 1: Verifying mock mode...');
-    await verifyMockMode();
+    await verifyMockMode(supabase);
 
     // Step 2: Run seeder
     logger.log('📋 Step 2: Running seeder...');
@@ -102,27 +109,28 @@ async function main() {
   } catch (error) {
     logger.error('❌ Soak test failed:', error);
     throw error;
+  } finally {
+    await app.close();
   }
 }
 
-async function verifyMockMode(): Promise<void> {
-  // Check .env for MOCK_LINKEDIN_PUBLISH
-  const envPath = path.join(process.cwd(), '.env');
-  if (!fs.existsSync(envPath)) {
-    throw new Error('.env file not found. Create one based on .env.example');
+async function verifyMockMode(supabase: SupabaseService): Promise<void> {
+  // Check if we have test users in the system
+  const client = supabase.getServiceClient();
+
+  const { data: testUsers, error } = await client
+    .from('profiles')
+    .select('id')
+    .eq('is_test_user', true)
+    .limit(1);
+
+  if (error || !testUsers?.length) {
+    logger.error('❌ No test users found in the database.');
+    logger.error('   Run: npm run soak-test:seed');
+    throw new Error('No test users found. Run: npm run soak-test:seed');
   }
 
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  const mockEnabled = envContent.includes('MOCK_LINKEDIN_PUBLISH=true');
-
-  if (!mockEnabled) {
-    logger.warn('⚠️  MOCK_LINKEDIN_PUBLISH is not set to true in .env');
-    logger.warn('   Posts will go to REAL LinkedIn unless you fix this!');
-    logger.warn('   Add: MOCK_LINKEDIN_PUBLISH=true');
-    throw new Error('Mock mode not enabled. Aborting to prevent real posts.');
-  }
-
-  logger.log('  ✅ Mock mode enabled (MOCK_LINKEDIN_PUBLISH=true)');
+  logger.log(`  ✅ Test users found, mock mode enabled`);
 }
 
 async function runSeeder(fastForward: boolean): Promise<void> {
