@@ -1,11 +1,16 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { SupabaseService } from './supabase.service';
 import { SeoKeywordsService } from './seo-keywords.service';
 import { isPlatformAdmin } from '../common/platform-admin';
+import { QUEUE_NAMES } from '../common/constants';
+import { BlogPublishJobData } from '../processors/blog-publishing.processor';
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -82,10 +87,70 @@ export interface StaticPageSeoInput {
 
 @Injectable()
 export class BlogService {
+  private readonly logger = new Logger(BlogService.name);
+
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly seoKeywordsService: SeoKeywordsService,
+    @InjectQueue(QUEUE_NAMES.BLOG_PUBLISH)
+    private readonly blogPublishQueue: Queue,
   ) {}
+
+  // ─── Blog Scheduling Helpers ────────────────────────────────────────
+
+  /**
+   * Enqueue a delayed BullMQ job to publish a blog post at its scheduled time.
+   */
+  private async enqueueBlogPublishJob(
+    postId: string,
+    scheduledPublishAt: Date,
+  ): Promise<string> {
+    const delay = Math.max(scheduledPublishAt.getTime() - Date.now(), 0);
+    const job = await this.blogPublishQueue.add(
+      'publish-blog-post',
+      { blogPostId: postId } satisfies BlogPublishJobData,
+      {
+        delay,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: 10,
+        removeOnFail: 10,
+        jobId: `blog-${postId}-${Date.now()}`,
+      },
+    );
+    this.logger.log(
+      `Enqueued blog publish job ${job.id} for post ${postId}, delay=${delay}ms`,
+    );
+    return job.id?.toString() || '';
+  }
+
+  /**
+   * Cancel any pending blog publish job for a post using stored jobId in settings.
+   */
+  private async cancelBlogPublishJob(
+    postId: string,
+    settings: Record<string, unknown> | null | undefined,
+  ): Promise<void> {
+    const activeJobId = (settings as any)?.blog_publish_job_id;
+    if (!activeJobId) return;
+
+    try {
+      const job = await this.blogPublishQueue.getJob(activeJobId);
+      if (job) {
+        const state = await job.getState();
+        if (state === 'delayed' || state === 'waiting') {
+          await job.remove();
+          this.logger.log(
+            `Cancelled blog publish job ${activeJobId} for post ${postId}`,
+          );
+        }
+      }
+    } catch (e) {
+      this.logger.warn(
+        `Could not remove blog publish job ${activeJobId}: ${(e as Error).message}`,
+      );
+    }
+  }
 
   isPlatformAdminUser(user: { id: string; email?: string }): boolean {
     return isPlatformAdmin(user);
@@ -344,6 +409,26 @@ export class BlogService {
         throw new BadRequestException('Path already exists for another post');
       throw new BadRequestException(error.message);
     }
+
+    // Schedule publish job if status=scheduled with a valid future time
+    if (data.status === 'scheduled' && data.scheduled_publish_at) {
+      const scheduledAt = new Date(data.scheduled_publish_at);
+      if (!isNaN(scheduledAt.getTime()) && scheduledAt.getTime() > Date.now()) {
+        const jobId = await this.enqueueBlogPublishJob(data.id, scheduledAt);
+        // Store jobId in settings for later cancellation
+        await client
+          .from('blog_posts')
+          .update({
+            settings: {
+              ...(data.settings ?? {}),
+              blog_publish_job_id: jobId,
+              sweep_retry_count: 0,
+            },
+          })
+          .eq('id', data.id);
+      }
+    }
+
     return data;
   }
 
@@ -369,6 +454,23 @@ export class BlogService {
     if (Object.keys(patch).length === 0) {
       return this.getAdminPost(id);
     }
+
+    // Load current state BEFORE patching (for scheduling transition detection)
+    const { data: currentPost } = await client
+      .from('blog_posts')
+      .select('status, scheduled_publish_at, settings')
+      .eq('id', id)
+      .maybeSingle();
+
+    // Auto-stamp published_at when status transitions to 'published'
+    if (
+      patch.status === 'published' &&
+      currentPost?.status !== 'published' &&
+      !patch.published_at
+    ) {
+      patch.published_at = new Date().toISOString();
+    }
+
     const { data, error } = await client
       .from('blog_posts')
       .update(patch)
@@ -376,6 +478,70 @@ export class BlogService {
       .select('*')
       .single();
     if (error) throw new BadRequestException(error.message);
+
+    // ─── Handle scheduling transitions ────────────────────────────────
+    const oldStatus = currentPost?.status;
+    const newStatus = data.status as string;
+    const oldScheduledAt = currentPost?.scheduled_publish_at;
+    const newScheduledAt = data.scheduled_publish_at as string | null;
+
+    // Case A: Became scheduled or rescheduled
+    if (newStatus === 'scheduled' && newScheduledAt) {
+      const scheduledAt = new Date(newScheduledAt);
+      const oldTime = oldScheduledAt
+        ? new Date(oldScheduledAt).getTime()
+        : null;
+      const isNewSchedule = oldStatus !== 'scheduled';
+      const isReschedule =
+        oldStatus === 'scheduled' && oldTime !== scheduledAt.getTime();
+
+      if (
+        (isNewSchedule || isReschedule) &&
+        !isNaN(scheduledAt.getTime()) &&
+        scheduledAt.getTime() > Date.now()
+      ) {
+        // Cancel existing job first
+        await this.cancelBlogPublishJob(
+          id,
+          currentPost?.settings as Record<string, unknown> | null,
+        );
+        // Enqueue new job
+        const jobId = await this.enqueueBlogPublishJob(id, scheduledAt);
+        // Persist jobId + reset sweep counter
+        await client
+          .from('blog_posts')
+          .update({
+            settings: {
+              ...((data.settings as Record<string, unknown>) ?? {}),
+              blog_publish_job_id: jobId,
+              sweep_retry_count: 0,
+              sweep_exhausted: undefined,
+            },
+          })
+          .eq('id', id);
+      }
+    }
+
+    // Case B: Left scheduled state (scheduled → draft/published/archived)
+    if (oldStatus === 'scheduled' && newStatus !== 'scheduled') {
+      await this.cancelBlogPublishJob(
+        id,
+        currentPost?.settings as Record<string, unknown> | null,
+      );
+      // Clean up scheduling metadata from settings
+      const cleanSettings = {
+        ...((data.settings as Record<string, unknown>) ?? {}),
+      };
+      delete cleanSettings.blog_publish_job_id;
+      delete cleanSettings.sweep_retry_count;
+      delete cleanSettings.sweep_exhausted;
+      delete cleanSettings.last_sweep_at;
+      await client
+        .from('blog_posts')
+        .update({ settings: cleanSettings })
+        .eq('id', id);
+    }
+
     return data;
   }
 

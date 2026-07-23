@@ -37,6 +37,7 @@ export const QUEUE_NAMES = {
   FEEDBACK_REMINDER: 'feedback-reminder',
   MAINTENANCE: 'maintenance',
   WEBHOOK_DELIVERY: 'webhook-delivery',
+  BLOG_PUBLISH: 'blog-publish',
 };
 
 export const MAINTENANCE_JOB_NAMES = {

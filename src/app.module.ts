@@ -98,6 +98,7 @@ import { AppSettingsService } from './services/app-settings.service';
 import { ExchangeRateService } from './services/exchange-rate.service';
 import { ExchangeRateCronService } from './cron/exchange-rate.cron';
 import { MissedPostSweeperCronService } from './cron/missed-post-sweeper.cron';
+import { MissedBlogSweeperCronService } from './cron/missed-blog-sweeper.cron';
 import { PostEngagementSyncCronService } from './cron/post-engagement-sync.cron';
 
 import { SupabaseService } from './services/supabase.service';
@@ -173,6 +174,7 @@ import { GenerationWorker } from './workers/generation.worker';
 import { GenerationWorkerManager } from './workers/generation-worker-manager';
 import { MediaCarouselWorker } from './workers/media-carousel.worker';
 import { PostPublishingProcessor } from './processors/post-publishing.processor';
+import { BlogPublishingProcessor } from './processors/blog-publishing.processor';
 import { TrendingHashtagProcessor } from './workers/trending-hashtag.processor';
 import { FeedbackRewardProcessor } from './processors/feedback-reward.processor';
 import { FeedbackReminderProcessor } from './processors/feedback-reminder.processor';
@@ -231,6 +233,9 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     }),
     BullModule.registerQueue({
       name: QUEUE_NAMES.WEBHOOK_DELIVERY,
+    }),
+    BullModule.registerQueue({
+      name: QUEUE_NAMES.BLOG_PUBLISH,
     }),
     ScheduleModule.forRoot(),
     // Sprint 1.3/1.4 social provider engine. Self-registers the LinkedIn
@@ -394,6 +399,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     GenerationWorkerManager,
     MediaCarouselWorker,
     PostPublishingProcessor,
+    BlogPublishingProcessor,
     TrendingHashtagProcessor,
     RateLimitMiddleware,
     UserRateLimitGuard,
@@ -413,6 +419,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     ExchangeRateService,
     ExchangeRateCronService,
     MissedPostSweeperCronService,
+    MissedBlogSweeperCronService,
     PostEngagementSyncCronService,
   ],
 })
