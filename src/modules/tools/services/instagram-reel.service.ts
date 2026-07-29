@@ -8,7 +8,7 @@ import { InstagramReelResult } from '../registry/tool.types';
 import { EngineOrchestratorService } from '../../media-engine';
 
 const CACHE_PREFIX = 'tool:ig-reel:';
-const CACHE_TTL_SECONDS = 3600; // 1 hour
+const CACHE_TTL_SECONDS = 900; // 15 minutes — Instagram CDN tokens expire in ~30-60min
 
 /**
  * Instagram Reel Service — Public API facade.
@@ -33,15 +33,29 @@ export class InstagramReelService {
   /**
    * Main entry: download reel metadata from an Instagram URL.
    * Now delegates to the Media Engine's multi-engine orchestrator.
+   *
+   * @param url The Instagram Reel URL
+   * @param bustCache If true, skip the cache and force a fresh extraction.
+   *                  Use this when the client detects an expired CDN URL
+   *                  (video won't play, 403/410 on CDN) and needs a fresh one.
    */
-  async downloadReel(url: string): Promise<InstagramReelResult> {
+  async downloadReel(
+    url: string,
+    bustCache = false,
+  ): Promise<InstagramReelResult> {
     const postId = this.extractPostId(url);
+    const cacheKey = `${CACHE_PREFIX}${postId}`;
 
     // Check cache (same key pattern as before — backward compatible)
-    const cached = await this.cacheService.get(`${CACHE_PREFIX}${postId}`);
-    if (cached) {
-      this.logger.debug(`Cache hit for reel ${postId}`);
-      return cached as InstagramReelResult;
+    if (!bustCache) {
+      const cached = await this.cacheService.get(cacheKey);
+      if (cached) {
+        this.logger.debug(`Cache hit for reel ${postId}`);
+        return cached as InstagramReelResult;
+      }
+    } else {
+      this.logger.debug(`Cache bust requested for reel ${postId}`);
+      await this.cacheService.delete(cacheKey);
     }
 
     // Delegate to the engine orchestrator (tries all engines in order)
@@ -76,7 +90,7 @@ export class InstagramReelService {
     };
 
     // Cache result
-    await this.cacheService.set(`${CACHE_PREFIX}${postId}`, result, CACHE_TTL_SECONDS);
+    await this.cacheService.set(cacheKey, result, CACHE_TTL_SECONDS);
 
     this.logger.log(
       `Reel ${postId} extracted via ${extraction.engine} in ${extraction.durationMs}ms`,

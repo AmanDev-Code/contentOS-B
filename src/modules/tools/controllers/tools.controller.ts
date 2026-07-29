@@ -93,7 +93,7 @@ export class ToolsController {
       });
     }
 
-    const { url } = parsed.data;
+    const { url, refresh } = parsed.data;
 
     // Check tool availability
     if (!this.toolsService.isToolAvailable('instagram-reel-downloader')) {
@@ -105,7 +105,10 @@ export class ToolsController {
     }
 
     try {
-      const result = await this.toolsService.instagramReel.downloadReel(url);
+      const result = await this.toolsService.instagramReel.downloadReel(
+        url,
+        refresh === true,
+      );
 
       return {
         success: true,

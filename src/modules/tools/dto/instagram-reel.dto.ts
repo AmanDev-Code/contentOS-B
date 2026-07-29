@@ -39,6 +39,9 @@ export const InstagramReelDownloadSchema = z.object({
           'URL must be an Instagram Reel, Post, or Share link (e.g. instagram.com/reel/ABC123)',
       },
     ),
+  // Optional: force a fresh extraction, bypassing the cache. Used by the
+  // frontend when a previously-returned CDN URL has expired.
+  refresh: z.boolean().optional(),
 });
 
 export type InstagramReelDownloadDto = z.infer<
