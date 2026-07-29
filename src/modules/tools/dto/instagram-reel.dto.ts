@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 /**
  * Zod schema for Instagram Reel download request.
@@ -60,4 +60,13 @@ export class InstagramReelDownloadBodyDto {
   @IsString()
   @IsNotEmpty()
   url: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Force a fresh extraction, bypassing the cache. Used when a previously-returned CDN URL has expired.',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  refresh?: boolean;
 }
