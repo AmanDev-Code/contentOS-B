@@ -1446,34 +1446,4 @@ ${defs}
       .replace(/\s+/g, ' ')
       .trim();
   }
-
-  // Rate limiting helper
-  async checkRateLimit(userId: string, endpoint: string): Promise<boolean> {
-    const key = `rate_limit:${userId}:${endpoint}`;
-    const current = await this.cacheService.get(key);
-
-    if (!current) {
-      await this.cacheService.set(key, '1', 3600); // 1 hour
-      return true;
-    }
-
-    const count = parseInt(current, 10);
-    const maxRequests = this.getMaxRequestsForEndpoint(endpoint);
-
-    if (count >= maxRequests) {
-      return false;
-    }
-
-    await this.cacheService.set(key, (count + 1).toString(), 3600);
-    return true;
-  }
-
-  private getMaxRequestsForEndpoint(endpoint: string): number {
-    const limits = {
-      'image-generation': 50,
-      'carousel-generation': 20,
-      'pdf-generation': 30,
-    };
-    return limits[endpoint] || 100;
-  }
 }

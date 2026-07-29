@@ -27,6 +27,7 @@ import { TrendingHashtagOrchestratorService } from '../services/trending-hashtag
 import { ScraperSessionHealthService } from '../services/scrapers/session-health.service';
 import { ScraperEventLogService } from '../services/scrapers/scraper-event-log.service';
 import { InstagramScraperService } from '../services/scrapers/instagram.scraper';
+import { InstagramMobileApiService } from '../services/instagram-mobile-api.service';
 import { TwitterScraperService } from '../services/scrapers/twitter.scraper';
 import { LinkedinScraperService } from '../services/scrapers/linkedin.scraper';
 import { ScraperCredentialsService } from '../services/scrapers/scraper-credentials.service';
@@ -120,6 +121,7 @@ export class AdminController {
     private readonly trendingHashtagEngine: TrendingHashtagEngineService,
     private readonly appSettingsService: AppSettingsService,
     private readonly generationService: GenerationService,
+    private readonly instagramMobileApi: InstagramMobileApiService,
     @InjectQueue(QUEUE_NAMES.SOCIAL_PUBLISH)
     private readonly publishQueue: Queue,
   ) {}
@@ -258,6 +260,267 @@ export class AdminController {
     const health = await this.scraperSessionHealthService.check();
     const credentials = await this.scraperCredentials.getAdminView();
     return { success: true, data: { credentials, health } };
+  }
+
+  @Post('scraper/instagram-connect')
+  @ApiOperation({
+    summary:
+      'Launch browser for Instagram login. User logs in manually, then cookies are extracted automatically.',
+  })
+  async instagramConnect() {
+    const { chromium } = await import('playwright');
+    let browser;
+    try {
+      browser = await chromium.launch({
+        headless: false,
+        args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+      });
+      const context = await browser.newContext({
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        viewport: { width: 420, height: 740 },
+      });
+      const page = await context.newPage();
+      await page.goto('https://www.instagram.com/accounts/login/', {
+        waitUntil: 'domcontentloaded',
+      });
+
+      // Wait for user to complete login + any challenges/captchas
+      // Instead of checking URL, poll for the sessionid cookie which only
+      // appears after ALL challenges (captcha, 2FA, etc.) are completed.
+      // Timeout after 10 minutes to give user time for captcha/challenges.
+      try {
+        await page.waitForFunction(
+          () => document.cookie.includes('sessionid='),
+          { timeout: 600_000, polling: 2000 },
+        );
+      } catch {
+        // Before giving up, check if sessionid exists in context cookies
+        // (it might not be in document.cookie due to httpOnly flag)
+        const checkCookies = await context.cookies('https://www.instagram.com');
+        const hasSession = checkCookies.some((c) => c.name === 'sessionid' && c.value.length > 5);
+        if (!hasSession) {
+          await browser.close();
+          return {
+            success: false,
+            error: 'Login timed out (10 minutes). Complete all challenges and try again.',
+          };
+        }
+      }
+
+      // Small delay to let cookies finalize
+      await page.waitForTimeout(2000);
+
+      // Extract cookies
+      const cookies = await context.cookies('https://www.instagram.com');
+      const cookieMap = Object.fromEntries(
+        cookies.map((c) => [c.name, c.value]),
+      );
+
+      const extracted = {
+        instagramSession: cookieMap['sessionid'] || '',
+        instagramCsrfToken: cookieMap['csrftoken'] || '',
+        instagramDsUserId: cookieMap['ds_user_id'] || '',
+        instagramIgDid: cookieMap['ig_did'] || '',
+        instagramMid: cookieMap['mid'] || '',
+      };
+
+      await browser.close();
+
+      if (!extracted.instagramSession) {
+        return {
+          success: false,
+          error:
+            'Could not find sessionid cookie. Login may not have completed successfully.',
+        };
+      }
+
+      // Save to Redis via ScraperCredentialsService
+      await this.scraperCredentials.save(extracted);
+      await this.browserPool.recycle();
+
+      // Verify the session works
+      const health = await this.scraperSessionHealthService.check();
+      const credentials = await this.scraperCredentials.getAdminView();
+
+      return {
+        success: true,
+        data: {
+          message: 'Instagram session extracted and saved successfully.',
+          credentials,
+          health,
+        },
+      };
+    } catch (error) {
+      if (browser) await browser.close().catch(() => {});
+      throw new HttpException(
+        {
+          success: false,
+          error: `Instagram connect failed: ${(error as Error).message}`,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('scraper/instagram-extract-now')
+  @ApiOperation({
+    summary:
+      'Fallback: Extract Instagram cookies from a currently open browser window. Opens IG, grabs cookies if already logged in.',
+  })
+  async instagramExtractNow() {
+    const { chromium } = await import('playwright');
+    let browser;
+    try {
+      browser = await chromium.launch({
+        headless: true,
+        args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+      });
+      const context = await browser.newContext({
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      });
+
+      // If we already have a session, inject it and verify
+      const creds = await this.scraperCredentials.getEffective();
+      if (creds.instagramSession) {
+        await context.addCookies([
+          {
+            name: 'sessionid',
+            value: creds.instagramSession,
+            domain: '.instagram.com',
+            path: '/',
+            secure: true,
+            sameSite: 'None',
+            httpOnly: true,
+          },
+          ...(creds.instagramCsrfToken
+            ? [
+                {
+                  name: 'csrftoken',
+                  value: creds.instagramCsrfToken,
+                  domain: '.instagram.com',
+                  path: '/',
+                  secure: true,
+                  sameSite: 'Lax' as const,
+                },
+              ]
+            : []),
+          ...(creds.instagramDsUserId
+            ? [
+                {
+                  name: 'ds_user_id',
+                  value: creds.instagramDsUserId,
+                  domain: '.instagram.com',
+                  path: '/',
+                  secure: true,
+                  sameSite: 'None' as const,
+                },
+              ]
+            : []),
+        ]);
+      }
+
+      const page = await context.newPage();
+      await page.goto('https://www.instagram.com/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000,
+      });
+
+      // Check if we're logged in
+      const finalUrl = page.url();
+      const isLoggedIn =
+        !finalUrl.includes('/accounts/login') &&
+        !finalUrl.includes('/challenge');
+
+      if (!isLoggedIn) {
+        await browser.close();
+        return {
+          success: false,
+          error:
+            'Not logged in. Use "Connect Instagram" to open a browser and log in first.',
+        };
+      }
+
+      // Extract fresh cookies
+      const cookies = await context.cookies('https://www.instagram.com');
+      const cookieMap = Object.fromEntries(
+        cookies.map((c) => [c.name, c.value]),
+      );
+
+      const extracted = {
+        instagramSession: cookieMap['sessionid'] || '',
+        instagramCsrfToken: cookieMap['csrftoken'] || '',
+        instagramDsUserId: cookieMap['ds_user_id'] || '',
+        instagramIgDid: cookieMap['ig_did'] || '',
+        instagramMid: cookieMap['mid'] || '',
+      };
+
+      await browser.close();
+
+      if (!extracted.instagramSession) {
+        return {
+          success: false,
+          error: 'Session cookie not found. The session may have expired.',
+        };
+      }
+
+      await this.scraperCredentials.save(extracted);
+      await this.browserPool.recycle();
+      const health = await this.scraperSessionHealthService.check();
+      const credentials = await this.scraperCredentials.getAdminView();
+
+      return {
+        success: true,
+        data: { message: 'Cookies refreshed successfully.', credentials, health },
+      };
+    } catch (error) {
+      if (browser) await browser.close().catch(() => {});
+      throw new HttpException(
+        {
+          success: false,
+          error: `Extract failed: ${(error as Error).message}`,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('scraper/instagram-mobile-login')
+  @ApiOperation({
+    summary:
+      'Login via Instagram Android Mobile API for long-lived sessions (90+ days).',
+  })
+  async instagramMobileLogin(@Body() body: { username: string; password: string }) {
+    if (!body?.username?.trim() || !body?.password?.trim()) {
+      throw new BadRequestException('Username and password are required.');
+    }
+    const result = await this.instagramMobileApi.login(
+      body.username.trim(),
+      body.password.trim(),
+    );
+    return { success: result.success, data: result };
+  }
+
+  @Post('scraper/instagram-mobile-verify-2fa')
+  @ApiOperation({
+    summary: 'Complete 2FA challenge for Instagram Mobile API login.',
+  })
+  async instagramMobileVerify2FA(@Body() body: { code: string }) {
+    if (!body?.code?.trim()) {
+      throw new BadRequestException('Verification code is required.');
+    }
+    const result = await this.instagramMobileApi.verify2FA(body.code.trim());
+    return { success: result.success, data: result };
+  }
+
+  @Get('scraper/instagram-mobile-status')
+  @ApiOperation({
+    summary: 'Check if a valid Instagram Mobile API session exists.',
+  })
+  async instagramMobileStatus() {
+    const status = await this.instagramMobileApi.getSessionStatus();
+    return { success: true, data: status };
   }
 
   @Get('scraper/session-health')

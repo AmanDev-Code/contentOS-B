@@ -14,6 +14,7 @@ import { SupabaseService } from './supabase.service';
 import { MediaGenerationService } from './media-generation.service';
 import { LinkedinService } from './linkedin.service';
 import { CacheService } from './cache.service';
+import { RateLimiterService } from './rate-limiter.service';
 import { UserPublishedPostRepository } from '../repositories/user-published-post.repository';
 import {
   assertLinkedInCommentaryWithinLimit,
@@ -80,6 +81,7 @@ export class PostSchedulingService {
     private readonly mediaGenerationService: MediaGenerationService,
     private readonly linkedinService: LinkedinService,
     private readonly cacheService: CacheService,
+    private readonly rateLimiterService: RateLimiterService,
     // Sprint 1.6: captures the published caption into the per-user style corpus
     // (task #1132) so generation can learn from what the user actually published.
     private readonly publishedPostRepo: UserPublishedPostRepository,
@@ -159,13 +161,15 @@ export class PostSchedulingService {
         request.userId,
       );
 
-      // Check rate limit
-      const canSchedule = await this.mediaGenerationService.checkRateLimit(
+      // Check rate limit via RateLimiterService
+      const rlResult = await this.rateLimiterService.consume(
+        'posts-schedule',
         request.userId,
-        'post-scheduling',
+        1,
+        false,
       );
 
-      if (!canSchedule) {
+      if (!rlResult.allowed) {
         throw new Error('Rate limit exceeded for post scheduling');
       }
 
@@ -498,13 +502,15 @@ export class PostSchedulingService {
     try {
       this.logger.log(`Publishing post ${request.contentId} immediately`);
 
-      // Check rate limit
-      const canPublish = await this.mediaGenerationService.checkRateLimit(
+      // Check rate limit via RateLimiterService
+      const rlResult = await this.rateLimiterService.consume(
+        'posts-publish',
         request.userId,
-        'post-publishing',
+        1,
+        false,
       );
 
-      if (!canPublish) {
+      if (!rlResult.allowed) {
         throw new Error('Rate limit exceeded for post publishing');
       }
 

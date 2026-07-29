@@ -99,6 +99,7 @@ function makeService(supabase: any, queue: any) {
     {} as any, // mediaGenerationService
     {} as any, // linkedinService
     {} as any, // cacheService
+    { consume: jest.fn().mockResolvedValue({ allowed: true, remaining: 99, resetMs: 0, consumed: 1, limit: 100, retryAfterMs: 0 }) } as any, // rateLimiterService
     {} as any, // publishedPostRepo
   );
 }

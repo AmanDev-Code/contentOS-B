@@ -193,6 +193,32 @@ export class CacheService implements OnModuleInit {
     this.fallback.clear();
   }
 
+  /**
+   * Get all keys matching a pattern (uses Redis KEYS command).
+   * Returns keys WITHOUT the cache prefix — callers use logical keys.
+   * Only suitable for small key spaces (<1000 matches).
+   */
+  async getKeysByPattern(pattern: string): Promise<string[]> {
+    if (this.redis) {
+      try {
+        const keys = await this.redis.keys(CACHE_PREFIX + pattern);
+        return keys.map((k) => k.slice(CACHE_PREFIX.length));
+      } catch (e) {
+        this.logger.warn(`Redis KEYS failed for ${pattern}: ${e.message}`);
+      }
+    }
+
+    // Fallback: simple prefix matching (no glob support)
+    const prefix = pattern.replace(/\*$/, '');
+    const results: string[] = [];
+    for (const key of this.fallback.keys()) {
+      if (key.startsWith(prefix)) {
+        results.push(key);
+      }
+    }
+    return results;
+  }
+
   getStats(): { size: number; keys: string[] } {
     return {
       size: this.fallback.size,

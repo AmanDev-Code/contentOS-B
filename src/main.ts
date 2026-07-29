@@ -51,8 +51,9 @@ async function bootstrap() {
 
       const isLocalhost = /^http:\/\/localhost:\d+$/.test(origin);
       const isNgrok = /^https:\/\/[a-z0-9-]+\.ngrok-free\.dev$/.test(origin);
+      const isChromeExtension = /^chrome-extension:\/\//.test(origin);
 
-      if (exactAllowed.has(origin) || (isDev && isLocalhost) || isNgrok) {
+      if (exactAllowed.has(origin) || (isDev && isLocalhost) || isNgrok || isChromeExtension) {
         return callback(null, true);
       }
       return callback(new Error(`CORS blocked origin: ${origin}`), false);

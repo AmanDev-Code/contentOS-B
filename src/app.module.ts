@@ -179,8 +179,8 @@ import { TrendingHashtagProcessor } from './workers/trending-hashtag.processor';
 import { FeedbackRewardProcessor } from './processors/feedback-reward.processor';
 import { FeedbackReminderProcessor } from './processors/feedback-reminder.processor';
 import { MaintenanceProcessor } from './processors/maintenance.processor';
-import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
 import { UserRateLimitGuard } from './guards/user-rate-limit.guard';
+import { ToolRateLimitGuard } from './guards/tool-rate-limit.guard';
 import { PaywallGuard } from './guards/paywall.guard';
 import { SocialChannelGuard } from './guards/social-channel.guard';
 import { Reflector } from '@nestjs/core';
@@ -188,9 +188,13 @@ import { Reflector } from '@nestjs/core';
 import { CustomTopicGenerationService } from './modules/post-ai/custom-topic-generation.service';
 import { CarouselTrainingCaptureService } from './services/carousel-training-capture.service';
 import { OpenAIRateLimiterService } from './services/openai-rate-limiter.service';
+import { RateLimiterService } from './services/rate-limiter.service';
+import { InstagramMobileApiService } from './services/instagram-mobile-api.service';
+import { ToolsModule } from './modules/tools/tools.module';
+import { MediaEngineModule } from './modules/media-engine';
+import { AdminMediaEngineController } from './controllers/admin-media-engine.controller';
 
 import { QUEUE_NAMES } from './common/constants';
-import { MiddlewareConsumer, NestModule } from '@nestjs/common';
 
 @Module({
   imports: [
@@ -243,6 +247,10 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     // LinkedinController can dual-write into the new social_accounts + Vault
     // model (gated by FEATURE_SOCIAL_PROVIDER_V2).
     LinkedinModule,
+    // Free SEO tools module (public, no auth, IP-rate-limited)
+    ToolsModule,
+    // Universal media extraction engine (isolated, multi-engine fallback)
+    MediaEngineModule,
   ],
   controllers: [
     AppController,
@@ -301,6 +309,7 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     PublicLaunchPricingController,
     AdminReferralController,
     AdminMediaController,
+    AdminMediaEngineController,
     AdminSubscriptionPlansController,
     AdminDiscountCodesController,
     AdminLaunchPricingController,
@@ -401,8 +410,8 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     PostPublishingProcessor,
     BlogPublishingProcessor,
     TrendingHashtagProcessor,
-    RateLimitMiddleware,
     UserRateLimitGuard,
+    ToolRateLimitGuard,
     PaywallGuard,
     SocialChannelGuard,
     CreditPreflightGuard,
@@ -413,6 +422,8 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     CustomTopicGenerationService,
     CarouselTrainingCaptureService,
     OpenAIRateLimiterService,
+    RateLimiterService,
+    InstagramMobileApiService,
     MaintenanceService,
     AppSettingsService,
     CurrencyService,
@@ -423,8 +434,4 @@ import { MiddlewareConsumer, NestModule } from '@nestjs/common';
     PostEngagementSyncCronService,
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RateLimitMiddleware).forRoutes('*'); // Apply to all routes
-  }
-}
+export class AppModule {}

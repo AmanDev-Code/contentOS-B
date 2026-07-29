@@ -13,7 +13,8 @@ import {
   ApiKeyService,
   type ValidatedApiKey,
 } from '../services/api-key.service';
-import { CacheService } from '../services/cache.service';
+import { RateLimiterService } from '../services/rate-limiter.service';
+import { API_KEY_PLAN_LIMITS } from '../config/rate-limit.config';
 import { API_SCOPE_KEY } from '../decorators/api-scope.decorator';
 
 export interface ApiKeyAuthedRequest {
@@ -40,7 +41,7 @@ export class ApiKeyAuthGuard implements CanActivate {
 
   constructor(
     private readonly apiKeyService: ApiKeyService,
-    private readonly cacheService: CacheService,
+    private readonly rateLimiterService: RateLimiterService,
     private readonly reflector: Reflector,
   ) {}
 
@@ -64,27 +65,38 @@ export class ApiKeyAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or revoked API key.');
     }
 
-    // --- Rate limiting (fixed 1-hour window per key) ---
-    const windowSeconds = 3600;
-    const bucket = Math.floor(Date.now() / (windowSeconds * 1000));
-    const rlKey = `apikey:rl:${validated.keyId}:${bucket}`;
+    // --- Rate limiting (via RateLimiterService) ---
     const limit = validated.rateLimitPerHour;
-    const used = await this.cacheService.incr(rlKey, windowSeconds);
-    const remaining = Math.max(0, limit - used);
-    const resetEpoch = (bucket + 1) * windowSeconds;
+
+    // Create dynamic limiter for this key's plan limit if needed
+    this.rateLimiterService.createDynamicLimiter(`apikey:${validated.keyId}`, {
+      points: limit,
+      durationSeconds: 3600,
+      message: `Rate limit exceeded: ${limit} requests/hour.`,
+    });
+
+    const rlResult = await this.rateLimiterService.consume(
+      `apikey:${validated.keyId}`,
+      validated.keyId,
+      1,
+      false, // fail-open for API keys
+    );
+
+    const remaining = rlResult.remaining;
+    const resetEpoch = Math.ceil((Date.now() + rlResult.resetMs) / 1000);
 
     this.setHeader(response, 'X-RateLimit-Limit', limit);
     this.setHeader(response, 'X-RateLimit-Remaining', remaining);
     this.setHeader(response, 'X-RateLimit-Reset', resetEpoch);
-    this.setHeader(response, 'X-RateLimit-Window', windowSeconds);
+    this.setHeader(response, 'X-RateLimit-Window', 3600);
 
-    if (used > limit) {
-      const retryAfter = resetEpoch - Math.floor(Date.now() / 1000);
-      this.setHeader(response, 'Retry-After', Math.max(1, retryAfter));
+    if (!rlResult.allowed) {
+      const retryAfter = Math.max(1, Math.ceil(rlResult.retryAfterMs / 1000));
+      this.setHeader(response, 'Retry-After', retryAfter);
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          message: `Rate limit exceeded: ${limit} requests/hour. Retry after ${Math.max(1, retryAfter)}s.`,
+          message: `Rate limit exceeded: ${limit} requests/hour. Retry after ${retryAfter}s.`,
           error: 'Too Many Requests',
         },
         HttpStatus.TOO_MANY_REQUESTS,

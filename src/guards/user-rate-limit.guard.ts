@@ -7,11 +7,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { CacheService } from '../services/cache.service';
-import {
-  RATE_LIMIT_BY_PATH,
-  resolveRateLimitEndpoint,
-} from '../config/rate-limit.config';
+import { RateLimiterService } from '../services/rate-limiter.service';
+import { CORE_LIMITS, resolvePathToLimiter } from '../config/rate-limit.config';
 
 interface AuthedRequest extends Request {
   user?: { id: string };
@@ -21,7 +18,7 @@ interface AuthedRequest extends Request {
 export class UserRateLimitGuard implements CanActivate {
   private readonly logger = new Logger(UserRateLimitGuard.name);
 
-  constructor(private readonly cacheService: CacheService) {}
+  constructor(private readonly rateLimiterService: RateLimiterService) {}
 
   private applyHeaders(response: unknown, headers: Record<string, string>) {
     const res = response as {
@@ -54,46 +51,60 @@ export class UserRateLimitGuard implements CanActivate {
       (req as { path?: string }).path ||
       (req.url ? String(req.url).split('?')[0] : '') ||
       '';
-    const endpoint = resolveRateLimitEndpoint(path, RATE_LIMIT_BY_PATH);
-    if (!endpoint) {
+
+    const limiterName = resolvePathToLimiter(path);
+    if (!limiterName) {
       return true;
     }
+
+    // Bypass GET requests on read-heavy listing endpoints to avoid throttle loops
     const method = String(
       (req as { method?: string }).method || 'GET',
     ).toUpperCase();
-    // Safeguard read-heavy listing endpoints from accidental throttle loops (StrictMode, polling).
     if (
       method === 'GET' &&
-      (endpoint === '/generation/content' || endpoint === '/content')
+      (limiterName === 'gen-content' || limiterName === 'content')
     ) {
       return true;
     }
 
-    const config = RATE_LIMIT_BY_PATH[endpoint];
-    const allowed = await this.checkRateLimit(userId, endpoint, config);
-    if (!allowed) {
-      this.logger.warn(
-        `User rate limit exceeded for user ${userId} on ${endpoint}`,
-      );
-      const usage = await this.getCurrentUsage(userId, endpoint, config);
+    const config = CORE_LIMITS[limiterName];
+    const result = await this.rateLimiterService.consume(
+      limiterName,
+      userId,
+      1,
+      false, // fail-open for core product
+    );
+
+    // Always emit rate limit headers
+    const resetEpoch = Math.ceil(Date.now() + result.resetMs);
+    this.applyHeaders(res, {
+      'X-RateLimit-Limit': (config?.points || result.limit).toString(),
+      'X-RateLimit-Remaining': result.remaining.toString(),
+      'X-RateLimit-Reset': resetEpoch.toString(),
+      'X-RateLimit-Window': (
+        (config?.durationSeconds || 3600) * 1000
+      ).toString(),
+    });
+
+    if (!result.allowed) {
       const retryAfterSeconds = Math.max(
         1,
-        Math.ceil((usage.resetTime - Date.now()) / 1000),
+        Math.ceil(result.retryAfterMs / 1000),
       );
+
       this.applyHeaders(res, {
-        'X-RateLimit-Limit': config.max.toString(),
-        'X-RateLimit-Remaining': Math.max(
-          0,
-          config.max - usage.count,
-        ).toString(),
-        'X-RateLimit-Reset': usage.resetTime.toString(),
-        'X-RateLimit-Window': config.windowMs.toString(),
         'Retry-After': retryAfterSeconds.toString(),
       });
+
+      this.logger.warn(
+        `User rate limit exceeded for user ${userId} on ${limiterName}`,
+      );
+
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          message: config.message || 'Too many requests',
+          message: config?.message || 'Too many requests',
           error: 'Too Many Requests',
           retryAfter: retryAfterSeconds,
         },
@@ -101,103 +112,6 @@ export class UserRateLimitGuard implements CanActivate {
       );
     }
 
-    const usage = await this.getCurrentUsage(userId, endpoint, config);
-    this.applyHeaders(res, {
-      'X-RateLimit-Limit': config.max.toString(),
-      'X-RateLimit-Remaining': Math.max(0, config.max - usage.count).toString(),
-      'X-RateLimit-Reset': usage.resetTime.toString(),
-      'X-RateLimit-Window': config.windowMs.toString(),
-    });
-
     return true;
-  }
-
-  private async checkRateLimit(
-    userId: string,
-    endpoint: string,
-    config: { windowMs: number; max: number },
-  ): Promise<boolean> {
-    const key = `rate_limit:v2:${userId}:${endpoint}`;
-    const now = Date.now();
-    const windowStart = now - config.windowMs;
-
-    try {
-      const windowData = await this.cacheService.get(key);
-
-      if (!windowData) {
-        await this.cacheService.set(
-          key,
-          JSON.stringify({
-            count: 1,
-            windowStart: now,
-            requests: [now],
-          }),
-          Math.ceil(config.windowMs / 1000),
-        );
-        return true;
-      }
-
-      const data = JSON.parse(windowData as string);
-      const validRequests = (data.requests as number[]).filter(
-        (timestamp) => timestamp > windowStart,
-      );
-
-      if (validRequests.length >= config.max) {
-        return false;
-      }
-
-      validRequests.push(now);
-      await this.cacheService.set(
-        key,
-        JSON.stringify({
-          count: validRequests.length,
-          windowStart: Math.min(data.windowStart, windowStart),
-          requests: validRequests,
-        }),
-        Math.ceil(config.windowMs / 1000),
-      );
-
-      return true;
-    } catch (e) {
-      this.logger.error(
-        `User rate limit check failed: ${(e as Error).message}`,
-      );
-      return true;
-    }
-  }
-
-  private async getCurrentUsage(
-    userId: string,
-    endpoint: string,
-    config: { windowMs: number; max: number },
-  ): Promise<{ count: number; resetTime: number }> {
-    const key = `rate_limit:v2:${userId}:${endpoint}`;
-    try {
-      const windowData = await this.cacheService.get(key);
-      if (!windowData) {
-        return {
-          count: 0,
-          resetTime: Date.now() + config.windowMs,
-        };
-      }
-      const data = JSON.parse(windowData as string);
-      const now = Date.now();
-      const windowStart = now - config.windowMs;
-      const validRequests = (data.requests as number[]).filter(
-        (timestamp) => timestamp > windowStart,
-      );
-      return {
-        count: validRequests.length,
-        resetTime:
-          validRequests.length === 0
-            ? now + config.windowMs
-            : Math.min(...validRequests) + config.windowMs,
-      };
-    } catch {
-      return {
-        count: 0,
-        resetTime: Date.now() + config.windowMs,
-      };
-    }
   }
 }
