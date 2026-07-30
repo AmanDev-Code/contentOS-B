@@ -69,6 +69,9 @@ export interface CreateBlogPostInput {
   structured_data?: Record<string, unknown> | null;
   locale?: string;
   faq_json?: Array<{ question: string; answer: string }> | null;
+  listing_image_url?: string | null;
+  listing_image_object_position?: string | null;
+  toc_json?: Array<{ label: string; anchor: string }> | null;
 }
 
 export interface StaticPageSeoInput {
@@ -170,12 +173,19 @@ export class BlogService {
     return !!data;
   }
 
-  /** Accepts lowercase presets only; anything else maps to null. */
+  /** Accepts lowercase presets or custom "x,y" percentages; anything else maps to null. */
   sanitizeFeaturedImageObjectPosition(raw: unknown): string | null {
     if (raw === null || raw === undefined || raw === '') return null;
     const s = String(raw).trim().toLowerCase();
-    if (!FEATURED_IMAGE_OBJECT_POSITION.has(s)) return null;
-    return s;
+    if (FEATURED_IMAGE_OBJECT_POSITION.has(s)) return s;
+    // Accept custom "x,y" format (two numbers 0-100 separated by comma)
+    const match = s.match(/^(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/);
+    if (match) {
+      const x = Math.min(100, Math.max(0, parseFloat(match[1])));
+      const y = Math.min(100, Math.max(0, parseFloat(match[2])));
+      return `${Math.round(x)},${Math.round(y)}`;
+    }
+    return null;
   }
 
   normalizeSlug(raw: string): string {
@@ -260,7 +270,7 @@ export class BlogService {
     let q = client
       .from('blog_posts')
       .select(
-        'id, parent_id, path, slug, title, subtitle, excerpt, post_kind, content_category, published_at, scheduled_publish_at, status, featured_image_url, featured_image_object_position, reading_minutes, author_display_name, author_role, author_avatar_url, tags, seo_title, seo_description, og_image_url',
+        'id, parent_id, path, slug, title, subtitle, excerpt, post_kind, content_category, published_at, scheduled_publish_at, status, featured_image_url, featured_image_object_position, listing_image_url, listing_image_object_position, reading_minutes, author_display_name, author_role, author_avatar_url, tags, seo_title, seo_description, og_image_url',
       )
       .in('status', ['published', 'scheduled'])
       .order('published_at', { ascending: false, nullsFirst: false })
@@ -392,6 +402,11 @@ export class BlogService {
       structured_data: input.structured_data ?? null,
       locale: input.locale ?? 'en',
       faq_json: input.faq_json ?? null,
+      listing_image_url: input.listing_image_url?.trim() || null,
+      listing_image_object_position: this.sanitizeFeaturedImageObjectPosition(
+        input.listing_image_object_position,
+      ),
+      toc_json: input.toc_json ?? null,
       created_by: userId,
     };
 
@@ -448,6 +463,12 @@ export class BlogService {
       patch.featured_image_object_position =
         this.sanitizeFeaturedImageObjectPosition(
           patch.featured_image_object_position,
+        );
+    }
+    if ('listing_image_object_position' in patch) {
+      patch.listing_image_object_position =
+        this.sanitizeFeaturedImageObjectPosition(
+          patch.listing_image_object_position,
         );
     }
     const client = this.supabaseService.getServiceClient();
