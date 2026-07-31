@@ -4893,17 +4893,85 @@ Rules:
       
       this.logger.log(`Successfully regenerated feature image for post ${post.id}`);
       return { success: true, image_url: publicUrl };
-      
+
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`Failed to regenerate feature image for post ${slug}: ${errorMsg}`);
-      
+
       // Fallback placeholder if image generation fails completely
       return {
         success: false,
         error: errorMsg,
         image_url: undefined
       };
+    }
+  }
+
+  /**
+   * AI-outpaint the feature image to 16:10 aspect for blog listing cards.
+   * Uses Bifrost's /images/edits endpoint (Stability AI / OpenAI / Bedrock).
+   * Falls back to sharp edge-mirror padding when AI models fail.
+   */
+  async generateListingImage(
+    slug: string,
+  ): Promise<{ success: boolean; listing_image_url?: string; error?: string }> {
+    if (!this.blogImageService || !this.minioService) {
+      return { success: false, error: 'Image service not available' };
+    }
+
+    const client = this.supabase.getServiceClient();
+
+    try {
+      const { data: post, error: postErr } = await client
+        .from('blog_posts')
+        .select('id, title, slug, featured_image_url, seo_keywords')
+        .eq('slug', slug)
+        .single();
+
+      if (postErr || !post) {
+        throw new NotFoundException('Post not found');
+      }
+      if (!post.featured_image_url) {
+        throw new BadRequestException(
+          'Post has no featured image to extend. Generate a featured image first.',
+        );
+      }
+
+      const imagePath = await this.blogImageService.outpaintForListing({
+        id: post.id,
+        title: post.title,
+        slug: post.slug,
+        featured_image_url: post.featured_image_url,
+        keywords: post.seo_keywords?.split(',').map((k: string) => k.trim()),
+      });
+
+      const publicUrl = await this.minioService.getPublicUrl(
+        'blog-images',
+        imagePath,
+      );
+
+      const { error: updateErr } = await client
+        .from('blog_posts')
+        .update({
+          listing_image_url: publicUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', post.id);
+
+      if (updateErr) {
+        throw new Error(
+          `Failed to update post with listing image: ${updateErr.message}`,
+        );
+      }
+
+      this.logger.log(`Generated listing image for post ${post.id}`);
+      return { success: true, listing_image_url: publicUrl };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(
+        `Failed to generate listing image for post ${slug}: ${errorMsg}`,
+      );
+      return { success: false, error: errorMsg };
     }
   }
 

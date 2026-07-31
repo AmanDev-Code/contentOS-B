@@ -44,6 +44,9 @@ export class BlogImageService implements OnModuleInit {
   private readonly TARGET_WIDTH = 1200;
   private readonly TARGET_HEIGHT = 630;
   private readonly ASPECT_RATIO = this.TARGET_WIDTH / this.TARGET_HEIGHT;
+  // Listing card dimensions (16:10 aspect for blog index cards)
+  private readonly LISTING_WIDTH = 1200;
+  private readonly LISTING_HEIGHT = 750;
 
   constructor(
     private readonly aiGateway: AiGatewayService,
@@ -307,6 +310,175 @@ Examples of what to include:
   async deleteImage(objectName: string): Promise<void> {
     await this.minio.deleteFile(this.BUCKET_NAME, objectName);
     this.logger.log(`Deleted image from MinIO: ${objectName}`);
+  }
+
+  /**
+   * AI-powered outpainting: extend an image's canvas to fit the listing
+   * aspect ratio (16:10) without cropping content. Uses Bifrost's
+   * /images/edits endpoint (Stability AI directional outpaint or OpenAI
+   * mask-based edits). Falls back to sharp's edge-mirror padding when
+   * the AI models fail.
+   */
+  async outpaintForListing(post: {
+    id: string;
+    title: string;
+    slug: string;
+    featured_image_url: string;
+    keywords?: string[];
+  }): Promise<string> {
+    // 1. Download the source image
+    const sourceBuffer = await this.fetchImageBuffer(post.featured_image_url);
+
+    // 2. Detect dimensions
+    const meta = await sharp(sourceBuffer).metadata();
+    const srcW = meta.width || this.TARGET_WIDTH;
+    const srcH = meta.height || this.TARGET_HEIGHT;
+
+    // 3. Calculate extension needed to reach 16:10 (1200×750)
+    //    Preserve the source image at native scale, add canvas around it.
+    const targetAspect = this.LISTING_WIDTH / this.LISTING_HEIGHT; // 1.6
+    const srcAspect = srcW / srcH;
+
+    let addLeft = 0, addRight = 0, addTop = 0, addBottom = 0;
+
+    if (srcAspect > targetAspect) {
+      // Source is wider than target — need to add vertical padding
+      const targetH = Math.round(srcW / targetAspect);
+      const extraH = targetH - srcH;
+      addTop = Math.floor(extraH / 2);
+      addBottom = extraH - addTop;
+    } else if (srcAspect < targetAspect) {
+      // Source is taller than target — need to add horizontal padding
+      const targetW = Math.round(srcH * targetAspect);
+      const extraW = targetW - srcW;
+      addLeft = Math.floor(extraW / 2);
+      addRight = extraW - addLeft;
+    }
+
+    // If no extension needed (already 16:10), just resize + upload
+    if (addLeft === 0 && addRight === 0 && addTop === 0 && addBottom === 0) {
+      return await this.finalizeAndUpload(sourceBuffer, post, 'listing');
+    }
+
+    // 4. Try AI outpainting via Bifrost
+    let extendedBuffer: Buffer | null = null;
+    try {
+      if (this.aiGateway.hasImageEnhanceModels() || this.aiGateway.hasImageModels()) {
+        const prompt = this.buildOutpaintPrompt(post.title, post.keywords);
+        this.logger.log(
+          `Outpainting ${post.slug} — extend L${addLeft} R${addRight} T${addTop} B${addBottom}`,
+        );
+
+        // Pad source with transparent pixels — the AI fills the transparent regions
+        const paddedInput = await sharp(sourceBuffer)
+          .extend({
+            top: addTop,
+            bottom: addBottom,
+            left: addLeft,
+            right: addRight,
+            background: { r: 0, g: 0, b: 0, alpha: 0 },
+          })
+          .png()
+          .toBuffer();
+
+        const { b64, model } = await this.aiGateway.generateImageEditB64({
+          image: paddedInput,
+          imageMime: 'image/png',
+          prompt,
+          type: 'outpainting',
+          size: `${this.LISTING_WIDTH}x${this.LISTING_HEIGHT}`,
+          left: addLeft,
+          right: addRight,
+          up: addTop,
+          down: addBottom,
+          creativity: 0.35,
+          timeoutMs: 180_000,
+        });
+        this.logger.log(`Outpaint succeeded with model ${model}`);
+        extendedBuffer = Buffer.from(b64, 'base64');
+      }
+    } catch (err) {
+      this.logger.warn(
+        `AI outpaint failed for ${post.slug}, falling back to edge-mirror: ${(err as Error).message}`,
+      );
+    }
+
+    // 5. Fallback: edge-mirror padding via sharp (non-AI but content-preserving)
+    if (!extendedBuffer) {
+      extendedBuffer = await sharp(sourceBuffer)
+        .extend({
+          top: addTop,
+          bottom: addBottom,
+          left: addLeft,
+          right: addRight,
+          extendWith: 'mirror',
+        })
+        .toBuffer();
+    }
+
+    // 6. Resize to exact listing dimensions and upload
+    return await this.finalizeAndUpload(extendedBuffer, post, 'listing');
+  }
+
+  /**
+   * Fetch an image URL and return its raw bytes.
+   * Handles both public URLs and MinIO object paths.
+   */
+  private async fetchImageBuffer(imageUrl: string): Promise<Buffer> {
+    // If it looks like a plain object path (no protocol), fetch from MinIO
+    if (!/^https?:\/\//i.test(imageUrl)) {
+      const stream = await this.minio.getFileStream(this.BUCKET_NAME, imageUrl);
+      return await this.streamToBuffer(stream);
+    }
+    const res = await fetch(imageUrl);
+    if (!res.ok) throw new Error(`Failed to fetch source image: HTTP ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  }
+
+  private streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      stream.on('data', (c: Buffer) => chunks.push(c));
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+      stream.on('error', reject);
+    });
+  }
+
+  /**
+   * Optimize (resize to target listing dimensions + webp) and upload to MinIO.
+   * Returns the object path (relative, matches the pattern used by
+   * generateFeatureImage).
+   */
+  private async finalizeAndUpload(
+    buffer: Buffer,
+    post: { slug: string; title: string; keywords?: string[] },
+    variant: 'listing' | 'feature',
+  ): Promise<string> {
+    const width = variant === 'listing' ? this.LISTING_WIDTH : this.TARGET_WIDTH;
+    const height = variant === 'listing' ? this.LISTING_HEIGHT : this.TARGET_HEIGHT;
+    const processed = await sharp(buffer)
+      .resize({ width, height, fit: 'cover', position: 'center' })
+      .webp({ quality: 82, effort: 6 })
+      .toBuffer();
+
+    const baseFileName = this.generateFileName(post.title, post.keywords?.[0]);
+    const fileName =
+      variant === 'listing' ? `listing-${baseFileName}` : baseFileName;
+    const objectName = `blog/${post.slug}/${fileName}`;
+    await this.minio.uploadFile(this.BUCKET_NAME, objectName, processed, 'image/webp');
+    this.logger.log(`Uploaded ${variant} image to MinIO: ${objectName}`);
+    return objectName;
+  }
+
+  /**
+   * Build a prompt for AI outpainting that instructs the model to
+   * naturally extend the scene without adding new subjects.
+   */
+  private buildOutpaintPrompt(title: string, keywords?: string[]): string {
+    const context = keywords?.length ? keywords.slice(0, 3).join(', ') : '';
+    return this.sanitizePrompt(
+      `Extend this image naturally by continuing the existing background, color palette, and lighting. Do not add new subjects, faces, text, or logos. Preserve the original composition. Context: ${title}${context ? ` (${context})` : ''}. Maintain a clean, professional look suitable for a blog listing card.`,
+    );
   }
 
   /**

@@ -591,12 +591,34 @@ export class ContentEngineController {
       if (!slug?.trim()) {
         throw new BadRequestException('Slug is required');
       }
-      
+
       return await this.contentEngine.regenerateFeatureImage(slug);
     } catch (e: any) {
       this.logger.error(`Failed to regenerate image for ${slug}: ${e?.message}`);
       throw new HttpException(
         e.message || 'Failed to regenerate image',
+        e.status || HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Post('blog/:slug/generate-listing-image')
+  @ApiOperation({
+    summary:
+      'AI-outpaint the feature image to 16:10 for the blog listing card',
+  })
+  async generateListingImage(@Param('slug') slug: string) {
+    try {
+      if (!slug?.trim()) {
+        throw new BadRequestException('Slug is required');
+      }
+      return await this.contentEngine.generateListingImage(slug);
+    } catch (e: any) {
+      this.logger.error(
+        `Failed to generate listing image for ${slug}: ${e?.message}`,
+      );
+      throw new HttpException(
+        e.message || 'Failed to generate listing image',
         e.status || HttpStatus.BAD_REQUEST,
       );
     }

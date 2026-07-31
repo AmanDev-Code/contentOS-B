@@ -394,6 +394,166 @@ export class AiGatewayService {
     }
   }
 
+  // --- Image editing / outpainting (multipart /images/edits) ----------------
+
+  /** True when at least one image_enhance model is configured. */
+  hasImageEnhanceModels(): boolean {
+    return (
+      this.registry.hasModelsSync('image_enhance') && Boolean(this.cfg().apiKey)
+    );
+  }
+
+  /**
+   * Edit or extend (outpaint) an existing image via Bifrost's
+   * `POST /v1/images/edits` endpoint. Sends a multipart/form-data body with
+   * the source image and optional mask + directional extend fields.
+   *
+   * Uses the `image_enhance` model chain by default (falls back to `image`
+   * chain if none configured). Supports:
+   *  - OpenAI mask-based edits (`gpt-image-1`, `dall-e-2`)
+   *  - Stability AI directional outpaint (`left/right/up/down` pixel extend)
+   *  - Bedrock Titan / Stability inpaint/outpaint via `type` field
+   */
+  async generateImageEditB64(opts: {
+    image: Buffer;
+    imageMime?: string; // defaults to image/png
+    prompt: string;
+    type?: 'inpainting' | 'outpainting' | 'background_removal';
+    mask?: Buffer;
+    maskMime?: string;
+    size?: string;
+    left?: number;
+    right?: number;
+    up?: number;
+    down?: number;
+    creativity?: number; // 0-1, Stability AI
+    timeoutMs?: number;
+    models?: string[];
+  }): Promise<{ b64: string; model: string }> {
+    const cfg = this.cfg();
+    if (!cfg.apiKey) throw new AiGatewayError('AI gateway API key is not set');
+
+    // Prefer image_enhance chain; fall back to image chain if empty.
+    let chain =
+      opts.models && opts.models.length
+        ? opts.models
+        : this.registry.getModelChainSync('image_enhance');
+    if (!chain.length) chain = this.registry.getModelChainSync('image');
+    if (!chain.length) {
+      throw new AiGatewayError(
+        'No image_enhance or image models are configured in the registry',
+      );
+    }
+
+    const endpoint = `${this.base()}/images/edits`;
+    const timeoutMs = opts.timeoutMs ?? 120_000;
+    const attempts: { model: string; error: string }[] = [];
+
+    for (const model of chain) {
+      try {
+        const b64 = await this.attemptImageEdit(
+          endpoint,
+          cfg.apiKey,
+          model,
+          opts,
+          timeoutMs,
+        );
+        if (attempts.length > 0) {
+          this.logger.warn(
+            `Image edit gateway recovered on fallback model ${model} after ${attempts.length} failure(s)`,
+          );
+        }
+        return { b64, model };
+      } catch (e) {
+        const msg = (e as Error).message;
+        attempts.push({ model, error: msg });
+        this.logger.warn(`Image edit model ${model} failed: ${msg}`);
+      }
+    }
+    throw new AiGatewayError(
+      `All ${chain.length} image edit model(s) failed`,
+      attempts,
+    );
+  }
+
+  private async attemptImageEdit(
+    endpoint: string,
+    apiKey: string,
+    model: string,
+    opts: {
+      image: Buffer;
+      imageMime?: string;
+      prompt: string;
+      type?: string;
+      mask?: Buffer;
+      maskMime?: string;
+      size?: string;
+      left?: number;
+      right?: number;
+      up?: number;
+      down?: number;
+      creativity?: number;
+    },
+    timeoutMs: number,
+  ): Promise<string> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const form = new FormData();
+      form.append('model', model);
+      form.append('prompt', opts.prompt);
+      if (opts.type) form.append('type', opts.type);
+      if (opts.size) form.append('size', opts.size);
+      if (opts.left !== undefined) form.append('left', String(opts.left));
+      if (opts.right !== undefined) form.append('right', String(opts.right));
+      if (opts.up !== undefined) form.append('up', String(opts.up));
+      if (opts.down !== undefined) form.append('down', String(opts.down));
+      if (opts.creativity !== undefined) {
+        form.append('creativity', String(opts.creativity));
+      }
+      form.append(
+        'image',
+        new Blob([new Uint8Array(opts.image)], {
+          type: opts.imageMime || 'image/png',
+        }),
+        'image.png',
+      );
+      if (opts.mask) {
+        form.append(
+          'mask',
+          new Blob([new Uint8Array(opts.mask)], {
+            type: opts.maskMime || 'image/png',
+          }),
+          'mask.png',
+        );
+      }
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errText.slice(0, 240)}`);
+      }
+      const json = await res.json();
+      const item = Array.isArray(json?.data) ? json.data[0] : null;
+      if (item?.b64_json) return item.b64_json as string;
+      if (item?.url) return await this.urlToB64(item.url as string, timeoutMs);
+      throw new Error('No edited image data returned');
+    } catch (e) {
+      const err = e as Error;
+      throw new Error(
+        err.name === 'AbortError' ? 'Request timed out' : err.message,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   // --- Context-aware image generation (Responses API) -----------------------
 
   /** True when at least one image_context model is configured. */
