@@ -46,7 +46,11 @@ export class InstagramReelService {
     url: string,
     bustCache = false,
   ): Promise<InstagramReelResult> {
-    const postId = this.extractPostId(url);
+    // Strip tracking params — Instagram only needs the path.
+    // UTM/igsh params create different cache keys in the orchestrator and
+    // can cause stale-URL issues when the same reel is fetched with/without params.
+    const cleanUrl = this.normalizeInstagramUrl(url);
+    const postId = this.extractPostId(cleanUrl);
     const cacheKey = `${CACHE_PREFIX}${postId}`;
 
     // Check cache (same key pattern as before — backward compatible)
@@ -59,7 +63,7 @@ export class InstagramReelService {
         const urlAlive = await this.validateVideoUrl(result.videoUrl);
         if (urlAlive) {
           this.logger.debug(`Cache hit for reel ${postId} — URL still alive`);
-          this.alerts.emitCacheHit(url);
+          this.alerts.emitCacheHit(cleanUrl);
           return result;
         }
 
@@ -73,7 +77,7 @@ export class InstagramReelService {
     }
 
     // Delegate to the engine orchestrator (tries all engines in order)
-    const extraction = await this.engineOrchestrator.extract(url, 'instagram');
+    const extraction = await this.engineOrchestrator.extract(cleanUrl, 'instagram');
 
     if (!extraction.success || extraction.items.length === 0) {
       throw new InstagramFetchError(
@@ -111,6 +115,22 @@ export class InstagramReelService {
     );
 
     return result;
+  }
+
+  /**
+   * Strip tracking/analytics query params from Instagram URLs.
+   * Instagram only needs the path — UTM, igsh, etc. create cache fragmentation
+   * and can cause stale-URL issues in the orchestrator's sha256-based cache.
+   */
+  private normalizeInstagramUrl(url: string): string {
+    try {
+      const parsed = new URL(url);
+      // Keep only the path — no query params needed for Instagram content
+      return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+    } catch {
+      // If URL parsing fails, at minimum strip query string
+      return url.split('?')[0].replace(/\/+$/, '');
+    }
   }
 
   /**
