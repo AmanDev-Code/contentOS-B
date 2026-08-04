@@ -18,14 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install
 
 COPY . .
 
 RUN npm run build
 
 # Production deps only (reuses same build tools)
-RUN rm -rf node_modules && npm ci --omit=dev
+RUN rm -rf node_modules && npm install --omit=dev
 
 FROM node:22-bookworm-slim
 
