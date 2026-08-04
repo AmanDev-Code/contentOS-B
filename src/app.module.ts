@@ -154,6 +154,7 @@ import { WebhookDispatcherService } from './services/webhook-dispatcher.service'
 import { WebhookDeliveryProcessor } from './processors/webhook-delivery.processor';
 import { ApiKeyService } from './services/api-key.service';
 import { ApiKeyAuthGuard } from './guards/api-key-auth.guard';
+import { AdminOrApiKeyGuard } from './guards/admin-or-apikey.guard';
 import { ApiV1PostsService } from './services/api-v1-posts.service';
 import { PlatformStaffGuard } from './guards/platform-staff.guard';
 import { ModerationGuard } from './guards/moderation.guard';
@@ -192,7 +193,11 @@ import { RateLimiterService } from './services/rate-limiter.service';
 import { InstagramMobileApiService } from './services/instagram-mobile-api.service';
 import { ToolsModule } from './modules/tools/tools.module';
 import { MediaEngineModule } from './modules/media-engine';
+import { AutoCaptionModule } from './modules/tools/auto-caption/auto-caption.module';
+import { McpController } from './modules/mcp/mcp.controller';
+import { McpService } from './modules/mcp/mcp.service';
 import { AdminMediaEngineController } from './controllers/admin-media-engine.controller';
+import { AdminTranscriptionController } from './controllers/admin-transcription.controller';
 
 import { QUEUE_NAMES } from './common/constants';
 
@@ -251,6 +256,8 @@ import { QUEUE_NAMES } from './common/constants';
     ToolsModule,
     // Universal media extraction engine (isolated, multi-engine fallback)
     MediaEngineModule,
+    // Auto-caption module (exports CaptionOrchestratorService for admin controller)
+    AutoCaptionModule,
   ],
   controllers: [
     AppController,
@@ -310,6 +317,8 @@ import { QUEUE_NAMES } from './common/constants';
     AdminReferralController,
     AdminMediaController,
     AdminMediaEngineController,
+    AdminTranscriptionController,
+    McpController,
     AdminSubscriptionPlansController,
     AdminDiscountCodesController,
     AdminLaunchPricingController,
@@ -387,6 +396,7 @@ import { QUEUE_NAMES } from './common/constants';
     WebhookDeliveryProcessor,
     ApiKeyService,
     ApiKeyAuthGuard,
+    AdminOrApiKeyGuard,
     ApiV1PostsService,
     FeedbackRewardProcessor,
     FeedbackReminderProcessor,
@@ -432,6 +442,7 @@ import { QUEUE_NAMES } from './common/constants';
     MissedPostSweeperCronService,
     MissedBlogSweeperCronService,
     PostEngagementSyncCronService,
+    McpService,
   ],
 })
 export class AppModule {}
