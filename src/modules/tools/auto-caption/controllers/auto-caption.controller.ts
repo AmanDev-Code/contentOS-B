@@ -258,10 +258,11 @@ export class AutoCaptionController {
     const result = await this.captionService.getResult(jobId);
 
     if (!result) {
-      // Result key expired in Redis — but the file may still exist in MinIO.
-      // Try serving directly from the expected output path.
+      // No result in Redis — job is either still processing or result expired.
+      // Check if the output file actually exists in MinIO before serving.
       const outputPath = `caption-output/${jobId}.mp4`;
       try {
+        await this.uploadService.checkFileExists(outputPath);
         const downloadUrl = await this.uploadService.getDownloadUrl(outputPath);
         return {
           success: true,
@@ -271,7 +272,8 @@ export class AutoCaptionController {
           durationMs: null,
         };
       } catch {
-        throw new HttpException('Job not found or expired. Please re-generate.', HttpStatus.NOT_FOUND);
+        // File doesn't exist — job is still processing or never ran
+        throw new HttpException('Job not found or still processing', HttpStatus.NOT_FOUND);
       }
     }
 

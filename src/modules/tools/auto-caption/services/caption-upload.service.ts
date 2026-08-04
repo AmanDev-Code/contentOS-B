@@ -90,6 +90,13 @@ export class CaptionUploadService {
   }
 
   /**
+   * Check if a file exists in MinIO (throws if not).
+   */
+  async checkFileExists(objectPath: string): Promise<void> {
+    await this.minio.getFileStats(this.bucket, objectPath);
+  }
+
+  /**
    * Download input file from MinIO to local temp path.
    */
   async downloadToLocal(objectPath: string, localPath: string): Promise<void> {
