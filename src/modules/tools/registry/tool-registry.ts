@@ -26,6 +26,24 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     ],
     searchVolume: 110000,
   },
+  'auto-caption-generator': {
+    slug: 'auto-caption-generator',
+    name: 'Auto Caption Generator',
+    description:
+      'Add auto-synced captions to any video for free. AI transcribes, syncs word-by-word, and burns styled subtitles onto your Reels, Shorts, and TikToks.',
+    category: 'file-processing-heavy',
+    status: 'active',
+    keywords: [
+      'auto caption generator',
+      'auto caption generator for video',
+      'add captions to video free',
+      'subtitle generator online',
+      'auto subtitles for reels',
+      'video caption maker',
+      'burn subtitles into video',
+    ],
+    searchVolume: 49000,
+  },
 };
 
 /**

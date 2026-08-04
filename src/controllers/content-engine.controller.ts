@@ -15,21 +15,21 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { AuthGuard } from '../guards/auth.guard';
-import { AdminGuard } from '../guards/admin.guard';
-import { PaywallGuard } from '../guards/paywall.guard';
+import { AdminOrApiKeyGuard } from '../guards/admin-or-apikey.guard';
+import { RequireApiScope } from '../decorators/api-scope.decorator';
 import { ContentEngineService } from '../services/content-engine.service';
 
 @ApiTags('content-engine')
 @Controller('admin/content-engine')
 @ApiBearerAuth()
-@UseGuards(AuthGuard, PaywallGuard, AdminGuard)
+@UseGuards(AdminOrApiKeyGuard)
 export class ContentEngineController {
   private readonly logger = new Logger(ContentEngineController.name);
 
   constructor(private readonly contentEngine: ContentEngineService) {}
 
   @Get('dashboard')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({ summary: 'Content Engine dashboard stats' })
   async dashboard() {
     try {
@@ -44,6 +44,7 @@ export class ContentEngineController {
   }
 
   @Post('generate-plan')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Generate AI content plan from keyword research' })
   async generatePlan(@Body() body: Record<string, any>) {
     try {
@@ -58,6 +59,7 @@ export class ContentEngineController {
   }
 
   @Post('generate-article')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Generate full article from approved plan' })
   async generateArticle(@Body() body: Record<string, any>) {
     try {
@@ -72,6 +74,7 @@ export class ContentEngineController {
   }
 
   @Post('generate-distribution')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Generate platform-adapted content for a post' })
   async generateDistribution(
     @Body() body: { post_id: string; platform: string },
@@ -93,6 +96,7 @@ export class ContentEngineController {
   // --- Clusters ---
 
   @Get('clusters')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({ summary: 'List content clusters' })
   async listClusters() {
     try {
@@ -107,6 +111,7 @@ export class ContentEngineController {
   }
 
   @Post('clusters')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Create content cluster' })
   async createCluster(
     @Body()
@@ -128,6 +133,7 @@ export class ContentEngineController {
   }
 
   @Get('clusters/:id')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({ summary: 'Get cluster with articles' })
   async getCluster(@Param('id') id: string) {
     try {
@@ -142,6 +148,7 @@ export class ContentEngineController {
   }
 
   @Post('clusters/:id/generate')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'AI generate cluster article suggestions' })
   async generateClusterSuggestions(@Param('id') id: string) {
     try {
@@ -158,6 +165,7 @@ export class ContentEngineController {
   // --- Distributions ---
 
   @Get('distributions/:postId')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({ summary: 'Get distributions for a post' })
   async getDistributions(@Param('postId') postId: string) {
     try {
@@ -172,6 +180,7 @@ export class ContentEngineController {
   }
 
   @Post('distributions/:postId/:platform')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Generate/update distribution for a platform' })
   async generatePlatformDistribution(
     @Param('postId') postId: string,
@@ -191,6 +200,7 @@ export class ContentEngineController {
   // --- Scores ---
 
   @Get('scores/:postId')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({ summary: 'Get quality scores for a post' })
   async getScores(@Param('postId') postId: string) {
     try {
@@ -205,6 +215,7 @@ export class ContentEngineController {
   }
 
   @Post('scores/:postId/calculate')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Recalculate quality scores for a post' })
   async calculateScores(@Param('postId') postId: string) {
     try {
@@ -221,6 +232,7 @@ export class ContentEngineController {
   // --- Platform Accounts ---
 
   @Get('platform-accounts/linkedin-status')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({
     summary: 'LinkedIn OAuth status for Content Engine distribution',
   })
@@ -241,6 +253,7 @@ export class ContentEngineController {
   }
 
   @Post('platform-accounts/linkedin/enable')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({
     summary: 'Enable Content Engine LinkedIn distribution via Trndinn OAuth',
   })
@@ -263,6 +276,7 @@ export class ContentEngineController {
   }
 
   @Get('platform-accounts')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({ summary: 'List all platform accounts' })
   async listPlatformAccounts() {
     try {
@@ -277,6 +291,7 @@ export class ContentEngineController {
   }
 
   @Post('platform-accounts')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Create or update a platform account' })
   async upsertPlatformAccount(
     @Request() req: { user?: { id: string } },
@@ -302,6 +317,7 @@ export class ContentEngineController {
   }
 
   @Post('platform-accounts/:platform/test')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Test platform connection' })
   async testPlatformConnection(@Param('platform') platform: string) {
     try {
@@ -316,6 +332,7 @@ export class ContentEngineController {
   }
 
   @Delete('platform-accounts/:platform')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Remove a platform account' })
   async deletePlatformAccount(@Param('platform') platform: string) {
     try {
@@ -332,6 +349,7 @@ export class ContentEngineController {
   // --- Enhanced Distributions ---
 
   @Post('distributions/:postId/generate-all')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Generate content for all connected platforms' })
   async generateAllDistributions(@Param('postId') postId: string) {
     try {
@@ -346,6 +364,7 @@ export class ContentEngineController {
   }
 
   @Post('distributions/:postId/:platform/generate')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Generate content for a specific platform' })
   async generateSingleDistribution(
     @Param('postId') postId: string,
@@ -363,6 +382,7 @@ export class ContentEngineController {
   }
 
   @Post('distributions/:postId/:platform/publish')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Auto-publish content to platform' })
   async publishDistribution(
     @Param('postId') postId: string,
@@ -380,6 +400,7 @@ export class ContentEngineController {
   }
 
   @Patch('distributions/:postId/:platform')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({
     summary: 'Update distribution (mark published, edit content)',
   })
@@ -413,6 +434,7 @@ export class ContentEngineController {
   // --- Internal Links ---
 
   @Get('internal-links/stats')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({ summary: 'Get internal link stats for dashboard' })
   async getInternalLinkStats() {
     try {
@@ -427,6 +449,7 @@ export class ContentEngineController {
   }
 
   @Post('internal-links/:postId/analyze')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({
     summary: 'Analyze and generate internal link suggestions for a post',
   })
@@ -443,6 +466,7 @@ export class ContentEngineController {
   }
 
   @Get('internal-links/:postId')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({ summary: 'Get internal link suggestions for a post' })
   async getInternalLinks(@Param('postId') postId: string) {
     try {
@@ -457,6 +481,7 @@ export class ContentEngineController {
   }
 
   @Patch('internal-links/:id/accept')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Accept an internal link suggestion' })
   async acceptLinkSuggestion(@Param('id') id: string) {
     try {
@@ -471,6 +496,7 @@ export class ContentEngineController {
   }
 
   @Patch('internal-links/:id/reject')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Reject an internal link suggestion' })
   async rejectLinkSuggestion(@Param('id') id: string) {
     try {
@@ -485,6 +511,7 @@ export class ContentEngineController {
   }
 
   @Post('internal-links/:postId/insert')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Insert all accepted links into post body' })
   async insertAcceptedLinks(@Param('postId') postId: string) {
     try {
@@ -501,6 +528,7 @@ export class ContentEngineController {
   // --- Image Engine ---
 
   @Post('images/:postId/plan')
+  @RequireApiScope('content-engine:write')
   @ApiOperation({ summary: 'Generate image plan for a post' })
   async generateImagePlan(@Param('postId') postId: string) {
     try {
@@ -515,6 +543,7 @@ export class ContentEngineController {
   }
 
   @Get('images/:postId')
+  @RequireApiScope('content-engine:read')
   @ApiOperation({ summary: 'Get image plan for a post' })
   async getImagePlan(@Param('postId') postId: string) {
     try {

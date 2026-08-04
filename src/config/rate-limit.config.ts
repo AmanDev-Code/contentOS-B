@@ -164,6 +164,13 @@ export const TOOL_LIMITS: Record<string, RateLimitConfig> = {
     failClosed: true,
     message: 'Rate limit reached. Please try again later.',
   },
+  'file-processing-heavy': {
+    points: 2,
+    durationSeconds: 86400, // 24 hours
+    blockDurationSeconds: 86400, // 24 hr block on abuse
+    failClosed: true,
+    message: 'You have used your 2 free captioned videos for today. Sign up for unlimited processing.',
+  },
 };
 
 /** Global per-IP limit across ALL tools (prevents distributed abuse) */

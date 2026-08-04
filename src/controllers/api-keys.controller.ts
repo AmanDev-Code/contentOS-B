@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Logger,
   NotFoundException,
@@ -17,12 +18,13 @@ import { UserRateLimitGuard } from '../guards/user-rate-limit.guard';
 import {
   ApiKeyService,
   API_SCOPES,
-  type ApiScope,
+  isAdminOnlyScope,
 } from '../services/api-key.service';
 import { QuotaService } from '../services/quota.service';
+import { isPlatformAdmin } from '../common/platform-admin';
 
 interface SessionRequest {
-  user?: { id: string };
+  user?: { id: string; email?: string };
 }
 
 /**
@@ -76,6 +78,18 @@ export class ApiKeysController {
         throw new BadRequestException(
           `Invalid scope(s): ${invalid.join(', ')}. Allowed: ${API_SCOPES.join(', ')}.`,
         );
+      }
+
+      // Admin-only scopes (blog:*, content-engine:*, seo:*) can only be issued
+      // to platform admins. Non-admins may still create keys with posts/accounts/media.
+      const adminOnly = body.scopes.filter((s) => isAdminOnlyScope(s));
+      if (adminOnly.length > 0) {
+        const user = req.user;
+        if (!user?.id || !isPlatformAdmin({ id: user.id, email: user.email })) {
+          throw new ForbiddenException(
+            'Only platform admins can create keys with blog, content-engine, or seo scopes.',
+          );
+        }
       }
     }
 

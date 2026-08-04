@@ -17,9 +17,12 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../guards/auth.guard';
 import { AdminGuard } from '../guards/admin.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
-import { BlogManagementGuard } from '../guards/blog-management.guard';
+import { AdminOrApiKeyGuard } from '../guards/admin-or-apikey.guard';
+import { RequireApiScope } from '../decorators/api-scope.decorator';
 import { BlogService } from '../services/blog.service';
 import type { AuthenticatedRequest } from '../guards/auth.guard';
+// Editor management endpoints keep the existing (JWT-only) admin guard —
+// intentionally NOT exposed to MCP API keys.
 
 @ApiTags('admin-blog')
 @Controller('admin/blog')
@@ -30,7 +33,8 @@ export class AdminBlogController {
   constructor(private readonly blogService: BlogService) {}
 
   @Get('posts')
-  @UseGuards(AuthGuard, PaywallGuard, BlogManagementGuard)
+  @UseGuards(AdminOrApiKeyGuard)
+  @RequireApiScope('blog:read')
   @ApiOperation({ summary: 'List posts (all statuses) for CMS' })
   async list(@Query('status') status?: string, @Query('q') q?: string) {
     try {
@@ -45,7 +49,8 @@ export class AdminBlogController {
   }
 
   @Get('posts/:id')
-  @UseGuards(AuthGuard, PaywallGuard, BlogManagementGuard)
+  @UseGuards(AdminOrApiKeyGuard)
+  @RequireApiScope('blog:read')
   @ApiOperation({ summary: 'Get one post for editing' })
   async one(@Param('id') id: string) {
     try {
@@ -60,7 +65,8 @@ export class AdminBlogController {
   }
 
   @Post('posts')
-  @UseGuards(AuthGuard, PaywallGuard, BlogManagementGuard)
+  @UseGuards(AdminOrApiKeyGuard)
+  @RequireApiScope('blog:write')
   @ApiOperation({
     summary: 'Create post (path = parent.path/slug when parent_id set)',
   })
@@ -80,7 +86,8 @@ export class AdminBlogController {
   }
 
   @Patch('posts/:id')
-  @UseGuards(AuthGuard, PaywallGuard, BlogManagementGuard)
+  @UseGuards(AdminOrApiKeyGuard)
+  @RequireApiScope('blog:write')
   @ApiOperation({ summary: 'Update post (slug/parent immutable after create)' })
   async patch(@Param('id') id: string, @Body() body: Record<string, unknown>) {
     try {
@@ -95,7 +102,8 @@ export class AdminBlogController {
   }
 
   @Delete('posts/:id')
-  @UseGuards(AuthGuard, PaywallGuard, BlogManagementGuard)
+  @UseGuards(AdminOrApiKeyGuard)
+  @RequireApiScope('blog:write')
   @ApiOperation({ summary: 'Delete post (cascades to child posts)' })
   async remove(@Param('id') id: string) {
     try {

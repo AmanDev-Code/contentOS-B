@@ -1,24 +1,16 @@
 import { Module } from '@nestjs/common';
-import { ToolsController } from './controllers/tools.controller';
 import { ToolsService } from './services/tools.service';
-import { InstagramReelService } from './services/instagram-reel.service';
-import { CacheService } from '../../services/cache.service';
-import { RateLimiterService } from '../../services/rate-limiter.service';
-import { ToolRateLimitGuard } from '../../guards/tool-rate-limit.guard';
-import { ScraperCredentialsService } from '../../services/scrapers/scraper-credentials.service';
-import { MediaEngineModule } from '../media-engine';
+import { AutoCaptionModule } from './auto-caption';
+import { InstagramReelDownloaderModule } from './instagram-reel-downloader';
 
+/**
+ * Root Tools Module — imports all individual tool sub-modules.
+ * Shared services (ToolsService, registry) live at this level.
+ * Each tool is a self-contained module in its own folder.
+ */
 @Module({
-  imports: [MediaEngineModule],
-  controllers: [ToolsController],
-  providers: [
-    ToolsService,
-    InstagramReelService,
-    CacheService,
-    RateLimiterService,
-    ToolRateLimitGuard,
-    ScraperCredentialsService,
-  ],
-  exports: [ToolsService, InstagramReelService],
+  imports: [AutoCaptionModule, InstagramReelDownloaderModule],
+  providers: [ToolsService],
+  exports: [ToolsService],
 })
 export class ToolsModule {}

@@ -29,8 +29,33 @@ export const API_SCOPES = [
   'accounts:read',
   'accounts:write',
   'media:write',
+  // Admin-only scopes — issuance is gated in ApiKeysController and enforced on
+  // admin endpoints via AdminOrApiKeyGuard. Used by the Trndinn Blog MCP server.
+  'blog:read',
+  'blog:write',
+  'content-engine:read',
+  'content-engine:write',
+  'seo:read',
+  'seo:write',
 ] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
+
+/**
+ * Scopes that only platform admins may put on an API key. Issuance is enforced
+ * at the create endpoint (`POST /api-keys`).
+ */
+export const ADMIN_ONLY_SCOPES: readonly ApiScope[] = [
+  'blog:read',
+  'blog:write',
+  'content-engine:read',
+  'content-engine:write',
+  'seo:read',
+  'seo:write',
+] as const;
+
+export function isAdminOnlyScope(scope: string): boolean {
+  return (ADMIN_ONLY_SCOPES as readonly string[]).includes(scope);
+}
 
 export const DEFAULT_API_SCOPES: ApiScope[] = [
   'posts:read',

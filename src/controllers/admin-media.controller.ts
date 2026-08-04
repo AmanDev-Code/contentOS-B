@@ -16,6 +16,8 @@ import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '../guards/auth.guard';
 import { AdminGuard } from '../guards/admin.guard';
 import { PaywallGuard } from '../guards/paywall.guard';
+import { AdminOrApiKeyGuard } from '../guards/admin-or-apikey.guard';
+import { RequireApiScope } from '../decorators/api-scope.decorator';
 import { MinioService } from '../services/minio.service';
 import { MediaGenerationService } from '../services/media-generation.service';
 import { SupabaseService } from '../services/supabase.service';
@@ -187,7 +189,8 @@ export class AdminMediaController {
   }
 
   @Post('upload')
-  @UseGuards(AuthGuard, PaywallGuard, AdminGuard)
+  @UseGuards(AdminOrApiKeyGuard)
+  @RequireApiScope('media:write')
   @ApiOperation({
     summary:
       'Upload any file into media/cms (images are optimized, other files stored as-is)',

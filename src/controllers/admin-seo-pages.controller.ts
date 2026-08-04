@@ -11,21 +11,21 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { AuthGuard } from '../guards/auth.guard';
-import { AdminGuard } from '../guards/admin.guard';
-import { PaywallGuard } from '../guards/paywall.guard';
+import { AdminOrApiKeyGuard } from '../guards/admin-or-apikey.guard';
+import { RequireApiScope } from '../decorators/api-scope.decorator';
 import { BlogService } from '../services/blog.service';
 
 @ApiTags('admin-seo-pages')
 @Controller('admin/seo/pages')
 @ApiBearerAuth()
-@UseGuards(AuthGuard, PaywallGuard, AdminGuard)
+@UseGuards(AdminOrApiKeyGuard)
 export class AdminSeoPagesController {
   private readonly logger = new Logger(AdminSeoPagesController.name);
 
   constructor(private readonly blogService: BlogService) {}
 
   @Get()
+  @RequireApiScope('seo:read')
   @ApiOperation({ summary: 'List static page SEO rows' })
   async list() {
     try {
@@ -40,6 +40,7 @@ export class AdminSeoPagesController {
   }
 
   @Get('one')
+  @RequireApiScope('seo:read')
   @ApiOperation({ summary: 'Get SEO for one route (?route=/pricing)' })
   async one(@Query('route') route: string) {
     try {
@@ -57,6 +58,7 @@ export class AdminSeoPagesController {
   }
 
   @Put()
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Create or update static page SEO' })
   async upsert(@Body() body: Record<string, unknown>) {
     try {
@@ -74,6 +76,7 @@ export class AdminSeoPagesController {
   }
 
   @Delete()
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Delete SEO row (?route=/pricing)' })
   async remove(@Query('route') route: string) {
     try {

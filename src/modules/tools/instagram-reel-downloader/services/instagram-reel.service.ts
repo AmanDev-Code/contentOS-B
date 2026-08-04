@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CacheService } from '../../../services/cache.service';
+import { CacheService } from '../../../../services/cache.service';
 import {
   ScraperCredentialsService,
   EffectiveScraperCredentials,
-} from '../../../services/scrapers/scraper-credentials.service';
-import { InstagramReelResult } from '../registry/tool.types';
-import { EngineOrchestratorService } from '../../media-engine';
+} from '../../../../services/scrapers/scraper-credentials.service';
+import { InstagramReelResult } from '../types';
+import { EngineOrchestratorService } from '../../../media-engine';
 
 const CACHE_PREFIX = 'tool:ig-reel:';
 const CACHE_TTL_SECONDS = 900; // 15 minutes — Instagram CDN tokens expire in ~30-60min

@@ -12,24 +12,25 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
-import { ToolRateLimitGuard } from '../../../guards/tool-rate-limit.guard';
-import { ToolCategoryMeta } from '../../../decorators/tool-category.decorator';
-import { ToolsService } from '../services/tools.service';
-import { InstagramFetchError } from '../services/instagram-reel.service';
+import { ToolRateLimitGuard } from '../../../../guards/tool-rate-limit.guard';
+import { ToolCategoryMeta } from '../../../../decorators/tool-category.decorator';
+import { InstagramReelService, InstagramFetchError } from '../services/instagram-reel.service';
 import {
   InstagramReelDownloadSchema,
   InstagramReelDownloadBodyDto,
 } from '../dto/instagram-reel.dto';
-import type { ToolResponse, InstagramReelResult } from '../registry/tool.types';
+import { isToolActive } from '../../registry/tool-registry';
+import type { ToolResponse } from '../../registry/tool.types';
+import type { InstagramReelResult } from '../types';
 
 @ApiTags('Tools')
-@Controller('api/tools')
-export class ToolsController {
-  private readonly logger = new Logger(ToolsController.name);
+@Controller('api/tools/instagram-reel-downloader')
+export class InstagramReelController {
+  private readonly logger = new Logger(InstagramReelController.name);
 
-  constructor(private readonly toolsService: ToolsService) {}
+  constructor(private readonly instagramReelService: InstagramReelService) {}
 
-  @Post('instagram-reel-downloader/download')
+  @Post('download')
   @HttpCode(HttpStatus.OK)
   @ToolCategoryMeta('utility')
   @UseGuards(ToolRateLimitGuard)
@@ -96,7 +97,7 @@ export class ToolsController {
     const { url, refresh } = parsed.data;
 
     // Check tool availability
-    if (!this.toolsService.isToolAvailable('instagram-reel-downloader')) {
+    if (!isToolActive('instagram-reel-downloader')) {
       throw new ServiceUnavailableException({
         success: false,
         error:
@@ -105,7 +106,7 @@ export class ToolsController {
     }
 
     try {
-      const result = await this.toolsService.instagramReel.downloadReel(
+      const result = await this.instagramReelService.downloadReel(
         url,
         refresh === true,
       );
@@ -168,7 +169,7 @@ export class ToolsController {
    * can save it (Instagram CDN blocks cross-origin fetch from the browser).
    * Uses Fastify's reply API since NestJS is running on the Fastify adapter.
    */
-  @Post('instagram-reel-downloader/proxy-download')
+  @Post('proxy-download')
   @HttpCode(HttpStatus.OK)
   @ToolCategoryMeta('utility')
   @UseGuards(ToolRateLimitGuard)

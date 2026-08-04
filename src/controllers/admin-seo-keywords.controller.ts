@@ -14,10 +14,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { AuthGuard } from '../guards/auth.guard';
 import type { AuthenticatedRequest } from '../guards/auth.guard';
-import { AdminGuard } from '../guards/admin.guard';
-import { PaywallGuard } from '../guards/paywall.guard';
+import { AdminOrApiKeyGuard } from '../guards/admin-or-apikey.guard';
+import { RequireApiScope } from '../decorators/api-scope.decorator';
 import { SeoKeywordsService } from '../services/seo-keywords.service';
 import type {
   BulkUpsertAssignmentsDto,
@@ -29,7 +28,7 @@ import type {
 @ApiTags('admin-seo-keywords')
 @Controller('admin/seo/keywords')
 @ApiBearerAuth()
-@UseGuards(AuthGuard, PaywallGuard, AdminGuard)
+@UseGuards(AdminOrApiKeyGuard)
 export class AdminSeoKeywordsController {
   private readonly logger = new Logger(AdminSeoKeywordsController.name);
 
@@ -40,6 +39,7 @@ export class AdminSeoKeywordsController {
   // ═══════════════════════════════════════════════════════════════════════════
 
   @Get()
+  @RequireApiScope('seo:read')
   @ApiOperation({ summary: 'List keywords with optional filters' })
   async list(
     @Query('status') status?: string,
@@ -69,6 +69,7 @@ export class AdminSeoKeywordsController {
   }
 
   @Post()
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Create a new keyword' })
   async create(
     @Body() body: Record<string, unknown>,
@@ -91,6 +92,7 @@ export class AdminSeoKeywordsController {
   }
 
   @Patch(':id')
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Update a keyword' })
   async update(
     @Param('id') id: string,
@@ -114,6 +116,7 @@ export class AdminSeoKeywordsController {
   }
 
   @Delete(':id')
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Archive a keyword (soft delete)' })
   async remove(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     try {
@@ -131,6 +134,7 @@ export class AdminSeoKeywordsController {
   }
 
   @Post('bulk-import')
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Bulk import keywords from array or CSV text' })
   async bulkImport(
     @Body()
@@ -171,6 +175,7 @@ export class AdminSeoKeywordsController {
   }
 
   @Post('bulk-status')
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Bulk update keyword status' })
   async bulkStatus(
     @Body() body: { ids: string[]; status: string },
@@ -201,6 +206,7 @@ export class AdminSeoKeywordsController {
   }
 
   @Post('bulk-delete')
+  @RequireApiScope('seo:write')
   @ApiOperation({
     summary: 'Permanently delete selected keywords (assignments cascade)',
   })
@@ -231,6 +237,7 @@ export class AdminSeoKeywordsController {
   }
 
   @Get('clusters')
+  @RequireApiScope('seo:read')
   @ApiOperation({ summary: 'List keyword clusters with stats' })
   async getClusters() {
     try {
@@ -249,13 +256,14 @@ export class AdminSeoKeywordsController {
 @ApiTags('admin-seo-assignments')
 @Controller('admin/seo/assignments')
 @ApiBearerAuth()
-@UseGuards(AuthGuard, PaywallGuard, AdminGuard)
+@UseGuards(AdminOrApiKeyGuard)
 export class AdminSeoAssignmentsController {
   private readonly logger = new Logger(AdminSeoAssignmentsController.name);
 
   constructor(private readonly seoKeywordsService: SeoKeywordsService) {}
 
   @Get()
+  @RequireApiScope('seo:read')
   @ApiOperation({ summary: 'Get keyword assignments for a target' })
   async list(
     @Query('target_type') targetType: string,
@@ -283,6 +291,7 @@ export class AdminSeoAssignmentsController {
   }
 
   @Post()
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Create or update an assignment' })
   async upsert(@Body() body: Record<string, unknown>) {
     try {
@@ -300,6 +309,7 @@ export class AdminSeoAssignmentsController {
   }
 
   @Post('bulk')
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Bulk create or update assignments for one target' })
   async bulkUpsert(
     @Body() body: Record<string, unknown>,
@@ -322,6 +332,7 @@ export class AdminSeoAssignmentsController {
   }
 
   @Delete(':id')
+  @RequireApiScope('seo:write')
   @ApiOperation({ summary: 'Remove an assignment' })
   async remove(@Param('id') id: string) {
     try {

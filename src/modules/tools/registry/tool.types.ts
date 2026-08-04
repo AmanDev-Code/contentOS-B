@@ -1,9 +1,10 @@
 /**
  * Shared type definitions for the free tools module.
+ * Tool-specific types (e.g. InstagramReelResult) live in their own tool folder.
  */
 
 /** Tool category determines rate limit bucket */
-export type ToolCategory = 'text-ai' | 'utility' | 'file-processing';
+export type ToolCategory = 'text-ai' | 'utility' | 'file-processing' | 'file-processing-heavy';
 
 /** Status of a registered tool */
 export type ToolStatus = 'active' | 'maintenance' | 'disabled';
@@ -31,15 +32,4 @@ export interface ToolResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
-}
-
-/** Instagram Reel download result */
-export interface InstagramReelResult {
-  videoUrl: string;
-  thumbnailUrl: string | null;
-  width: number;
-  height: number;
-  caption: string | null;
-  author: string | null;
-  duration: number | null;
 }
