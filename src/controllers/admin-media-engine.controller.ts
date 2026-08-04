@@ -70,6 +70,8 @@ export class AdminMediaEngineController {
       `Session added to pool: account=${body.accountId}, cookies=${Object.keys(body.cookies).length}, pool=${stats.total}`,
     );
 
+    this.alerts.emitSessionRegistered(body.accountId, platform);
+
     return {
       success: true,
       accountId: body.accountId,

@@ -62,8 +62,11 @@ export class EngineOrchestratorService {
     const cached = await this.getCachedResult(url);
     if (cached) {
       this.logger.debug(`Cache hit for URL: ${url}`);
+      this.alerts.emitCacheHit(url, cached.engine);
       return cached;
     }
+
+    this.alerts.emitCacheMiss(url);
 
     // Get engines sorted by priority
     const sortedEngines = this.getSortedEngines();
@@ -127,6 +130,7 @@ export class EngineOrchestratorService {
 
       try {
         // Attempt extraction
+        this.alerts.emitEngineAttempt(engine.name, url);
         const result = await engine.extract(url, session ?? undefined);
 
         if (result.success) {
@@ -147,6 +151,7 @@ export class EngineOrchestratorService {
         }
 
         // Engine returned a non-success result
+        this.alerts.emitEngineFailed(engine.name, url, result.error?.message || 'Unknown failure');
         await this.circuitBreaker.recordFailure(engine.name);
         if (session) {
           await this.sessionPool.release(session, {
@@ -163,6 +168,7 @@ export class EngineOrchestratorService {
         // Unhandled error from engine
         const errorMessage = err instanceof Error ? err.message : String(err);
         this.logger.error(`Engine ${engine.name} threw: ${errorMessage}`);
+        this.alerts.emitEngineFailed(engine.name, url, errorMessage);
 
         await this.circuitBreaker.recordFailure(engine.name);
         if (session) {

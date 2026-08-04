@@ -173,6 +173,89 @@ export class MediaEngineAlertService {
     });
   }
 
+  // ─── Observability Event Emitters ───────────────────────────────────────────
+
+  /**
+   * Cache hit — served from cached extraction result.
+   */
+  emitCacheHit(url: string, engine?: string): void {
+    this.emit({
+      event: 'CACHE_HIT',
+      severity: 'info',
+      engine: engine as EngineType | undefined,
+      details: { url: url.slice(0, 80) },
+    });
+  }
+
+  /**
+   * Cache miss — proceeding to fresh extraction.
+   */
+  emitCacheMiss(url: string): void {
+    this.emit({
+      event: 'CACHE_MISS',
+      severity: 'info',
+      details: { url: url.slice(0, 80) },
+    });
+  }
+
+  /**
+   * Cached URL is stale/expired (CDN returned 4xx/5xx).
+   */
+  emitCacheStale(url: string, statusCode?: number): void {
+    this.emit({
+      event: 'CACHE_STALE',
+      severity: 'warning',
+      details: { url: url.slice(0, 80), statusCode },
+    });
+  }
+
+  /**
+   * About to attempt extraction with a specific engine.
+   */
+  emitEngineAttempt(engine: string, url: string): void {
+    this.emit({
+      event: 'ENGINE_ATTEMPT',
+      severity: 'info',
+      engine: engine as EngineType,
+      details: { url: url.slice(0, 80) },
+    });
+  }
+
+  /**
+   * A specific engine failed (before fallback to next).
+   */
+  emitEngineFailed(engine: string, url: string, error: string): void {
+    this.emit({
+      event: 'ENGINE_FAILED',
+      severity: 'warning',
+      engine: engine as EngineType,
+      details: { url: url.slice(0, 80), error },
+    });
+  }
+
+  /**
+   * New session registered via Chrome extension.
+   */
+  emitSessionRegistered(accountId: string, platform: string): void {
+    this.emit({
+      event: 'SESSION_REGISTERED',
+      severity: 'info',
+      accountId,
+      platform: platform as Platform,
+    });
+  }
+
+  /**
+   * URL validation result (HEAD check on cached CDN URL).
+   */
+  emitUrlValidation(url: string, status: 'alive' | 'expired', statusCode?: number): void {
+    this.emit({
+      event: 'URL_VALIDATION',
+      severity: status === 'expired' ? 'warning' : 'info',
+      details: { url: url.slice(0, 80), status, statusCode },
+    });
+  }
+
   /**
    * Health check completed.
    */

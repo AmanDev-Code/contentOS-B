@@ -1,14 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
+import axios from 'axios';
 import { CacheService } from '../../../../services/cache.service';
 import {
   ScraperCredentialsService,
   EffectiveScraperCredentials,
 } from '../../../../services/scrapers/scraper-credentials.service';
 import { InstagramReelResult } from '../types';
-import { EngineOrchestratorService } from '../../../media-engine';
+import { EngineOrchestratorService, MediaEngineAlertService } from '../../../media-engine';
 
 const CACHE_PREFIX = 'tool:ig-reel:';
 const CACHE_TTL_SECONDS = 900; // 15 minutes — Instagram CDN tokens expire in ~30-60min
+const URL_VALIDATION_TIMEOUT_MS = 3000; // 3s timeout for HEAD check
 
 /**
  * Instagram Reel Service — Public API facade.
@@ -28,6 +30,7 @@ export class InstagramReelService {
     private readonly cacheService: CacheService,
     private readonly credentials: ScraperCredentialsService,
     private readonly engineOrchestrator: EngineOrchestratorService,
+    private readonly alerts: MediaEngineAlertService,
   ) {}
 
   /**
@@ -50,8 +53,19 @@ export class InstagramReelService {
     if (!bustCache) {
       const cached = await this.cacheService.get(cacheKey);
       if (cached) {
-        this.logger.debug(`Cache hit for reel ${postId}`);
-        return cached as InstagramReelResult;
+        const result = cached as InstagramReelResult;
+
+        // Validate CDN URL is still alive (Instagram URLs expire in 30-60min)
+        const urlAlive = await this.validateVideoUrl(result.videoUrl);
+        if (urlAlive) {
+          this.logger.debug(`Cache hit for reel ${postId} — URL still alive`);
+          this.alerts.emitCacheHit(url);
+          return result;
+        }
+
+        // Stale URL detected — purge cache and re-extract
+        this.logger.warn(`Cache stale for reel ${postId} — CDN URL expired, re-extracting`);
+        await this.cacheService.delete(cacheKey);
       }
     } else {
       this.logger.debug(`Cache bust requested for reel ${postId}`);
@@ -119,6 +133,41 @@ export class InstagramReelService {
     throw new InstagramFetchError(
       'Could not extract post ID from URL. Use a link like instagram.com/reel/ABC123',
     );
+  }
+
+  /**
+   * Validate a cached video URL is still accessible.
+   * Performs a HEAD request with a short timeout — if the CDN returns 4xx/5xx
+   * or the request times out, the URL is considered expired.
+   *
+   * @returns true if the URL is still alive (2xx/3xx), false otherwise
+   */
+  private async validateVideoUrl(videoUrl: string): Promise<boolean> {
+    try {
+      const response = await axios.head(videoUrl, {
+        timeout: URL_VALIDATION_TIMEOUT_MS,
+        maxRedirects: 3,
+        validateStatus: () => true, // Don't throw on any status
+      });
+
+      const alive = response.status >= 200 && response.status < 400;
+      this.alerts.emitUrlValidation(
+        videoUrl,
+        alive ? 'alive' : 'expired',
+        response.status,
+      );
+
+      if (!alive) {
+        this.alerts.emitCacheStale(videoUrl, response.status);
+      }
+
+      return alive;
+    } catch {
+      // Timeout or network error — treat as expired
+      this.alerts.emitUrlValidation(videoUrl, 'expired');
+      this.alerts.emitCacheStale(videoUrl);
+      return false;
+    }
   }
 }
 
