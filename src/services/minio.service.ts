@@ -283,26 +283,24 @@ export class MinioService implements OnModuleInit {
     expiry = 7 * 24 * 60 * 60, // 7 days
   ): Promise<string> {
     try {
-      const presignedUrl = await this.minioClient.presignedGetObject(
-        bucketName,
-        objectName,
-        expiry,
-      );
-
-      // Replace internal Docker hostname with public URL if configured
+      // If public URL is configured and bucket has public read policy,
+      // return a direct public URL (no signature needed).
+      // Presigned signatures are bound to the host they're generated for,
+      // so they break when served through a reverse proxy with a different hostname.
       const publicUrl =
         this.configService.get<string>('minio.publicUrl') ||
         process.env.MINIO_PUBLIC_URL;
 
       if (publicUrl) {
-        // presignedUrl looks like: http://minio:9000/bucket/path?X-Amz-...
-        // Replace origin with public URL base
-        const parsed = new URL(presignedUrl);
-        const publicBase = publicUrl.replace(/\/$/, '');
-        return `${publicBase}/${bucketName}/${objectName}${parsed.search}`;
+        return `${publicUrl.replace(/\/$/, '')}/${bucketName}/${objectName}`;
       }
 
-      return presignedUrl;
+      // Fallback: generate a real presigned URL (works when accessing MinIO directly)
+      return await this.minioClient.presignedGetObject(
+        bucketName,
+        objectName,
+        expiry,
+      );
     } catch (error) {
       this.logger.error(`Failed to generate presigned URL: ${error.message}`);
       throw error;
