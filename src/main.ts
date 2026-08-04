@@ -6,7 +6,17 @@ import {
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import multipart from '@fastify/multipart';
+import * as fs from 'fs';
+import * as path from 'path';
 import { AppModule } from './app.module';
+
+// Decode GCP credentials from base64 env var (Coolify secret) → temp file
+if (process.env.GOOGLE_CLOUD_STT_CREDENTIALS_BASE64 && !process.env.GOOGLE_CLOUD_STT_CREDENTIALS_PATH) {
+  const decoded = Buffer.from(process.env.GOOGLE_CLOUD_STT_CREDENTIALS_BASE64, 'base64').toString('utf-8');
+  const credPath = path.join('/tmp', 'gcp-stt-credentials.json');
+  fs.writeFileSync(credPath, decoded, { mode: 0o600 });
+  process.env.GOOGLE_CLOUD_STT_CREDENTIALS_PATH = credPath;
+}
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
