@@ -11,7 +11,7 @@ export function loadAutoCaptionConfig(): AutoCaptionConfig {
   return {
     maxDurationSec: int(process.env.AUTO_CAPTION_MAX_DURATION_SEC, 90),
     maxSizeBytes: int(process.env.AUTO_CAPTION_MAX_SIZE_BYTES, 100 * 1024 * 1024),
-    maxVideosPerIpPerDay: int(process.env.AUTO_CAPTION_MAX_VIDEOS_PER_DAY, 2),
+    maxVideosPerIpPerDay: int(process.env.AUTO_CAPTION_MAX_VIDEOS_PER_DAY, 5),
     maxMinutesPerIpPerDay: int(process.env.AUTO_CAPTION_IP_MINUTES_DAILY_CAP, 5),
     resultTtlSec: int(process.env.AUTO_CAPTION_RESULT_TTL_SEC, 3600),
     bucket: process.env.AUTO_CAPTION_BUCKET || 'trndinn-tools',
