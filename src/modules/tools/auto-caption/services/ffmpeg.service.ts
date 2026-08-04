@@ -181,20 +181,38 @@ export class FfmpegService {
     // Escape the SRT path for ffmpeg subtitles filter (colons, backslashes, single quotes)
     const escapedSrtPath = srtPath.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
 
-    // Build the vf filter string — NO single quotes around force_style value
-    // execFile passes args directly to the process (no shell), so no shell quoting needed
+    // Build the vf filter string
+    // Note: force_style needs single quotes for ffmpeg's subtitles filter parser
     const vf = `subtitles=${escapedSrtPath}:force_style='${forceStyle}'`;
 
-    this.logger.log(`Burn filter: ${vf.slice(0, 150)}...`);
+    this.logger.log(`Burn filter: ${vf.slice(0, 200)}...`);
+    this.logger.log(`SRT path: ${srtPath}, Video: ${videoPath}, Output: ${outputPath}`);
 
     try {
       // Try local ffmpeg first (production Ubuntu)
       try {
-        await exec(
+        const { stdout, stderr } = await exec(
           'ffmpeg',
           ['-y', '-i', videoPath, '-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath],
-          { signal: controller.signal, maxBuffer: 2 * 1024 * 1024 },
+          { signal: controller.signal, maxBuffer: 4 * 1024 * 1024 },
         );
+        // Always log stderr from ffmpeg — it contains encoding stats and potential warnings
+        if (stderr) {
+          // Log font/subtitle-related warnings at warn level, rest at debug
+          const hasSubWarning = stderr.includes('Glyph 0x') || stderr.includes('fontselect') ||
+            stderr.includes('Unable to') || stderr.includes('Cannot find') || stderr.includes('subtitle');
+          if (hasSubWarning) {
+            this.logger.warn(`FFmpeg subtitle warnings: ${stderr.slice(-500)}`);
+          } else {
+            this.logger.debug(`FFmpeg stderr (last 300): ${stderr.slice(-300)}`);
+          }
+        }
+
+        // Verify output file was actually created and has reasonable size
+        const fsModule2 = await import('fs');
+        const outputStat = await fsModule2.promises.stat(outputPath);
+        this.logger.log(`Burn complete: output ${(outputStat.size / 1024 / 1024).toFixed(1)}MB`);
+
         return;
       } catch (localErr: any) {
         const stderr = localErr.stderr || '';
