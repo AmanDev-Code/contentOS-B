@@ -253,34 +253,40 @@ export class FfmpegService {
   /**
    * Get force_style string for ffmpeg subtitles filter based on caption style.
    * Colors are in ASS format: &HAABBGGRR (alpha, blue, green, red).
-   * Font sizes calibrated for 720x1280 vertical video.
+   *
+   * IMPORTANT: FontSize in the subtitles filter's force_style is relative to
+   * a ~384px height baseline. For 1280px vertical video, multiply by ~3.3x.
+   * Base presets use sizes calibrated for 720x1280 vertical video.
    *
    * When `overrides` are provided, they merge on top of the preset values:
-   * - fontSize → replaces FontSize
+   * - fontSize → user's UI value (12-28), scaled to FFmpeg size
    * - marginV → replaces MarginV
    * - alignment → replaces Alignment
    */
   private getForceStyle(styleId: string, overrides?: Omit<BurnOptions, 'styleId'>): string {
     const styles: Record<string, string> = {
-      // Hormozi: White bold, black outline, medium size
-      hormozi: 'FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,Outline=3,Shadow=0,Bold=1,Alignment=2,MarginV=80',
-      // MrBeast: Yellow bold, dark red/orange outline, slightly larger
-      mrbeast: 'FontName=DejaVu Sans,FontSize=20,PrimaryColour=&H0000FFFF&,OutlineColour=&H00003399&,Outline=4,Shadow=0,Bold=1,Alignment=2,MarginV=80',
-      // Minimal: White, very thin outline, smaller, italic
-      minimal: 'FontName=DejaVu Sans,FontSize=16,PrimaryColour=&H00FFFFFF&,OutlineColour=&H80000000&,Outline=1,Shadow=1,Bold=0,Italic=1,Alignment=2,MarginV=60',
+      // Hormozi: White bold, black outline — large and punchy
+      hormozi: 'FontName=DejaVu Sans,FontSize=56,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,Outline=4,Shadow=0,Bold=1,Alignment=2,MarginV=120',
+      // MrBeast: Yellow bold, dark red/orange outline
+      mrbeast: 'FontName=DejaVu Sans,FontSize=60,PrimaryColour=&H0000FFFF&,OutlineColour=&H00003399&,Outline=5,Shadow=0,Bold=1,Alignment=2,MarginV=120',
+      // Minimal: White, very thin outline, slightly smaller, italic
+      minimal: 'FontName=DejaVu Sans,FontSize=48,PrimaryColour=&H00FFFFFF&,OutlineColour=&H80000000&,Outline=2,Shadow=1,Bold=0,Italic=1,Alignment=2,MarginV=100',
       // Karaoke: White bold, orange outline
-      karaoke: 'FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H000080FF&,Outline=3,Shadow=0,Bold=1,Alignment=2,MarginV=80',
+      karaoke: 'FontName=DejaVu Sans,FontSize=56,PrimaryColour=&H00FFFFFF&,OutlineColour=&H000080FF&,Outline=4,Shadow=0,Bold=1,Alignment=2,MarginV=120',
       // Typewriter: Green monospace, thin outline
-      typewriter: 'FontName=DejaVu Sans Mono,FontSize=14,PrimaryColour=&H0088FF00&,OutlineColour=&H00000000&,Outline=2,Shadow=0,Bold=0,Alignment=2,MarginV=60',
+      typewriter: 'FontName=DejaVu Sans Mono,FontSize=44,PrimaryColour=&H0088FF00&,OutlineColour=&H00000000&,Outline=3,Shadow=0,Bold=0,Alignment=2,MarginV=100',
       // Gradient Pop: Pink/magenta bold, black outline
-      'gradient-pop': 'FontName=DejaVu Sans,FontSize=20,PrimaryColour=&H00FF00FF&,OutlineColour=&H00000000&,Outline=3,Shadow=0,Bold=1,Alignment=2,MarginV=80',
+      'gradient-pop': 'FontName=DejaVu Sans,FontSize=60,PrimaryColour=&H00FF00FF&,OutlineColour=&H00000000&,Outline=4,Shadow=0,Bold=1,Alignment=2,MarginV=120',
     };
 
     let style = styles[styleId] || styles.hormozi;
 
     // Merge user overrides on top of the style preset
+    // User fontSize (12-28 from UI slider) is scaled to FFmpeg subtitle size
+    // Scale factor: UI value * 3 ≈ visible FFmpeg size for 1280px height video
     if (overrides?.fontSize != null) {
-      style = style.replace(/FontSize=\d+/, `FontSize=${overrides.fontSize}`);
+      const scaledSize = Math.round(overrides.fontSize * 3);
+      style = style.replace(/FontSize=\d+/, `FontSize=${scaledSize}`);
     }
     if (overrides?.marginV != null) {
       style = style.replace(/MarginV=\d+/, `MarginV=${overrides.marginV}`);
