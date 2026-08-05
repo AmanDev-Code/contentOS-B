@@ -1,7 +1,7 @@
 /**
  * CaptionPipelineWorker — BullMQ processor for caption jobs.
  *
- * Stages: probe → extract-audio → transcribe → render-ASS → burn-subtitles → upload output
+ * Stages: probe → extract-audio → transcribe → transliterate → render-ASS → burn-subtitles → upload output
  *
  * Lightweight: each stage is a direct function call, no sub-queues.
  * Concurrency: 2 (CPU-bound by ffmpeg encode).
@@ -13,6 +13,8 @@ import { Job } from 'bullmq';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import Sanscript from '@indic-transliteration/sanscript';
 
 import { CAPTION_QUEUE } from '../config';
 import { AutoCaptionJobData, PipelineProgress, PipelineResult, WordTiming } from '../types';
@@ -21,6 +23,57 @@ import { CaptionOrchestratorService } from '../services/caption-orchestrator.ser
 import { CaptionUploadService } from '../services/caption-upload.service';
 import { AssSubtitleService } from '../services/ass-subtitle.service';
 import { FfmpegService } from '../services/ffmpeg.service';
+
+// ─── Devanagari Transliteration ─────────────────────────────────────────────
+// Unicode range for Devanagari: U+0900 to U+097F (ऀ-ॿ)
+const DEVANAGARI_REGEX = /[ऀ-ॿ]/;
+
+/**
+ * Check if a string contains Devanagari script.
+ */
+function containsDevanagari(text: string): boolean {
+  return DEVANAGARI_REGEX.test(text);
+}
+
+/**
+ * Transliterate Devanagari text to Roman (Hinglish).
+ * Uses ITRANS scheme which produces readable romanization for Hindi speakers.
+ *
+ * Examples:
+ *   "पहले" → "pahale"
+ *   "योगेश" → "yogesha"
+ */
+function transliterateToRoman(text: string): string {
+  if (!containsDevanagari(text)) return text;
+
+  try {
+    // ITRANS is the most readable romanization for casual Hindi/Hinglish
+    // It produces: क→ka, ख→kha, ग→ga, etc.
+    const roman = Sanscript.t(text, 'devanagari', 'itrans');
+    // Remove trailing 'a' that Sanskrit transliteration adds (schwa deletion)
+    // Hindi doesn't pronounce final schwa in most words
+    // e.g., "yogesha" → "yogesh", "pahale" → "pahle"
+    return roman
+      .replace(/a\s/g, ' ')      // word-final 'a' before space
+      .replace(/a$/g, '')        // word-final 'a' at end
+      .replace(/aa/g, 'a')       // long 'aa' → 'a' (common in Hindi)
+      .toLowerCase();
+  } catch {
+    // If transliteration fails, return original text
+    return text;
+  }
+}
+
+/**
+ * Transliterate all Devanagari words in a WordTiming array to Roman script.
+ * Preserves timing information, only transforms the text.
+ */
+function transliterateWordTimings(words: WordTiming[]): WordTiming[] {
+  return words.map((w) => ({
+    ...w,
+    word: transliterateToRoman(w.word),
+  }));
+}
 
 @Processor(CAPTION_QUEUE, { concurrency: 2 })
 export class CaptionPipelineWorker extends WorkerHost {
@@ -70,10 +123,22 @@ export class CaptionPipelineWorker extends WorkerHost {
         throw new Error('No words detected in audio. The video may not contain clear speech.');
       }
 
-      // ─── Stage 5: Generate ASS subtitles ──────────────────────────────
+      // ─── Stage 5: Transliterate + Generate ASS subtitles ─────────────────
       await this.updateProgress(jobId, 'rendering', 65);
+
+      // Check if transcript contains Devanagari (Hindi) and transliterate to Roman (Hinglish)
+      const hasDevanagari = transcript.words.some((w) => containsDevanagari(w.word));
+      let wordsForCaption = transcript.words;
+
+      if (hasDevanagari) {
+        this.logger.log(`[${jobId}] Detected Devanagari script — transliterating to Hinglish (Roman)`);
+        wordsForCaption = transliterateWordTimings(transcript.words);
+        const sample = wordsForCaption.slice(0, 5).map((w) => w.word).join(' ');
+        this.logger.log(`[${jobId}] Transliterated sample: "${sample}..."`);
+      }
+
       const assContent = this.assService.generate(
-        transcript.words,
+        wordsForCaption,
         styleId,
         probe.width || 1080,
         probe.height || 1920,
@@ -96,8 +161,8 @@ export class CaptionPipelineWorker extends WorkerHost {
       const outputKey = `caption-output/${jobId}.mp4`;
       await this.uploadService.uploadOutput(outputPath, outputKey);
 
-      // Generate SRT content for optional download
-      const srtContent = this.generateSrt(transcript.words, 5);
+      // Generate SRT content for optional download (use transliterated words)
+      const srtContent = this.generateSrt(wordsForCaption, 5);
 
       // Store dedup result
       const styleKey = `${styleId}:${JSON.stringify(customization || {})}`;

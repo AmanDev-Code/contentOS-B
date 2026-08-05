@@ -141,13 +141,17 @@ export class FfmpegService {
   /**
    * Burn subtitles into video with the selected caption style.
    *
-   * Strategy:
-   * 1. Try local ffmpeg `subtitles` filter (production Ubuntu)
-   * 2. Fallback to Docker `trndinn-ffmpeg` (dev Mac)
+   * Strategy (in order of preference):
+   * 1. ASS direct via `subtitles=<assPath>` (preserves all animations + positioning)
+   * 2. SRT fallback with `force_style` if libass is unavailable
+   * 3. Docker `trndinn-ffmpeg` with `ass=<assPath>` as last resort
    *
-   * Style-specific colors, fonts, and sizes are passed via force_style.
-   * Optional `options` overrides (fontSize/marginV/alignment) merge on top
-   * of the style preset — used when the user customizes position/size in the UI.
+   * Using ASS directly preserves:
+   * - Word-by-word highlight animations (Hormozi, Karaoke)
+   * - Bounce/scale animations (Gradient Pop)
+   * - Typewriter progressive reveal
+   * - Correct MarginV positioning from the ASS header
+   *
    * Timeout: 120s hard kill.
    */
   async burnSubtitles(
@@ -160,45 +164,39 @@ export class FfmpegService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
 
-    // Generate SRT from ASS for the subtitles filter
-    const srtPath = assPath.replace(/\.ass$/, '.srt');
-    await this.convertAssToSrt(assPath, srtPath);
-
-    // Log SRT content for debugging
     const fsModule = await import('fs');
-    const srtContent = await fsModule.promises.readFile(srtPath, 'utf-8');
-    const srtLineCount = srtContent.split('\n').filter(l => l.trim()).length;
-    this.logger.log(`SRT generated: ${srtLineCount} lines, first 200 chars: ${srtContent.slice(0, 200)}`);
 
-    if (srtLineCount < 3) {
-      this.logger.error(`SRT file is empty or malformed! Full content: ${srtContent}`);
-      throw new Error('SRT generation failed — no subtitle lines produced from transcript');
+    // Verify ASS file exists and has content
+    const assContent = await fsModule.promises.readFile(assPath, 'utf-8');
+    const dialogueCount = assContent.split('\n').filter(l => l.startsWith('Dialogue:')).length;
+    this.logger.log(`ASS file: ${dialogueCount} dialogue events, size=${assContent.length} bytes`);
+
+    if (dialogueCount === 0) {
+      this.logger.error(`ASS file has no Dialogue events! Header: ${assContent.slice(0, 300)}`);
+      throw new Error('ASS generation failed — no dialogue events produced from transcript');
     }
 
-    // Get style-specific force_style string, merged with user overrides
-    const forceStyle = this.getForceStyle(options?.styleId || 'hormozi', options);
+    // Escape the ASS path for ffmpeg subtitles filter (colons, backslashes, single quotes)
+    const escapedAssPath = assPath.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
 
-    // Escape the SRT path for ffmpeg subtitles filter (colons, backslashes, single quotes)
-    const escapedSrtPath = srtPath.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
+    // PRIMARY: Use ASS directly with the `subtitles` filter (libass renders all ASS features)
+    // The `subtitles` filter supports ASS natively — no need for force_style overrides.
+    // All styling (position, font, colors, animations) comes from the ASS file itself.
+    const vfAss = `subtitles=${escapedAssPath}`;
 
-    // Build the vf filter string
-    // Note: force_style needs single quotes for ffmpeg's subtitles filter parser
-    const vf = `subtitles=${escapedSrtPath}:force_style='${forceStyle}'`;
-
-    this.logger.log(`Burn filter: ${vf.slice(0, 200)}...`);
-    this.logger.log(`SRT path: ${srtPath}, Video: ${videoPath}, Output: ${outputPath}`);
+    this.logger.log(`Burn strategy: ASS direct. Filter: ${vfAss}`);
+    this.logger.log(`Video: ${videoPath}, Output: ${outputPath}`);
 
     try {
-      // Try local ffmpeg first (production Ubuntu)
+      // Try #1: Local ffmpeg with ASS direct (subtitles filter supports .ass natively)
       try {
-        const { stdout, stderr } = await exec(
+        const { stderr } = await exec(
           'ffmpeg',
-          ['-y', '-i', videoPath, '-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath],
+          ['-y', '-i', videoPath, '-vf', vfAss, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath],
           { signal: controller.signal, maxBuffer: 4 * 1024 * 1024 },
         );
-        // Always log stderr from ffmpeg — it contains encoding stats and potential warnings
+
         if (stderr) {
-          // Log font/subtitle-related warnings at warn level, rest at debug
           const hasSubWarning = stderr.includes('Glyph 0x') || stderr.includes('fontselect') ||
             stderr.includes('Unable to') || stderr.includes('Cannot find') || stderr.includes('subtitle');
           if (hasSubWarning) {
@@ -208,25 +206,71 @@ export class FfmpegService {
           }
         }
 
-        // Verify output file was actually created and has reasonable size
-        const fsModule2 = await import('fs');
-        const outputStat = await fsModule2.promises.stat(outputPath);
-        this.logger.log(`Burn complete: output ${(outputStat.size / 1024 / 1024).toFixed(1)}MB`);
-
+        // Verify output was created
+        const outputStat = await fsModule.promises.stat(outputPath);
+        this.logger.log(`Burn complete (ASS direct): output ${(outputStat.size / 1024 / 1024).toFixed(1)}MB`);
         return;
-      } catch (localErr: any) {
-        const stderr = localErr.stderr || '';
-        if (!stderr.includes('No such filter') && !stderr.includes('No option name') && !stderr.includes('Cannot load default config')) {
-          throw localErr;
+      } catch (assErr: any) {
+        const stderr = assErr.stderr || '';
+        // Check if the failure is due to missing libass/subtitle filter support
+        const isFilterMissing = stderr.includes('No such filter') ||
+          stderr.includes('Unrecognized option') ||
+          stderr.includes('Cannot load default config') ||
+          stderr.includes('Error opening input') ||
+          stderr.includes('Option ass not found');
+
+        if (!isFilterMissing) {
+          // Real encoding error (not a missing filter issue) — propagate
+          throw assErr;
         }
-        this.logger.warn('Local subtitle burn unavailable — using Docker trndinn-ffmpeg');
+
+        this.logger.warn(`ASS direct failed (libass likely unavailable): ${stderr.slice(-200)}`);
       }
 
-      // Fallback: Docker with trndinn-ffmpeg (has fonts + libass)
-      // Docker uses the ASS file directly (it has libass) instead of SRT+force_style
+      // Try #2: SRT fallback with force_style (loses animations but at least shows text)
+      this.logger.warn('Falling back to SRT + force_style (animations will be lost)');
+      const srtPath = assPath.replace(/\.ass$/, '.srt');
+      await this.convertAssToSrt(assPath, srtPath);
+
+      const srtContent = await fsModule.promises.readFile(srtPath, 'utf-8');
+      const srtLineCount = srtContent.split('\n').filter(l => l.trim()).length;
+      this.logger.log(`SRT fallback: ${srtLineCount} lines`);
+
+      if (srtLineCount < 3) {
+        this.logger.error(`SRT file is empty or malformed! Full content: ${srtContent}`);
+        throw new Error('SRT generation failed — no subtitle lines produced from transcript');
+      }
+
+      const forceStyle = this.getForceStyle(options?.styleId || 'hormozi', options);
+      const escapedSrtPath = srtPath.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
+      const vfSrt = `subtitles=${escapedSrtPath}:force_style='${forceStyle}'`;
+
+      try {
+        const { stderr } = await exec(
+          'ffmpeg',
+          ['-y', '-i', videoPath, '-vf', vfSrt, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath],
+          { signal: controller.signal, maxBuffer: 4 * 1024 * 1024 },
+        );
+
+        if (stderr) {
+          this.logger.debug(`FFmpeg SRT fallback stderr (last 300): ${stderr.slice(-300)}`);
+        }
+
+        const outputStat = await fsModule.promises.stat(outputPath);
+        this.logger.log(`Burn complete (SRT fallback): output ${(outputStat.size / 1024 / 1024).toFixed(1)}MB`);
+        return;
+      } catch (srtErr: any) {
+        const stderr = srtErr.stderr || '';
+        if (!stderr.includes('No such filter') && !stderr.includes('No option name') && !stderr.includes('Cannot load default config')) {
+          throw srtErr;
+        }
+        this.logger.warn('Local SRT burn also unavailable — using Docker trndinn-ffmpeg');
+      }
+
+      // Try #3: Docker with trndinn-ffmpeg (has fonts + libass, uses ASS directly)
       const workDir = this.getParentDir(videoPath);
-      const escapedAssPath = assPath.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
-      const dockerVf = `ass=${escapedAssPath}`;
+      const dockerEscapedAssPath = assPath.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
+      const dockerVf = `ass=${dockerEscapedAssPath}`;
 
       this.logger.log(`Docker burn with ASS filter: ${dockerVf}`);
 
@@ -245,6 +289,9 @@ export class FfmpegService {
         ],
         { signal: controller.signal, maxBuffer: 2 * 1024 * 1024 },
       );
+
+      const outputStat = await fsModule.promises.stat(outputPath);
+      this.logger.log(`Burn complete (Docker ASS): output ${(outputStat.size / 1024 / 1024).toFixed(1)}MB`);
     } finally {
       clearTimeout(timeout);
     }
