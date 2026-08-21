@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ToolsService } from './services/tools.service';
 import { AutoCaptionModule } from './auto-caption';
 import { InstagramReelDownloaderModule } from './instagram-reel-downloader';
+import { BioGeneratorModule } from './bio-generator';
 
 /**
  * Root Tools Module — imports all individual tool sub-modules.
@@ -9,7 +10,7 @@ import { InstagramReelDownloaderModule } from './instagram-reel-downloader';
  * Each tool is a self-contained module in its own folder.
  */
 @Module({
-  imports: [AutoCaptionModule, InstagramReelDownloaderModule],
+  imports: [AutoCaptionModule, InstagramReelDownloaderModule, BioGeneratorModule],
   providers: [ToolsService],
   exports: [ToolsService],
 })
