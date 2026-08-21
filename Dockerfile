@@ -17,15 +17,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json ./
-RUN npm install
+# Copy npm config alongside package files so `npm install` respects
+# legacy-peer-deps (needed for @nestjs/platform-fastify@11 vs @fastify/static@9
+# peerOptional conflict). Also passed inline as -CLI flag for belt-and-suspenders.
+COPY package.json package-lock.json .npmrc ./
+RUN npm install --legacy-peer-deps
 
 COPY . .
 
 RUN npm run build
 
 # Production deps only (reuses same build tools)
-RUN rm -rf node_modules && npm install --omit=dev
+RUN rm -rf node_modules && npm install --omit=dev --legacy-peer-deps
 
 FROM node:22-bookworm-slim
 
