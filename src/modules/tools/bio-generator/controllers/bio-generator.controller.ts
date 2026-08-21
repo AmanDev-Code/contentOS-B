@@ -13,15 +13,20 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   HttpException,
   HttpStatus,
   Post,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
-import { GenerateBioDto, ScoreBioDto } from '../dto/generate.dto';
+import { ToolCategoryMeta } from '../../../../decorators/tool-category.decorator';
+import { ToolRateLimitGuard } from '../../../../guards/tool-rate-limit.guard';
+
+import { FeedbackBioDto, GenerateBioDto, ScoreBioDto } from '../dto/generate.dto';
 import { BioGeneratorService } from '../services/bio-generator.service';
 import { BIO_PLATFORMS, BIO_TONES, PLATFORM_LIMITS, RATE_LIMITS } from '../config';
 
@@ -31,6 +36,9 @@ export class BioGeneratorController {
 
   /** POST /generate — main entry point (waits for every platform, then returns). */
   @Post('generate')
+  @HttpCode(HttpStatus.OK)
+  @ToolCategoryMeta('text-ai')
+  @UseGuards(ToolRateLimitGuard)
   async generate(@Body() body: GenerateBioDto, @Req() req: FastifyRequest) {
     const ip = this.extractIp(req);
     try {
@@ -58,6 +66,8 @@ export class BioGeneratorController {
    *   - event: end       → { generationId, model, durationMs, succeeded, failed }
    */
   @Post('generate-stream')
+  @ToolCategoryMeta('text-ai')
+  @UseGuards(ToolRateLimitGuard)
   async generateStream(
     @Body() body: GenerateBioDto,
     @Req() req: FastifyRequest,
@@ -118,6 +128,9 @@ export class BioGeneratorController {
 
   /** POST /score — 5-dimension rubric + 3 tips for a single bio. */
   @Post('score')
+  @HttpCode(HttpStatus.OK)
+  @ToolCategoryMeta('text-ai')
+  @UseGuards(ToolRateLimitGuard)
   async score(@Body() body: ScoreBioDto, @Req() req: FastifyRequest) {
     const ip = this.extractIp(req);
     try {
@@ -148,6 +161,29 @@ export class BioGeneratorController {
       })),
       tones: BIO_TONES,
     };
+  }
+
+  /**
+   * POST /feedback — thumbs-up / thumbs-down on a specific generated bio.
+   *
+   * Anonymous (no auth). IP is hashed before storage. Counts are NOT
+   * surfaced back to end users — only aggregates in the admin dashboard.
+   * Same text-ai rate bucket so a script can't spam thumbs.
+   */
+  @Post('feedback')
+  @HttpCode(HttpStatus.OK)
+  @ToolCategoryMeta('text-ai')
+  @UseGuards(ToolRateLimitGuard)
+  async feedback(@Body() body: FeedbackBioDto, @Req() req: FastifyRequest) {
+    const ip = this.extractIp(req);
+    try {
+      const result = await this.service.recordFeedback(body, ip);
+      return { success: true, ...result };
+    } catch (e) {
+      if (e instanceof HttpException) throw e;
+      const msg = e instanceof Error ? e.message : 'Failed to record feedback';
+      throw new HttpException(msg, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 
   private extractIp(req: FastifyRequest): string {

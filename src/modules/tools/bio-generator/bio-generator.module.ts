@@ -12,18 +12,24 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { BioGeneratorAdminController } from './controllers/bio-generator-admin.controller';
 import { BioGeneratorController } from './controllers/bio-generator.controller';
-import { BioGeneratorService, PromptBuilderService } from './services';
+import { BioFeedbackService, BioGeneratorService, PromptBuilderService } from './services';
 
 // Shared services provided locally so this module has no global deps.
 import { AiGatewayService } from '../../../services/ai-gateway.service';
 import { AiModelRegistryService } from '../../../services/ai-model-registry.service';
 import { AppSettingsService } from '../../../services/app-settings.service';
 import { CacheService } from '../../../services/cache.service';
+import { RateLimiterService } from '../../../services/rate-limiter.service';
 import { SupabaseService } from '../../../services/supabase.service';
+import { ProfileRepository } from '../../../repositories/profile.repository';
+import { AuthGuard } from '../../../guards/auth.guard';
+import { AdminGuard } from '../../../guards/admin.guard';
+import { ToolRateLimitGuard } from '../../../guards/tool-rate-limit.guard';
 
 @Module({
-  controllers: [BioGeneratorController],
+  controllers: [BioGeneratorController, BioGeneratorAdminController],
   providers: [
     ConfigService,
     CacheService,
@@ -31,9 +37,15 @@ import { SupabaseService } from '../../../services/supabase.service';
     AppSettingsService,
     AiModelRegistryService,
     AiGatewayService,
+    RateLimiterService,
+    ProfileRepository,
+    AuthGuard,
+    AdminGuard,
+    ToolRateLimitGuard,
     PromptBuilderService,
+    BioFeedbackService,
     BioGeneratorService,
   ],
-  exports: [BioGeneratorService],
+  exports: [BioGeneratorService, BioFeedbackService],
 })
 export class BioGeneratorModule {}

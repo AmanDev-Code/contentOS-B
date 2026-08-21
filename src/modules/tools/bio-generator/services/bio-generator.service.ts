@@ -30,6 +30,8 @@ import type {
   BioStreamEvent,
   BioVariation,
 } from '../types';
+import type { FeedbackBioDto } from '../dto/generate.dto';
+import { BioFeedbackService } from './bio-feedback.service';
 import { PromptBuilderService } from './prompt-builder.service';
 
 @Injectable()
@@ -40,7 +42,17 @@ export class BioGeneratorService {
     private readonly ai: AiGatewayService,
     private readonly cache: CacheService,
     private readonly prompts: PromptBuilderService,
+    private readonly feedback: BioFeedbackService,
   ) {}
+
+  /**
+   * Record a thumbs-up / thumbs-down on a generated bio. Delegates to the
+   * dedicated feedback service so this service stays focused on generation.
+   * Returns only the vote accepted — counts are never surfaced to end users.
+   */
+  async recordFeedback(input: FeedbackBioDto, ip: string): Promise<{ vote: 'up' | 'down' }> {
+    return this.feedback.record(input, ip);
+  }
 
   /** Enforce per-IP rate limit. Dev mode bypasses. */
   async checkIpLimit(ip: string): Promise<{ allowed: boolean; reason?: string; remaining: number }> {

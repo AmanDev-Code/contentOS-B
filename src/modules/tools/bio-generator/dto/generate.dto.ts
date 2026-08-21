@@ -107,3 +107,56 @@ export class ScoreBioDto {
   @MaxLength(300)
   goal?: string;
 }
+
+/**
+ * Feedback payload — one thumb per bio variation.
+ * `angle` and `tone` are captured so admin analytics can cross-tab
+ * "which angle wins on LinkedIn?" without joining to another table.
+ */
+const FEEDBACK_ANGLES = ['credibility', 'outcome', 'positioning', 'direction'] as const;
+const FEEDBACK_VOTES = ['up', 'down'] as const;
+
+export class FeedbackBioDto {
+  @IsIn(FEEDBACK_VOTES as unknown as string[])
+  vote!: (typeof FEEDBACK_VOTES)[number];
+
+  @IsIn(BIO_PLATFORMS as unknown as string[])
+  platform!: BioPlatform;
+
+  @IsIn(FEEDBACK_ANGLES as unknown as string[])
+  angle!: (typeof FEEDBACK_ANGLES)[number];
+
+  @IsIn(BIO_TONES as unknown as string[])
+  tone!: BioTone;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(3000)
+  text?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(FOCUS_AREAS.length)
+  @IsIn(FOCUS_AREAS as unknown as string[], { each: true })
+  focusAreas?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  emojis?: boolean;
+
+  @IsOptional()
+  @IsIn(['personal', 'brand'])
+  bioType?: 'personal' | 'brand';
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(3)
+  variationIndex?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  generationId?: string;
+}
