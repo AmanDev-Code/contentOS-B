@@ -25,6 +25,7 @@ import {
   InstagramPrivateApiEngine,
   InstagramMobileApiEngine,
   InstagramBrowserEngine,
+  InstagramEmbedEngine,
 } from './extractors';
 
 // Workers
@@ -43,6 +44,7 @@ import { MediaDownloadWorker } from './workers';
  * 1. Instagram Private API (GraphQL doc_id POST)
  * 2. Instagram Mobile API (/api/v1/media/)
  * 3. Instagram Browser (Playwright)
+ * 4. Instagram Embed (unauthenticated — no session needed)
  */
 @Module({
   imports: [
@@ -74,6 +76,7 @@ import { MediaDownloadWorker } from './workers';
     InstagramPrivateApiEngine,
     InstagramMobileApiEngine,
     InstagramBrowserEngine,
+    InstagramEmbedEngine,
 
     // Workers
     MediaDownloadWorker,
@@ -93,6 +96,7 @@ export class MediaEngineModule implements OnModuleInit {
     private readonly privateApi: InstagramPrivateApiEngine,
     private readonly mobileApi: InstagramMobileApiEngine,
     private readonly browserEngine: InstagramBrowserEngine,
+    private readonly embedEngine: InstagramEmbedEngine,
   ) {}
 
   /**
@@ -102,5 +106,6 @@ export class MediaEngineModule implements OnModuleInit {
     this.orchestrator.registerEngine(this.privateApi);
     this.orchestrator.registerEngine(this.mobileApi);
     this.orchestrator.registerEngine(this.browserEngine);
+    this.orchestrator.registerEngine(this.embedEngine);
   }
 }

@@ -39,6 +39,8 @@ export class AdminMediaEngineController {
 
   /**
    * Add a session to the pool (called by Chrome extension).
+   * When re-adding an existing account, resets health + all circuit breakers
+   * so fresh cookies get a clean slate.
    */
   @Post('sessions')
   @ApiOperation({ summary: 'Add Instagram session to pool (from extension)' })
@@ -64,10 +66,18 @@ export class AdminMediaEngineController {
       body.proxy,
     );
 
+    // Reset ALL circuit breakers when fresh cookies are uploaded.
+    // Stale cookies cause cascading failures that trip circuits;
+    // fresh cookies deserve a clean slate.
+    const engines = ['private-api', 'mobile-api', 'browser', 'embed', 'oembed'] as const;
+    for (const engine of engines) {
+      await this.circuitBreaker.reset(engine);
+    }
+
     const stats = await this.sessionPool.getStats(platform);
 
     this.logger.log(
-      `Session added to pool: account=${body.accountId}, cookies=${Object.keys(body.cookies).length}, pool=${stats.total}`,
+      `Session added to pool: account=${body.accountId}, cookies=${Object.keys(body.cookies).length}, pool=${stats.total}, circuits=reset`,
     );
 
     this.alerts.emitSessionRegistered(body.accountId, platform);
@@ -79,6 +89,7 @@ export class AdminMediaEngineController {
       health: session.health,
       poolSize: stats.total,
       poolStats: stats,
+      circuitsReset: true,
     };
   }
 

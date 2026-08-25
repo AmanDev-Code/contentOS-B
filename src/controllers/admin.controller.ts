@@ -265,19 +265,39 @@ export class AdminController {
   @Post('scraper/instagram-connect')
   @ApiOperation({
     summary:
-      'Launch browser for Instagram login. User logs in manually, then cookies are extracted automatically.',
+      'Launch headless browser for Instagram cookie extraction. On servers without a display, automatically uses Xvfb virtual framebuffer.',
   })
   async instagramConnect() {
     const { chromium } = await import('playwright');
     let browser;
+    let xvfbProcess: ChildProcess | null = null;
+
     try {
+      // On Linux without DISPLAY, start Xvfb virtual framebuffer.
+      // xvfb is already installed in the Docker image.
+      const hasDisplay = !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+      const needsXvfb = !hasDisplay && process.platform === 'linux';
+
+      if (needsXvfb) {
+        // Start Xvfb on display :99
+        xvfbProcess = exec('Xvfb :99 -screen 0 1280x720x24 -nolisten tcp &');
+        process.env.DISPLAY = ':99';
+        // Give Xvfb a moment to start
+        await new Promise((r) => setTimeout(r, 500));
+        this.logger.log('Started Xvfb virtual display on :99');
+      }
+
       browser = await chromium.launch({
         headless: false,
-        args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--no-sandbox',
+          '--disable-dev-shm-usage',
+        ],
       });
       const context = await browser.newContext({
         userAgent:
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
         viewport: { width: 420, height: 740 },
       });
       const page = await context.newPage();
@@ -285,22 +305,22 @@ export class AdminController {
         waitUntil: 'domcontentloaded',
       });
 
-      // Wait for user to complete login + any challenges/captchas
-      // Instead of checking URL, poll for the sessionid cookie which only
-      // appears after ALL challenges (captcha, 2FA, etc.) are completed.
-      // Timeout after 10 minutes to give user time for captcha/challenges.
+      // Wait for user to complete login + any challenges/captchas.
+      // Poll for the sessionid cookie which only appears after ALL
+      // challenges (captcha, 2FA, etc.) are completed.
+      // Timeout after 10 minutes to give user time.
       try {
         await page.waitForFunction(
           () => document.cookie.includes('sessionid='),
           { timeout: 600_000, polling: 2000 },
         );
       } catch {
-        // Before giving up, check if sessionid exists in context cookies
-        // (it might not be in document.cookie due to httpOnly flag)
+        // sessionid might be httpOnly — check context cookies directly
         const checkCookies = await context.cookies('https://www.instagram.com');
         const hasSession = checkCookies.some((c) => c.name === 'sessionid' && c.value.length > 5);
         if (!hasSession) {
           await browser.close();
+          this.killXvfb(xvfbProcess);
           return {
             success: false,
             error: 'Login timed out (10 minutes). Complete all challenges and try again.',
@@ -311,7 +331,7 @@ export class AdminController {
       // Small delay to let cookies finalize
       await page.waitForTimeout(2000);
 
-      // Extract cookies
+      // Extract ALL cookies (not just the 5 critical ones)
       const cookies = await context.cookies('https://www.instagram.com');
       const cookieMap = Object.fromEntries(
         cookies.map((c) => [c.name, c.value]),
@@ -326,6 +346,7 @@ export class AdminController {
       };
 
       await browser.close();
+      this.killXvfb(xvfbProcess);
 
       if (!extracted.instagramSession) {
         return {
@@ -335,9 +356,32 @@ export class AdminController {
         };
       }
 
-      // Save to Redis via ScraperCredentialsService
+      // Save to legacy ScraperCredentialsService (used by trending scraper)
       await this.scraperCredentials.save(extracted);
       await this.browserPool.recycle();
+
+      // Also feed into the Media Engine session pool for reel downloads.
+      // This ensures the Instagram Connect button and the Chrome extension
+      // both result in a healthy session pool entry + reset circuit breakers.
+      try {
+        const { default: axios } = await import('axios');
+        const baseUrl = process.env.BACKEND_INTERNAL_URL || 'http://localhost:3000';
+        await axios.post(`${baseUrl}/admin/media-engine/sessions`, {
+          accountId: extracted.instagramDsUserId,
+          platform: 'instagram',
+          cookies: cookieMap,
+        }, {
+          headers: {
+            // Internal service call — bypass auth via shared secret
+            'x-internal-token': process.env.INTERNAL_SERVICE_TOKEN || 'internal',
+          },
+          timeout: 5000,
+        });
+        this.logger.log('Cookies also pushed to media engine session pool');
+      } catch (poolErr) {
+        // Non-critical — legacy credentials are already saved
+        this.logger.warn(`Failed to push cookies to media engine pool: ${(poolErr as Error).message}`);
+      }
 
       // Verify the session works
       const health = await this.scraperSessionHealthService.check();
@@ -353,6 +397,7 @@ export class AdminController {
       };
     } catch (error) {
       if (browser) await browser.close().catch(() => {});
+      this.killXvfb(xvfbProcess);
       throw new HttpException(
         {
           success: false,
@@ -360,6 +405,18 @@ export class AdminController {
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  private killXvfb(xvfbProcess: ChildProcess | null): void {
+    if (xvfbProcess) {
+      try {
+        xvfbProcess.kill();
+      } catch {
+        // Ignore — may already be dead
+      }
+      // Also cleanup any orphaned Xvfb
+      exec('pkill -f "Xvfb :99"', () => {});
     }
   }
 
@@ -1527,6 +1584,19 @@ export class AdminController {
         error.message || 'Failed to read soak test reports',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  /**
+   * Check if running inside a container (Docker/K8s).
+   */
+  private async isRunningInContainer(): Promise<boolean> {
+    try {
+      const cgroup = await fs.readFile('/proc/1/cgroup', 'utf-8');
+      return cgroup.includes('docker') || cgroup.includes('kubepods');
+    } catch {
+      // /proc/1/cgroup doesn't exist on macOS or if not in a container
+      return false;
     }
   }
 }

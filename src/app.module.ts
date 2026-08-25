@@ -83,6 +83,7 @@ import { LaunchPricingService } from './services/launch-pricing.service';
 import { FeedbackController } from './controllers/feedback.controller';
 import { BrandProfilesController } from './controllers/brand-profiles.controller';
 import { UserFeedbackController } from './controllers/user-feedback.controller';
+import { ToolFeedbackController } from './controllers/tool-feedback.controller';
 import { PlatformAdminFeedbackController } from './controllers/platform-admin-feedback.controller';
 import { PlatformAdminUserFeedbackController } from './controllers/platform-admin-user-feedback.controller';
 import { PlatformAccessController } from './controllers/platform-access.controller';
@@ -145,6 +146,7 @@ import { AiModelRegistryService } from './services/ai-model-registry.service';
 import { AiGatewayService } from './services/ai-gateway.service';
 import { WebResearchService } from './services/web-research.service';
 import { UserFeedbackService } from './services/user-feedback.service';
+import { ToolFeedbackService } from './services/tool-feedback.service';
 import { PlatformAccessService } from './services/platform-access.service';
 import { ReferralService } from './services/referral.service';
 import { FeedbackQueueBootstrapService } from './services/feedback-queue-bootstrap.service';
@@ -303,6 +305,7 @@ import { QUEUE_NAMES } from './common/constants';
     FeedbackController,
     BrandProfilesController,
     UserFeedbackController,
+    ToolFeedbackController,
     PlatformAdminFeedbackController,
     PlatformAdminUserFeedbackController,
     PlatformAccessController,
@@ -386,6 +389,7 @@ import { QUEUE_NAMES } from './common/constants';
     AiGatewayService,
     WebResearchService,
     UserFeedbackService,
+    ToolFeedbackService,
     PlatformAccessService,
     ReferralService,
     PlatformStaffGuard,
