@@ -3,6 +3,8 @@ import { CacheService } from './cache.service';
 import {
   ScraperCredentialsService,
 } from './scrapers/scraper-credentials.service';
+import { SessionPoolService } from '../modules/media-engine/services/session-pool.service';
+import { CircuitBreakerService } from '../modules/media-engine/services/circuit-breaker.service';
 import axios from 'axios';
 import * as crypto from 'crypto';
 
@@ -65,6 +67,8 @@ export class InstagramMobileApiService {
   constructor(
     private readonly cacheService: CacheService,
     private readonly credentials: ScraperCredentialsService,
+    private readonly sessionPool: SessionPoolService,
+    private readonly circuitBreaker: CircuitBreakerService,
   ) {}
 
   /**
@@ -367,16 +371,43 @@ export class InstagramMobileApiService {
   /**
    * Sync the mobile session cookies back to the main ScraperCredentialsService
    * so the Instagram Reel Downloader (and trending scraper) can use them.
+   * Also pushes to the Media Engine session pool + resets circuit breakers.
    */
   private async syncToScraperCredentials(
     session: MobileSession,
   ): Promise<void> {
+    // Legacy credential store (trending scraper)
     await this.credentials.save({
       instagramSession: session.sessionId,
       instagramCsrfToken: session.csrfToken,
       instagramDsUserId: session.userId,
       instagramMid: session.mid,
     });
+
+    // Media Engine session pool (reel downloader)
+    try {
+      const cookies: Record<string, string> = {
+        sessionid: session.sessionId,
+        csrftoken: session.csrfToken,
+        ds_user_id: session.userId,
+        mid: session.mid,
+      };
+      await this.sessionPool.addSession(session.userId, 'instagram', cookies);
+
+      // Reset all circuit breakers — fresh login = clean slate
+      const engines = ['private-api', 'mobile-api', 'browser', 'embed', 'oembed'] as const;
+      for (const engine of engines) {
+        await this.circuitBreaker.reset(engine);
+      }
+      this.logger.log(
+        `Mobile session pushed to media engine pool + circuits reset for @${session.username}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push mobile session to pool: ${(err as Error).message}`,
+      );
+    }
+
     this.logger.log(
       `Mobile session synced to ScraperCredentials for @${session.username}`,
     );
