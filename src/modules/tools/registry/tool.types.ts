@@ -25,6 +25,12 @@ export interface ToolDefinition {
   keywords?: string[];
   /** Monthly search volume (for prioritization) */
   searchVolume?: number;
+  /** Client-side processing engine (for informational/registry purposes only) */
+  processingEngine?: 'canvas' | 'ffmpeg-wasm' | 'onnx-wasm' | 'tesseract-wasm' | 'native-api' | 'pure-js' | 'server-side';
+  /** Input formats accepted (e.g. ['png', 'jpg', 'webp']) */
+  inputFormats?: string[];
+  /** Output formats produced */
+  outputFormats?: string[];
 }
 
 /** Standard tool API response */
